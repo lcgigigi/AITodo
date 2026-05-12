@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 export const useAiStore = defineStore('ai', {
   state: () => ({
     currentModel: 'default',
-    currentAgentCode: 'workbench-assistant',
+    currentAgentCode: 'default-assistant',
     streaming: false,
     conversationId: '',
   }),

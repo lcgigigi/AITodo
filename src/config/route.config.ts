@@ -1,5 +1,5 @@
 export const routeConfig = {
-  defaultRoute: '/workbench',
+  defaultRoute: '/',
   loginRoute: '/login',
   whiteList: ['/login'],
 }

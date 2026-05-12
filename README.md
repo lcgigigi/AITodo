@@ -1,10 +1,12 @@
 # AITodo
 
-智能代办。
+智能代办前端项目。
 
-## AI 智能工作台
+## 当前结构
 
-基于 Vue 3、TypeScript、Vite、Naive UI、UnoCSS、Pinia 和 Vue Router 的 AI 工作台项目骨架。
+基于 Vue 3、TypeScript、Vite、Naive UI、UnoCSS、Pinia 和 Vue Router。
+
+当前只保留 `src/modules/home` 作为首页模块，首页入口为 `/`。
 
 ## 开发
 
@@ -12,5 +14,3 @@
 pnpm install
 pnpm dev
 ```
-
-当前已预留 `/workbench`、`/agenda/calendar`、`/ai-agent` 三个核心入口，以及后续 AI 功能模块目录。

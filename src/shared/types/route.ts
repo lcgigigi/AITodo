@@ -6,5 +6,4 @@ export interface AppRouteMeta extends RouteMeta {
   requiresAuth?: boolean
   keepAlive?: boolean
   permission?: string
-  layout?: 'base' | 'workbench' | 'blank'
 }
