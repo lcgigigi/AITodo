@@ -1,0 +1,27 @@
+:root {
+  --app-bg: #f4f7fb;
+  --app-panel-bg: rgba(255, 255, 255, 0.76);
+  --app-card-bg: rgba(255, 255, 255, 0.84);
+  --app-text-primary: #182034;
+  --app-text-secondary: #667085;
+  --app-text-tertiary: #98a2b3;
+  --app-border: rgba(116, 132, 164, 0.2);
+  --app-radius-lg: 8px;
+  --app-radius-md: 8px;
+  --app-shadow-soft: 0 18px 45px rgba(27, 39, 71, 0.08);
+  --app-primary: #4f7cff;
+  --app-success: #27c083;
+  --app-warning: #f59e0b;
+  --app-danger: #ef4444;
+}
+
+:root[data-theme='dark'] {
+  --app-bg: #101828;
+  --app-panel-bg: rgba(24, 34, 55, 0.8);
+  --app-card-bg: rgba(28, 40, 64, 0.86);
+  --app-text-primary: #f8fafc;
+  --app-text-secondary: #cbd5e1;
+  --app-text-tertiary: #94a3b8;
+  --app-border: rgba(148, 163, 184, 0.22);
+  --app-shadow-soft: 0 18px 45px rgba(0, 0, 0, 0.24);
+}
