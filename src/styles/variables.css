@@ -13,6 +13,27 @@
   --app-success: #27c083;
   --app-warning: #f59e0b;
   --app-danger: #ef4444;
+
+  --background: var(--app-bg);
+  --foreground: var(--app-text-primary);
+  --card: #ffffff;
+  --card-foreground: var(--app-text-primary);
+  --popover: #ffffff;
+  --popover-foreground: var(--app-text-primary);
+  --muted: #f1f5f9;
+  --muted-foreground: var(--app-text-secondary);
+  --accent: #eef4ff;
+  --accent-foreground: var(--app-text-primary);
+  --border: rgba(116, 132, 164, 0.2);
+  --input: rgba(116, 132, 164, 0.2);
+  --primary: var(--app-primary);
+  --primary-foreground: #ffffff;
+  --secondary: #e2e8f0;
+  --secondary-foreground: var(--app-text-primary);
+  --destructive: var(--app-danger);
+  --destructive-foreground: #ffffff;
+  --ring: var(--app-primary);
+  --radius: 0.625rem;
 }
 
 :root[data-theme='dark'] {
@@ -24,4 +45,24 @@
   --app-text-tertiary: #94a3b8;
   --app-border: rgba(148, 163, 184, 0.22);
   --app-shadow-soft: 0 18px 45px rgba(0, 0, 0, 0.24);
+
+  --background: var(--app-bg);
+  --foreground: var(--app-text-primary);
+  --card: #182237;
+  --card-foreground: var(--app-text-primary);
+  --popover: #182237;
+  --popover-foreground: var(--app-text-primary);
+  --muted: #1f2a44;
+  --muted-foreground: var(--app-text-secondary);
+  --accent: #263653;
+  --accent-foreground: var(--app-text-primary);
+  --border: rgba(148, 163, 184, 0.22);
+  --input: rgba(148, 163, 184, 0.22);
+  --primary: var(--app-primary);
+  --primary-foreground: #ffffff;
+  --secondary: #263653;
+  --secondary-foreground: var(--app-text-primary);
+  --destructive: var(--app-danger);
+  --destructive-foreground: #ffffff;
+  --ring: var(--app-primary);
 }

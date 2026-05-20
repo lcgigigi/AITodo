@@ -5,6 +5,9 @@ interface UserProfile {
   name: string
   avatar?: string
   department?: string
+  role?: 'leader' | 'employee'
+  leaderId?: string
+  teamMemberIds?: string[]
 }
 
 export const useUserStore = defineStore('user', {
@@ -28,6 +31,7 @@ export const useUserStore = defineStore('user', {
         id: 'mock-user',
         name: '工作台用户',
         department: 'AI平台部',
+        role: 'employee',
       }
     },
     logout() {
