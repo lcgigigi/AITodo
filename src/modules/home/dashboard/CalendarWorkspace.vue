@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import girlImage from '@/assets/girl.png'
 import campusImage from '@/assets/modelone.png'
@@ -7,17 +7,39 @@ import { useUserStore } from '@/stores/user.store'
 import CalendarMonth from './CalendarMonth.vue'
 import DayPreviewPanel from './DayPreviewPanel.vue'
 import type { CalendarDay, CalendarEvent, CalendarEventStatus, CalendarSpecialDay, CalendarTodoDraft, CalendarTodoUpdate } from './types'
+import { compareEvents, dateRange, formatEventTime } from './todoDisplay'
 import { createTodo as mockCreateTodo, listTodos, mockInitialTodos, mockUsers, updateTodo as mockUpdateTodo, updateTodoStatus as mockUpdateTodoStatus } from './todoMock'
 
-const selectedDate = ref('2026-05-08')
-const currentMonth = ref(new Date(2026, 4, 1))
+const now = ref(new Date())
+const selectedDate = ref(ymd(now.value))
+const currentMonth = ref(new Date(now.value.getFullYear(), now.value.getMonth(), 1))
 const currentUserId = ref('leader-zhang')
 const allEvents = ref<CalendarEvent[]>(mockInitialTodos)
 const isProfileDialogOpen = ref(false)
 const isDayPreviewOpen = ref(false)
+const isTodayBubbleVisible = ref(true)
+const isTodayBubbleManualClosed = ref(false)
+const isTodayBubbleAutoHidden = ref(false)
+const quickCreatePrompt = ref('')
+const quickCreateKey = ref(0)
 const calendarViewMode = ref<'month' | 'week'>('month')
 const userStore = useUserStore()
 const router = useRouter()
+let clockTimer: ReturnType<typeof setInterval> | undefined
+let todayBubbleTimer: ReturnType<typeof setTimeout> | undefined
+let panelCloseRestoreTimer: ReturnType<typeof setTimeout> | undefined
+
+onMounted(() => {
+  clockTimer = setInterval(() => {
+    now.value = new Date()
+  }, 60_000)
+})
+
+onBeforeUnmount(() => {
+  if (clockTimer) clearInterval(clockTimer)
+  clearTodayBubbleTimer()
+  clearPanelCloseRestoreTimer()
+})
 
 const agents = [
   {
@@ -147,12 +169,14 @@ function getDaysInMonth(year: number, month: number) {
 const eventMap = computed(() => {
   const map = new Map<string, CalendarEvent[]>()
   for (const event of events.value) {
-    const list = map.get(event.date) ?? []
-    list.push(event)
-    map.set(event.date, list)
+    for (const date of dateRange(event.date, event.endDate)) {
+      const list = map.get(date) ?? []
+      list.push(event)
+      map.set(date, list)
+    }
   }
   for (const list of map.values()) {
-    list.sort((a, b) => a.time.localeCompare(b.time))
+    list.sort(compareEvents)
   }
   return map
 })
@@ -179,6 +203,7 @@ const assignableUsers = computed(() => {
   return [currentUser.value]
 })
 const events = computed(() => listTodos(allEvents.value, currentUser.value))
+const todayDate = computed(() => ymd(now.value))
 
 const days = computed<CalendarDay[]>(() => {
   const result: CalendarDay[] = []
@@ -186,17 +211,15 @@ const days = computed<CalendarDay[]>(() => {
   const month = currentMonth.value.getMonth()
   const start = new Date(year, month, 1)
   const offset = (start.getDay() + 6) % 7
-  const totalDays = getDaysInMonth(year, month)
-  const visibleDays = offset + totalDays > 35 ? 42 : 35
   const cursor = new Date(year, month, 1 - offset)
 
-  for (let i = 0; i < visibleDays; i += 1) {
+  for (let i = 0; i < 42; i += 1) {
     const date = ymd(cursor)
     result.push({
       date,
       day: cursor.getDate(),
       inMonth: cursor.getFullYear() === year && cursor.getMonth() === month,
-      isToday: date === '2026-05-08',
+      isToday: date === todayDate.value,
       specialDays: specialDayMap.value.get(date) ?? [],
       events: eventMap.value.get(date) ?? [],
     })
@@ -222,7 +245,7 @@ const weekDays = computed<CalendarDay[]>(() => {
         cursor.getFullYear() === currentMonth.value.getFullYear() &&
         cursor.getMonth() === currentMonth.value.getMonth(),
       inActiveWeek: true,
-      isToday: date === '2026-05-08',
+      isToday: date === todayDate.value,
       specialDays: specialDayMap.value.get(date) ?? [],
       events: eventMap.value.get(date) ?? [],
     })
@@ -247,21 +270,25 @@ const weekLabel = computed(() => {
   return `${start.getFullYear()} 年 ${startLabel} - ${endLabel}`
 })
 const visibleCalendarDays = computed(() => (calendarViewMode.value === 'week' ? weekDays.value : days.value))
+const isTodoOperating = computed(() => isDayPreviewOpen.value)
+const shouldShowTodayBubble = computed(
+  () =>
+    calendarViewMode.value === 'month' &&
+    isTodayBubbleVisible.value &&
+    !isTodayBubbleManualClosed.value &&
+    !isTodoOperating.value,
+)
 const selectedEvents = computed(() => eventMap.value.get(selectedDate.value) ?? [])
 const selectedSpecialDays = computed(() => specialDayMap.value.get(selectedDate.value) ?? [])
-const todayEvents = computed(() => eventMap.value.get('2026-05-08') ?? [])
+const todayEvents = computed(() => eventMap.value.get(todayDate.value) ?? [])
 const todayPendingEvents = computed(() => todayEvents.value.filter((event) => event.status !== 'done'))
-const todayUrgentCount = computed(
-  () => todayEvents.value.filter((event) => event.priority === 'urgent' && event.status !== 'done').length,
-)
-const nextTodayEvent = computed(() => todayPendingEvents.value[todayPendingEvents.value.length - 1])
-const urgentCount = computed(() => events.value.filter((event) => event.priority === 'urgent' && event.status !== 'done').length)
+const nextTodayEvent = computed(() => todayPendingEvents.value[0])
 const completedCount = computed(() => events.value.filter((event) => event.status === 'done').length)
 const userName = computed(() => currentUser.value.name)
 const userDepartment = computed(() => `${currentUser.value.department ?? 'AI平台'} · ${currentUser.value.role === 'leader' ? '领导' : '员工'}`)
 const avatarUrl = computed(() => currentUser.value.avatar ?? userStore.profile?.avatar ?? girlImage)
 const greeting = computed(() => {
-  const hour = new Date().getHours()
+  const hour = now.value.getHours()
   if (hour < 6) return '夜深了'
   if (hour < 12) return '早上好'
   if (hour < 18) return '下午好'
@@ -272,51 +299,158 @@ const timeLabel = computed(() =>
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
-  }).format(new Date()),
+  }).format(now.value),
 )
 const dateLabel = computed(() =>
   new Intl.DateTimeFormat('zh-CN', {
     month: 'long',
     day: 'numeric',
     weekday: 'long',
-  }).format(new Date()),
+  }).format(now.value),
 )
 const dataUpdateLabel = computed(() => `数据更新于 ${timeLabel.value}`)
-const weekTaskCompleted = computed(() => Math.max(completedCount.value, 5))
+const todayCompletedCount = computed(() => todayEvents.value.length - todayPendingEvents.value.length)
+const todayTaskProgress = computed(() =>
+  todayEvents.value.length ? Math.round((todayCompletedCount.value / todayEvents.value.length) * 100) : 0,
+)
+const weekTaskCompleted = computed(() => Math.min(Math.max(completedCount.value, 5), Math.max(events.value.length, 1)))
 const weekTaskProgress = computed(() => Math.round((weekTaskCompleted.value / Math.max(events.value.length, 1)) * 100))
+const welcomeSummary = computed(() => {
+  if (!todayPendingEvents.value.length) {
+    return ['今日暂无待办安排。', '可以查看本月日程，或新增一个待办。']
+  }
+
+  return [
+    `今日 ${todayPendingEvents.value.length} 项待办，本周完成率 ${weekTaskProgress.value}%。`,
+    `${nextTodayEvent.value ? formatEventTime(nextTodayEvent.value) : '稍后'} 处理 ${nextTodayEvent.value?.title ?? '下一项任务'}。`,
+  ]
+})
 
 const selectedDateLabel = computed(() => {
   const date = new Date(`${selectedDate.value}T12:00:00`)
   const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()]
-  return `${date.getMonth() + 1}月${date.getDate()}日 ${weekday}`
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${weekday}`
 })
 
-function selectDate(date: string) {
+function selectDate(date: string, syncMonth = true) {
   selectedDate.value = date
   const nextDate = new Date(`${date}T12:00:00`)
-  if (
+  if (syncMonth && (
     nextDate.getFullYear() !== currentMonth.value.getFullYear() ||
     nextDate.getMonth() !== currentMonth.value.getMonth()
-  ) {
+  )) {
     currentMonth.value = new Date(nextDate.getFullYear(), nextDate.getMonth(), 1)
   }
 }
 
-function openDayPreview(date: string) {
-  selectDate(date)
+function toggleDayPreview(date: string) {
+  if (isDayPreviewOpen.value && selectedDate.value === date) {
+    closeDayPreview()
+    return
+  }
+
+  selectDate(date, calendarViewMode.value === 'week')
+  openTodoPanel()
+}
+
+function closeDayPreview() {
+  isDayPreviewOpen.value = false
+  scheduleTodayBubbleAfterPanelClose()
+}
+
+function openTodayPreview() {
+  selectDate(todayDate.value)
+  openTodoPanel()
+}
+
+function closeTodayBubble() {
+  clearTodayBubbleTimer()
+  clearPanelCloseRestoreTimer()
+  isTodayBubbleVisible.value = false
+  isTodayBubbleAutoHidden.value = false
+  isTodayBubbleManualClosed.value = true
+}
+
+function openTodayBubble() {
+  clearTodayBubbleTimer()
+  clearPanelCloseRestoreTimer()
+  selectDate(todayDate.value)
+  isTodayBubbleManualClosed.value = false
+  isTodayBubbleAutoHidden.value = false
+  isTodayBubbleVisible.value = true
+}
+
+function openTodoPanel() {
+  clearTodayBubbleTimer()
+  clearPanelCloseRestoreTimer()
+  isTodayBubbleVisible.value = false
+  isTodayBubbleAutoHidden.value = false
   isDayPreviewOpen.value = true
+}
+
+function clearTodayBubbleTimer() {
+  if (!todayBubbleTimer) return
+  clearTimeout(todayBubbleTimer)
+  todayBubbleTimer = undefined
+}
+
+function clearPanelCloseRestoreTimer() {
+  if (!panelCloseRestoreTimer) return
+  clearTimeout(panelCloseRestoreTimer)
+  panelCloseRestoreTimer = undefined
+}
+
+function tryShowTodayBubble() {
+  if (isTodayBubbleManualClosed.value || isTodoOperating.value || calendarViewMode.value !== 'month') return
+
+  isTodayBubbleVisible.value = true
+  isTodayBubbleAutoHidden.value = false
+}
+
+function resetTodayBubbleTimer() {
+  clearTodayBubbleTimer()
+  todayBubbleTimer = setTimeout(tryShowTodayBubble, 3000)
+}
+
+function hideTodayBubbleTemporarily() {
+  if (isTodayBubbleManualClosed.value || isTodoOperating.value || calendarViewMode.value !== 'month') return
+
+  isTodayBubbleVisible.value = false
+  isTodayBubbleAutoHidden.value = true
+  resetTodayBubbleTimer()
+}
+
+function scheduleTodayBubbleAfterPanelClose() {
+  clearTodayBubbleTimer()
+  clearPanelCloseRestoreTimer()
+  if (isTodayBubbleManualClosed.value || calendarViewMode.value !== 'month') return
+
+  panelCloseRestoreTimer = setTimeout(() => {
+    if (!isDayPreviewOpen.value && !isTodayBubbleManualClosed.value && calendarViewMode.value === 'month') {
+      isTodayBubbleVisible.value = true
+      isTodayBubbleAutoHidden.value = false
+    }
+  }, 1000)
+}
+
+function quickCreateToday(prompt: string) {
+  quickCreatePrompt.value = prompt
+  quickCreateKey.value += 1
+  selectDate(todayDate.value)
+  isTodayBubbleManualClosed.value = false
+  openTodoPanel()
 }
 
 function createTodo(payload: CalendarTodoDraft) {
   allEvents.value = mockCreateTodo(allEvents.value, currentUser.value, payload)
   selectDate(payload.date)
-  isDayPreviewOpen.value = true
+  openTodoPanel()
 }
 
 function updateTodo(payload: CalendarTodoUpdate) {
   allEvents.value = mockUpdateTodo(allEvents.value, currentUser.value, payload)
   selectDate(payload.date)
-  isDayPreviewOpen.value = true
+  openTodoPanel()
 }
 
 function updateTodoStatus(id: string, status: CalendarEventStatus) {
@@ -346,14 +480,25 @@ function openAgentList() {
 </script>
 
 <template>
-  <div class="calendar-workspace">
-    <section class="profile-welcome-panel" aria-label="个人信息与欢迎区">
+  <div class="calendar-workspace" @click="closeDayPreview">
+    <div
+      v-if="isDayPreviewOpen"
+      class="left-preview-scrim"
+      role="presentation"
+      @click.stop="closeDayPreview"
+    ></div>
+
+    <section
+      class="profile-welcome-panel"
+      :class="{ 'has-profile-dialog': isProfileDialogOpen }"
+      aria-label="个人信息与欢迎区"
+    >
       <section class="profile-panel">
         <div class="profile-menu-anchor">
           <button class="profile-trigger" type="button" @click="isProfileDialogOpen = !isProfileDialogOpen">
             <img class="avatar" :src="avatarUrl" alt="用户头像" />
             <span class="profile-copy">
-              <strong>{{ userName }}</strong>
+              <strong>{{ greeting }}，{{ userName }}</strong>
               <span>{{ userDepartment }}</span>
             </span>
           </button>
@@ -404,17 +549,15 @@ function openAgentList() {
         </div>
       </section>
 
-      <section class="welcome-panel">
-        <div class="time-block">
-          <span>{{ dateLabel }}</span>
-          <strong>{{ timeLabel }}</strong>
-        </div>
+      <div class="time-block">
+        <span>{{ dateLabel }}</span>
+      </div>
 
+      <section class="welcome-panel">
         <div class="welcome-main">
-          <h1>{{ greeting }}，{{ userName }}</h1>
           <p>
-            今日 {{ todayPendingEvents.length }} 项待办，{{ todayUrgentCount }} 项高优先级，<br />
-            {{ nextTodayEvent?.time ?? '16:00' }} 需完成 PPT 初稿，<br />
+            {{ welcomeSummary[0] }}<br />
+            {{ welcomeSummary[1] }}<br />
             AI 已为你整理重点。
           </p>
           <span class="data-update">
@@ -425,19 +568,15 @@ function openAgentList() {
 
         <div class="campus-visual" aria-hidden="true">
           <img :src="campusImage" alt="" />
-          <span class="campus-pin pin-office"><b></b>办公楼</span>
-          <span class="campus-pin pin-production"><b></b>生产区</span>
-          <span class="campus-pin pin-meeting"><b></b>会议中心</span>
-          <span class="campus-pin pin-check"><b></b>巡检点</span>
         </div>
 
         <div class="quick-metrics">
           <article class="metric-card metric-card-today">
             <span>今日待办</span>
             <strong><em>{{ todayPendingEvents.length }}</em>项</strong>
-            <p>已完成 {{ todayEvents.length - todayPendingEvents.length }} 项</p>
-            <div class="metric-ring" style="--progress: 0deg">
-              <b>0%</b>
+            <p>已完成 {{ todayCompletedCount }} 项</p>
+            <div class="metric-ring" :style="{ '--progress': `${todayTaskProgress * 3.6}deg` }">
+              <b>{{ todayTaskProgress }}%</b>
             </div>
           </article>
 
@@ -453,14 +592,13 @@ function openAgentList() {
             </div>
           </article>
 
-          <article class="metric-card metric-card-urgent">
-            <span>高优先级</span>
-            <strong><em>{{ todayUrgentCount }}</em>项</strong>
-            <p>即将到期 {{ todayUrgentCount }} 项</p>
-            <div class="urgent-symbol" aria-hidden="true">
-              <span>!</span>
+          <article class="metric-card metric-card-completion">
+            <span>本周完成率</span>
+            <strong><em>{{ weekTaskProgress }}</em>%</strong>
+            <p>已完成 {{ weekTaskCompleted }} / {{ events.length }} 项</p>
+            <div class="metric-ring" :style="{ '--progress': `${weekTaskProgress * 3.6}deg` }">
+              <b>{{ weekTaskProgress }}%</b>
             </div>
-            <i class="urgent-spark" aria-hidden="true"></i>
           </article>
         </div>
       </section>
@@ -490,7 +628,6 @@ function openAgentList() {
           <div class="agent-main">
             <div class="agent-title">
               <h3>{{ agent.name }}</h3>
-              <span>{{ agent.status }}</span>
             </div>
             <p>{{ agent.desc }}</p>
           </div>
@@ -500,7 +637,33 @@ function openAgentList() {
       </div>
     </section>
 
-    <section class="layout-column left-column" aria-label="日历与待办">
+    <section class="layout-column left-column" aria-label="日历与待办" @click.stop>
+      <Transition name="day-preview-float">
+        <aside
+          v-if="isDayPreviewOpen"
+          class="day-preview-popover"
+          aria-label="当天待办详情"
+          @click.stop
+          @pointerdown.stop
+        >
+          <DayPreviewPanel
+            :date="selectedDate"
+            :date-label="selectedDateLabel"
+            :events="selectedEvents"
+            :special-days="selectedSpecialDays"
+            :current-user="currentUser"
+            :assignable-users="assignableUsers"
+            :quick-create-prompt="quickCreatePrompt"
+            :quick-create-key="quickCreateKey"
+            show-close
+            @create-todo="createTodo"
+            @update-todo="updateTodo"
+            @update-status="updateTodoStatus"
+            @close="closeDayPreview"
+          />
+        </aside>
+      </Transition>
+
       <div class="panel calendar-panel">
         <CalendarMonth
           v-model:view-mode="calendarViewMode"
@@ -508,44 +671,48 @@ function openAgentList() {
           :selected-date="selectedDate"
           :month-label="monthLabel"
           :week-label="weekLabel"
-          @select="openDayPreview"
+          :today-date="todayDate"
+          :today-events="todayEvents"
+          :show-today-bubble="shouldShowTodayBubble"
+          :can-open-today-bubble="isTodayBubbleManualClosed"
+          @select="toggleDayPreview"
+          @calendar-interaction="hideTodayBubbleTemporarily"
+          @close-today-bubble="closeTodayBubble"
+          @open-today-bubble="openTodayBubble"
+          @quick-create-today="quickCreateToday"
           @previous-period="changePeriod(-1)"
           @next-period="changePeriod(1)"
         />
       </div>
     </section>
-
-    <n-modal v-model:show="isDayPreviewOpen" :mask-closable="true" :auto-focus="false">
-      <div class="day-preview-dialog">
-        <DayPreviewPanel
-          :date="selectedDate"
-          :date-label="selectedDateLabel"
-          :events="selectedEvents"
-          :special-days="selectedSpecialDays"
-          :current-user="currentUser"
-          :assignable-users="assignableUsers"
-          show-close
-          @create-todo="createTodo"
-          @update-todo="updateTodo"
-          @update-status="updateTodoStatus"
-          @close="isDayPreviewOpen = false"
-        />
-      </div>
-    </n-modal>
   </div>
 </template>
 
 <style scoped>
 .calendar-workspace {
+  position: relative;
+  isolation: isolate;
   height: 100%;
   min-height: 0;
   box-sizing: border-box;
   padding: 22px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(560px, 2fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   grid-template-rows: minmax(370px, 1.5fr) minmax(240px, 1fr);
   gap: 8px 18px;
   overflow: hidden;
+}
+
+.left-preview-scrim {
+  position: absolute;
+  z-index: 80;
+  top: 22px;
+  left: 22px;
+  bottom: 22px;
+  width: calc((100% - 62px) / 2);
+  border-radius: 24px;
+  background: rgba(248, 250, 252, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
 }
 
 .layout-column {
@@ -568,7 +735,8 @@ function openAgentList() {
 }
 
 .left-column {
-  grid-column: 3;
+  position: relative;
+  grid-column: 3 / 5;
   grid-row: 1 / 3;
   min-height: 0;
 }
@@ -599,16 +767,65 @@ function openAgentList() {
   padding: 8px;
 }
 
-.day-preview-dialog {
-  width: min(680px, calc(100vw - 32px));
-  max-height: min(760px, calc(100vh - 48px));
+.day-preview-popover {
+  position: absolute;
+  z-index: 999;
+  top: calc(50% - 24px);
+  right: calc(100% + 16px);
+  width: min(500px, calc(50vw - 42px));
+  min-height: min(620px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  flex: 0 0 auto;
   box-sizing: border-box;
   border: 1px solid rgba(226, 232, 240, 0.92);
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 30px 80px -34px rgba(15, 23, 42, 0.62);
-  padding: 22px;
+  border-radius: 26px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 28px 72px -36px rgba(15, 23, 42, 0.58);
+  padding: 24px;
   overflow: auto;
+  backdrop-filter: blur(18px);
+  transform: translateY(-50%);
+}
+
+.day-preview-popover::before,
+.day-preview-popover::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+}
+
+.day-preview-popover::before {
+  top: 50%;
+  right: -13px;
+  width: 24px;
+  height: 24px;
+  border-top: 1px solid rgba(226, 232, 240, 0.92);
+  border-right: 1px solid rgba(226, 232, 240, 0.92);
+  background: rgba(255, 255, 255, 0.96);
+  transform: translateY(-50%) rotate(45deg);
+  box-shadow: 12px -8px 28px -24px rgba(15, 23, 42, 0.5);
+}
+
+.day-preview-popover::after {
+  top: 50%;
+  right: -42px;
+  width: 32px;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(148, 163, 184, 0.48), rgba(148, 163, 184, 0));
+  transform: translateY(-50%);
+}
+
+.day-preview-float-enter-active,
+.day-preview-float-leave-active {
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+
+.day-preview-float-enter-from,
+.day-preview-float-leave-to {
+  opacity: 0;
+  transform: translate(12px, -50%);
 }
 
 .profile-welcome-panel {
@@ -617,14 +834,21 @@ function openAgentList() {
   grid-column: 1 / 3;
   grid-row: 1;
   min-height: 0;
-  padding: 22px 20px 16px;
-  display: block;
+  padding: 22px 28px 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 20px 24px;
   overflow: visible;
   border: 0;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
   backdrop-filter: none;
+}
+
+.profile-welcome-panel.has-profile-dialog {
+  z-index: 1100;
 }
 
 .profile-welcome-panel .profile-panel,
@@ -642,6 +866,8 @@ function openAgentList() {
 .profile-welcome-panel .welcome-panel {
   position: relative;
   z-index: 1;
+  grid-column: 1 / -1;
+  grid-row: 2;
   border-radius: 0;
 }
 
@@ -649,47 +875,46 @@ function openAgentList() {
   height: 100%;
   padding: 0;
   display: grid;
-  grid-template-columns: minmax(205px, 0.82fr) minmax(240px, 1.18fr);
-  grid-template-rows: minmax(214px, 1fr) 124px;
-  gap: 16px 14px;
+  grid-template-columns: minmax(230px, 0.88fr) minmax(280px, 1.12fr);
+  grid-template-rows: minmax(190px, 1fr) 124px;
+  gap: 18px 24px;
   background: transparent;
   color: #111827;
 }
 
 .time-block {
-  position: absolute;
-  top: 0;
-  right: 0;
+  position: relative;
   z-index: 3;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: flex-start;
-  gap: 4px;
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  align-self: start;
+  margin-top: 9px;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: none;
 }
 
 .time-block span {
-  color: #667085;
-  font-size: 12px;
-  font-weight: 850;
-  line-height: 1;
-}
-
-.time-block strong {
-  color: #0f172a;
-  font-size: clamp(44px, 3.9vw, 58px);
-  line-height: 0.9;
+  color: #334155;
+  font-size: 20px;
   font-weight: 900;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .welcome-main {
   grid-column: 1;
   grid-row: 1;
-  align-self: end;
-  max-width: 260px;
-  padding: 118px 0 0 6px;
+  align-self: start;
+  max-width: 310px;
+  padding: 36px 0 0;
 }
 
 .eyebrow {
@@ -719,15 +944,15 @@ p {
 }
 
 .welcome-main p {
-  margin-top: 10px;
+  margin-top: 0;
   color: #64748b;
   font-size: 14px;
   font-weight: 850;
-  line-height: 1.45;
+  line-height: 1.58;
 }
 
 .data-update {
-  margin-top: 18px;
+  margin-top: 28px;
   color: #94a3b8;
   display: inline-flex;
   align-items: center;
@@ -749,67 +974,48 @@ p {
   grid-row: 1;
   align-self: stretch;
   min-height: 0;
-  padding-top: 42px;
+  padding-top: 12px;
+}
+
+.campus-visual::before,
+.campus-visual::after {
+  position: absolute;
+  content: '';
+  pointer-events: none;
+}
+
+.campus-visual::before {
+  inset: 22px 10px 18px 12px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 64% 30%, rgba(34, 197, 94, 0.14), transparent 38%),
+    radial-gradient(circle at 35% 58%, rgba(37, 99, 235, 0.15), transparent 44%);
+  filter: blur(10px);
+}
+
+.campus-visual::after {
+  right: 8%;
+  bottom: -2px;
+  width: 76%;
+  height: 74px;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse at center, rgba(15, 23, 42, 0.15), transparent 64%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0), rgba(241, 245, 249, 0.72));
+  filter: blur(2px);
 }
 
 .campus-visual img {
   position: absolute;
-  right: -22px;
+  z-index: 1;
+  right: -24px;
   bottom: -10px;
-  width: min(124%, 590px);
-  max-height: 310px;
+  width: min(118%, 575px);
+  max-height: 292px;
   object-fit: contain;
-  filter: drop-shadow(0 26px 30px rgba(37, 99, 235, 0.12));
-}
-
-.campus-pin {
-  position: absolute;
-  z-index: 2;
-  min-height: 27px;
-  border: 1px solid rgba(226, 232, 240, 0.9);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 12px 24px -20px rgba(15, 23, 42, 0.48);
-  padding: 0 11px 0 9px;
-  color: #334155;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 900;
-  white-space: nowrap;
-}
-
-.campus-pin b {
-  width: 14px;
-  height: 14px;
-  border-radius: 999px;
-  background: currentColor;
-  box-shadow: inset 0 0 0 4px rgba(255, 255, 255, 0.68);
-}
-
-.pin-office {
-  top: 94px;
-  left: 4%;
-  color: #2563eb;
-}
-
-.pin-production {
-  top: 48px;
-  left: 50%;
-  color: #059669;
-}
-
-.pin-meeting {
-  right: 8%;
-  bottom: 68px;
-  color: #f97316;
-}
-
-.pin-check {
-  left: 40%;
-  bottom: 6px;
-  color: #7c3aed;
+  filter:
+    drop-shadow(0 30px 34px rgba(15, 23, 42, 0.13))
+    drop-shadow(0 0 28px rgba(37, 99, 235, 0.08));
 }
 
 .quick-metrics {
@@ -826,7 +1032,9 @@ p {
   box-sizing: border-box;
   border: 1px solid rgba(226, 232, 240, 0.9);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.76);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.86), rgba(248, 250, 252, 0.72)),
+    rgba(255, 255, 255, 0.76);
   padding: 13px 18px;
   color: #64748b;
   font-size: 12px;
@@ -859,8 +1067,8 @@ p {
   color: #2563eb;
 }
 
-.metric-card-urgent strong em {
-  color: #ef4444;
+.metric-card-completion strong em {
+  color: #059669;
 }
 
 .metric-card > span {
@@ -917,57 +1125,6 @@ p {
   background: conic-gradient(#2563eb var(--progress), #e5e7eb 0);
 }
 
-.urgent-symbol {
-  position: absolute;
-  right: 34px;
-  top: 50%;
-  width: 58px;
-  height: 58px;
-  border-radius: 999px;
-  border: 7px solid rgba(239, 68, 68, 0.13);
-  color: #ef4444;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transform: translateY(-56%);
-}
-
-.urgent-symbol span {
-  width: 0;
-  height: 0;
-  border-left: 13px solid transparent;
-  border-right: 13px solid transparent;
-  border-bottom: 23px solid #ef4444;
-  color: #ffffff;
-  display: inline-flex;
-  align-items: flex-end;
-  justify-content: center;
-  font-size: 15px;
-  font-weight: 950;
-  line-height: 18px;
-  padding-bottom: 2px;
-  box-sizing: border-box;
-}
-
-.urgent-symbol span::before {
-  content: '!';
-  position: absolute;
-  transform: translateY(21px);
-  font-weight: 950;
-}
-
-.urgent-spark {
-  position: absolute;
-  right: 24px;
-  bottom: 15px;
-  width: 54px;
-  height: 16px;
-  background:
-    linear-gradient(145deg, transparent 0 17%, #ef4444 18% 24%, transparent 25% 39%, #ef4444 40% 46%, transparent 47% 62%, #ef4444 63% 69%, transparent 70%),
-    linear-gradient(35deg, transparent 0 18%, #ef4444 19% 25%, transparent 26%);
-  opacity: 0.9;
-}
-
 .agent-panel {
   padding: 20px;
   display: flex;
@@ -979,7 +1136,9 @@ p {
   grid-column: 1 / 3;
   grid-row: 2;
   border-radius: 22px;
-  background: rgba(255, 255, 255, 0.68);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(241, 245, 249, 0.56)),
+    rgba(255, 255, 255, 0.68);
 }
 
 .section-head {
@@ -1050,30 +1209,46 @@ p {
 }
 
 .agent-list::-webkit-scrollbar,
-.day-preview-dialog::-webkit-scrollbar {
+.day-preview-popover::-webkit-scrollbar {
   width: 0;
 }
 
 .agent-card {
   position: relative;
-  min-height: 118px;
+  min-height: 108px;
   box-sizing: border-box;
-  border: 1px solid rgba(226, 232, 240, 0.9);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.68);
-  padding: 18px 14px 14px;
+  border: 1px solid rgba(226, 232, 240, 0.82);
+  border-radius: 16px;
+  background:
+    linear-gradient(140deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.64)),
+    rgba(255, 255, 255, 0.72);
+  padding: 15px 14px 14px;
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr);
+  grid-template-columns: 46px minmax(0, 1fr);
   grid-template-rows: auto auto;
   align-items: start;
   gap: 8px 12px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.64);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.74),
+    0 16px 30px -30px rgba(15, 23, 42, 0.4);
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+.agent-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(147, 197, 253, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.86),
+    0 20px 34px -28px rgba(37, 99, 235, 0.36);
 }
 
 .agent-icon {
-  width: 42px;
-  height: 42px;
-  border-radius: 13px;
+  width: 46px;
+  height: 46px;
+  border-radius: 15px;
   color: #ffffff;
   display: inline-flex;
   align-items: center;
@@ -1088,8 +1263,9 @@ p {
 }
 
 .agent-title {
-  display: block;
-  padding-right: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .agent-title h3 {
@@ -1100,22 +1276,6 @@ p {
   white-space: nowrap;
   font-size: 15px;
   line-height: 1.25;
-}
-
-.agent-title span {
-  position: absolute;
-  top: 18px;
-  right: 38px;
-  min-height: 19px;
-  padding: 0 7px;
-  border-radius: 999px;
-  background: #dcfce7;
-  color: #166534;
-  display: inline-flex;
-  align-items: center;
-  font-size: 10px;
-  font-weight: 850;
-  white-space: nowrap;
 }
 
 .agent-main p,
@@ -1139,8 +1299,8 @@ p {
   min-height: 20px;
   padding: 0 8px;
   border-radius: 999px;
-  background: #dcfce7;
-  color: #166534;
+  background: rgba(241, 245, 249, 0.84);
+  color: #475569;
   display: inline-flex;
   align-items: center;
   font-size: 11px;
@@ -1157,20 +1317,33 @@ p {
   border: 0;
   border-radius: 999px;
   background: transparent;
-  color: #111827;
+  color: #94a3b8;
   font: inherit;
   font-size: 22px;
   line-height: 1;
   cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.agent-menu:hover {
+  background: rgba(241, 245, 249, 0.86);
+  color: #334155;
 }
 
 .profile-panel {
-  position: absolute;
+  position: relative;
   z-index: 25;
-  top: 22px;
-  left: 28px;
+  grid-column: 1;
+  grid-row: 1;
+  align-self: start;
+  top: auto;
+  left: auto;
   padding: 0;
   background: transparent;
+}
+
+.profile-welcome-panel.has-profile-dialog .profile-panel {
+  z-index: 1110;
 }
 
 .profile-menu-anchor {
@@ -1190,7 +1363,7 @@ p {
   font: inherit;
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
   text-align: left;
   cursor: pointer;
 }
@@ -1219,15 +1392,16 @@ p {
 
 .profile-copy strong {
   color: #111827;
-  font-size: 21px;
+  font-size: clamp(20px, 1.55vw, 26px);
   font-weight: 900;
-  line-height: 1.15;
+  line-height: 1.08;
+  letter-spacing: 0;
 }
 
 .profile-copy span {
   color: #64748b;
-  font-size: 12px;
-  font-weight: 800;
+  font-size: 13px;
+  font-weight: 850;
   line-height: 1.35;
 }
 
@@ -1286,7 +1460,7 @@ p {
 .profile-dialog-mask {
   position: fixed;
   inset: 0;
-  z-index: 22;
+  z-index: 1090;
   background: transparent;
 }
 
@@ -1294,7 +1468,7 @@ p {
   position: absolute;
   top: calc(100% + 14px);
   left: 0;
-  z-index: 30;
+  z-index: 1111;
   width: min(390px, calc(100vw - 44px));
   border: 1px solid rgba(226, 232, 240, 0.92);
   border-radius: 22px;
@@ -1412,6 +1586,22 @@ p {
     min-height: 540px;
   }
 
+  .left-preview-scrim {
+    display: none;
+  }
+
+  .day-preview-popover {
+    position: relative;
+    top: auto;
+    right: auto;
+    width: 100%;
+    min-height: 0;
+    max-height: 420px;
+    margin-bottom: 0;
+    border-radius: 18px;
+    transform: none;
+  }
+
   .agent-panel {
     max-height: none;
     overflow: visible;
@@ -1422,6 +1612,7 @@ p {
   .calendar-workspace {
     padding: 12px;
     gap: 12px;
+    overflow-x: hidden;
   }
 
   .layout-column {
@@ -1431,26 +1622,108 @@ p {
   .welcome-panel,
   .profile-panel,
   .agent-panel,
-  .day-preview-dialog {
+  .day-preview-popover {
     padding: 14px;
     border-radius: 16px;
   }
 
-  .time-block,
-  .section-head {
+  .profile-welcome-panel {
+    height: auto;
+    min-height: auto;
+    padding: 14px 12px;
+    overflow: visible;
+    overflow-x: clip;
+  }
+
+  .profile-panel {
+    position: relative;
+    top: auto;
+    left: auto;
+    padding: 0 0 12px;
+  }
+
+  .welcome-panel {
+    height: auto;
+    display: flex;
     flex-direction: column;
+    gap: 14px;
+  }
+
+  .time-block {
+    position: relative;
+    top: auto;
+    right: auto;
+    align-self: flex-end;
+    min-width: 116px;
+    padding: 9px 10px;
+  }
+
+  .section-head {
+    flex-direction: row;
+    align-items: center;
   }
 
   .welcome-main {
+    order: 1;
     max-width: 100%;
+    padding: 0;
+  }
+
+  .campus-visual {
+    order: 2;
+    width: 100%;
+    min-height: 176px;
+    padding-top: 0;
+    overflow: hidden;
+  }
+
+  .campus-visual img {
+    right: -54px;
+    bottom: -4px;
+    width: min(128%, 440px);
+    max-height: 176px;
+  }
+
+  .campus-visual::before {
+    inset: 12px 8px 14px;
+  }
+
+  .campus-visual::after {
+    right: 10%;
+    bottom: -8px;
+    width: 82%;
+  }
+
+  .quick-metrics {
+    order: 3;
+    grid-template-columns: 1fr;
   }
 
   .calendar-panel {
     min-height: 500px;
   }
 
+  .agent-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .agent-card {
-    grid-template-columns: 38px minmax(0, 1fr);
+    min-height: 132px;
+    grid-template-columns: 42px minmax(0, 1fr);
+    padding: 14px 12px;
+  }
+
+  .agent-icon {
+    width: 42px;
+    height: 42px;
+  }
+
+  .agent-title h3 {
+    font-size: 14px;
+  }
+
+  .agent-main p {
+    -webkit-line-clamp: 3;
   }
 
   .agent-badge {

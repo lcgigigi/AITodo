@@ -2,7 +2,7 @@
 defineProps<{
   selectedToolName: string
   eventCount: number
-  urgentCount: number
+  doneCount: number
 }>()
 </script>
 
@@ -10,11 +10,11 @@ defineProps<{
   <section class="focus-card">
     <div>
       <p>今日专注</p>
-      <h2>{{ urgentCount > 0 ? '先处理高优先级事项' : '节奏稳定' }}</h2>
+      <h2>{{ eventCount > doneCount ? '保持推进节奏' : '节奏稳定' }}</h2>
     </div>
     <div class="focus-metrics">
       <span><strong>{{ eventCount }}</strong>项安排</span>
-      <span><strong>{{ urgentCount }}</strong>项优先</span>
+      <span><strong>{{ doneCount }}</strong>项完成</span>
     </div>
     <div class="suggestion">
       <span>推荐入口</span>

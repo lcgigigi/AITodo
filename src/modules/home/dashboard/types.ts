@@ -3,13 +3,15 @@ export type CalendarEventStatus = 'todo' | 'done'
 export type CalendarEventPriority = 'normal' | 'urgent'
 export type CalendarUserRole = 'leader' | 'employee'
 export type CalendarTodoScope = 'self' | 'assigned_by_me' | 'assigned_to_me'
+export type CalendarTodoFormMode = 'scheduled' | 'deadline'
 
 export type CalendarSpecialDayType = 'holiday' | 'workday' | 'solar-term'
 
 export interface CalendarEvent {
   id: string
   date: string
-  time: string
+  endDate?: string
+  time?: string
   title: string
   type: CalendarEventType
   owner: string
@@ -28,7 +30,8 @@ export interface CalendarEvent {
 
 export interface CalendarTodoDraft {
   date: string
-  time: string
+  endDate?: string
+  time?: string
   title: string
   owner?: string
   source?: string
@@ -40,7 +43,8 @@ export interface CalendarTodoDraft {
 export interface CalendarTodoUpdate {
   id: string
   date: string
-  time: string
+  endDate?: string
+  time?: string
   title: string
   owner: string
   source?: string
@@ -50,7 +54,9 @@ export interface CalendarTodoUpdate {
 }
 
 export interface CalendarTodoForm {
+  mode: CalendarTodoFormMode
   date: string
+  endDate: string
   time: string
   title: string
   owner: string
@@ -72,7 +78,8 @@ export interface CalendarUser {
 
 export interface ParsedTodoDraft {
   date: string
-  time: string
+  endDate?: string
+  time?: string
   title: string
   owner?: string
   assigneeId?: string

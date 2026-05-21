@@ -7,6 +7,7 @@ import type {
   CalendarUser,
   ParsedTodoDraft,
 } from './types'
+import { addDays, compareDate, compareEvents, ymd } from './todoDisplay'
 
 export const mockUsers: CalendarUser[] = [
   {
@@ -235,7 +236,8 @@ export const mockInitialTodos: CalendarEvent[] = [
   {
     id: 'evt-0514-ai',
     date: '2026-05-14',
-    time: '10:30',
+    endDate: '2026-05-18',
+    time: undefined,
     title: '智能体脚本评审',
     type: 'ai',
     owner: '张经理',
@@ -262,7 +264,7 @@ export const mockInitialTodos: CalendarEvent[] = [
   {
     id: 'evt-0521-meeting',
     date: '2026-05-21',
-    time: '13:30',
+    time: undefined,
     title: '季度复盘材料会',
     type: 'meeting',
     owner: '刘畅',
@@ -300,6 +302,7 @@ export function listTodos(events: CalendarEvent[], currentUser: CalendarUser): C
         completable,
       }
     })
+    .sort(compareEvents)
 }
 
 export function createTodo(
@@ -315,12 +318,12 @@ export function createTodo(
     {
       id: `evt-${payload.date}-${Date.now()}`,
       date: payload.date,
+      endDate: payload.endDate && payload.endDate !== payload.date ? payload.endDate : undefined,
       time: payload.time,
       title: payload.title.trim(),
       type: 'task',
       owner: assigneeName,
       status: 'todo',
-      priority: 'normal',
       source: payload.source?.trim() || '自建待办',
       completionIdeas: payload.completionIdeas?.trim() || undefined,
       creatorId: currentUser.id,
@@ -344,6 +347,7 @@ export function updateTodo(
     return {
       ...event,
       date: payload.date,
+      endDate: payload.endDate && payload.endDate !== payload.date ? payload.endDate : undefined,
       time: payload.time,
       title: payload.title.trim(),
       owner: assigneeName,
@@ -367,16 +371,6 @@ export function updateTodoStatus(
   })
 }
 
-function addDays(date: Date, days: number) {
-  const next = new Date(date)
-  next.setDate(next.getDate() + days)
-  return next
-}
-
-function ymd(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-}
-
 function normalizeTime(hour: number, minute = 0) {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
 }
@@ -389,8 +383,9 @@ export async function parseTodoText(
 ) {
   await new Promise((resolve) => window.setTimeout(resolve, 360))
 
-  const baseDate = new Date('2026-05-14T12:00:00+08:00')
+  const baseDate = new Date(`${fallback.date}T12:00:00+08:00`)
   let date = fallback.date
+  let endDate = fallback.endDate && fallback.endDate !== fallback.date ? fallback.endDate : undefined
 
   if (text.includes('后天')) {
     date = ymd(addDays(baseDate, 2))
@@ -405,6 +400,18 @@ export async function parseTodoText(
     date = ymd(
       new Date(baseDate.getFullYear(), Number(monthDayMatch[1]) - 1, Number(monthDayMatch[2])),
     )
+  }
+
+  if (text.includes('本周内')) {
+    endDate = ymd(addDays(baseDate, 7 - baseDate.getDay()))
+  } else if (text.includes('下周前')) {
+    endDate = ymd(addDays(baseDate, 8 - baseDate.getDay()))
+  } else if (text.includes('本月内')) {
+    endDate = ymd(new Date(baseDate.getFullYear(), baseDate.getMonth() + 1, 0))
+  }
+
+  if (endDate && compareDate(endDate, date) < 0) {
+    endDate = date
   }
 
   let time = fallback.time
@@ -428,6 +435,7 @@ export async function parseTodoText(
 
   return {
     date,
+    endDate,
     time,
     owner: assignee.name,
     assigneeId: assignee.id,

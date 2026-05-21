@@ -50,12 +50,12 @@ const avatarUrl = computed(() => userStore.profile?.avatar ?? girlImage)
 
 <style scoped>
 .dashboard-topbar {
-  height: 72px;
-  min-height: 72px;
+  height: 60px;
+  min-height: 60px;
   box-sizing: border-box;
-  padding: 14px 22px;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.78);
-  background: rgba(255, 255, 255, 0.68);
+  padding: 9px 22px;
+  border: 0;
+  background: rgba(255, 255, 255, 0.42);
   backdrop-filter: blur(18px);
   display: flex;
   align-items: center;
@@ -71,9 +71,9 @@ const avatarUrl = computed(() => userStore.profile?.avatar ?? girlImage)
 }
 
 .logo-mark {
-  width: 42px;
-  height: 42px;
-  border-radius: 14px;
+  width: 38px;
+  height: 38px;
+  border-radius: 13px;
   background:
     radial-gradient(circle at 28% 20%, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0) 34%),
     linear-gradient(135deg, #0f172a 0%, #2563eb 52%, #059669 100%);
@@ -86,7 +86,7 @@ const avatarUrl = computed(() => userStore.profile?.avatar ?? girlImage)
 }
 
 .logo-mark span {
-  font-size: 21px;
+  font-size: 19px;
   line-height: 1;
   font-weight: 950;
   letter-spacing: 0;
@@ -101,7 +101,7 @@ const avatarUrl = computed(() => userStore.profile?.avatar ?? girlImage)
 
 .brand-copy strong {
   color: #0f172a;
-  font-size: 18px;
+  font-size: 17px;
   line-height: 1.1;
   font-weight: 900;
 }
@@ -115,16 +115,23 @@ const avatarUrl = computed(() => userStore.profile?.avatar ?? girlImage)
 
 .topbar-actions {
   min-width: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.36);
+  padding: 4px;
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 4px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.58),
+    0 12px 28px -28px rgba(15, 23, 42, 0.3);
 }
 
 .icon-button,
 .user-chip {
-  border: 1px solid rgba(226, 232, 240, 0.92);
-  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid transparent;
+  background: transparent;
   color: #334155;
   font: inherit;
   cursor: pointer;
@@ -137,8 +144,8 @@ const avatarUrl = computed(() => userStore.profile?.avatar ?? girlImage)
 
 .icon-button:hover,
 .user-chip:hover {
-  border-color: rgba(37, 99, 235, 0.42);
-  background: #ffffff;
+  border-color: transparent;
+  background: rgba(255, 255, 255, 0.64);
   color: #0f172a;
   transform: translateY(-1px);
 }
@@ -151,9 +158,9 @@ const avatarUrl = computed(() => userStore.profile?.avatar ?? girlImage)
 
 .icon-button {
   position: relative;
-  width: 38px;
-  height: 38px;
-  border-radius: 14px;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -199,19 +206,19 @@ const avatarUrl = computed(() => userStore.profile?.avatar ?? girlImage)
 
 .user-chip {
   max-width: 220px;
-  min-height: 42px;
-  border-radius: 16px;
-  padding: 4px 12px 4px 5px;
+  min-height: 34px;
+  border-radius: 999px;
+  padding: 2px 10px 2px 4px;
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   text-align: left;
 }
 
 .user-chip img {
-  width: 32px;
-  height: 32px;
-  border-radius: 12px;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
   object-fit: cover;
   background: #dbeafe;
   flex: 0 0 auto;
@@ -259,7 +266,7 @@ const avatarUrl = computed(() => userStore.profile?.avatar ?? girlImage)
   }
 
   .topbar-actions {
-    gap: 7px;
+    gap: 3px;
   }
 
   .user-chip {

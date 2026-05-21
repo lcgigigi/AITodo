@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useDialog } from 'naive-ui'
 import type { CalendarTodoForm, CalendarUser } from './types'
+import { formatFormDateTime } from './todoDisplay'
 import { parseTodoText as mockParseTodoText } from './todoMock'
 
 export type TodoDialogMode = 'create' | 'edit' | 'view'
@@ -33,13 +34,7 @@ const dialogTitle = computed(() => {
 })
 const canEditDialog = computed(() => props.mode !== 'view')
 const canSubmit = computed(() => canEditDialog.value && Boolean(todoForm.value.title.trim()))
-const isLeaderDispatching = computed(
-  () =>
-    canEditDialog.value &&
-    props.currentUser.role === 'leader' &&
-    todoForm.value.assigneeId !== props.currentUser.id,
-)
-const shouldShowCompletionIdeas = computed(() => !isLeaderDispatching.value)
+const formDateTimeLabel = computed(() => formatFormDateTime(todoForm.value))
 
 watch(
   () => props.show,
@@ -55,7 +50,9 @@ watch(
 
 function createFormCopy(form: CalendarTodoForm): CalendarTodoForm {
   return {
+    mode: form.mode,
     date: form.date,
+    endDate: form.endDate,
     time: form.time,
     title: form.title,
     owner: form.owner,
@@ -120,6 +117,8 @@ async function parseTodoText() {
   todoForm.value = {
     ...todoForm.value,
     ...parsed,
+    endDate: parsed.endDate ?? parsed.date ?? todoForm.value.endDate,
+    time: parsed.time ?? todoForm.value.time,
     completionIdeas: todoForm.value.completionIdeas,
   }
   isParsing.value = false
@@ -145,9 +144,6 @@ function submitTodo() {
   if (!todoForm.value.title.trim()) return
 
   const payload = createFormCopy(todoForm.value)
-  if (isLeaderDispatching.value) {
-    payload.completionIdeas = ''
-  }
 
   emit('save', payload)
   initialSnapshot.value = getSnapshot()
@@ -186,7 +182,7 @@ function submitTodo() {
         <section class="dialog-section">
           <div class="section-title">
             <h3>基础信息</h3>
-            <span>{{ todoForm.date }} {{ todoForm.time }}</span>
+            <span>{{ formDateTimeLabel }}</span>
           </div>
           <div class="form-grid">
             <label class="field">
@@ -208,7 +204,7 @@ function submitTodo() {
                 class="soft-picker"
                 value-format="HH:mm"
                 format="HH:mm"
-                :clearable="false"
+                :clearable="true"
                 :disabled="!canEditDialog"
               />
             </label>
@@ -246,18 +242,6 @@ function submitTodo() {
               <input v-else v-model="todoForm.source" type="text" placeholder="备注或来源" />
             </label>
           </div>
-        </section>
-
-        <section v-if="shouldShowCompletionIdeas" class="dialog-section ideas-section">
-          <label class="field field-full">
-            <span>完成思路</span>
-            <textarea
-              v-model="todoForm.completionIdeas"
-              rows="3"
-              :readonly="!canEditDialog"
-              placeholder="先记下拆解步骤、注意事项或后续要查的信息"
-            ></textarea>
-          </label>
         </section>
 
         <div class="modal-actions">
@@ -342,8 +326,7 @@ function submitTodo() {
   border-top: 1px solid #eef2f7;
 }
 
-.ai-section,
-.ideas-section {
+.ai-section {
   background: transparent;
 }
 
@@ -453,10 +436,6 @@ function submitTodo() {
   padding: 10px;
   resize: none;
   line-height: 1.45;
-}
-
-.ideas-section textarea {
-  min-height: 88px;
 }
 
 .field input:focus,

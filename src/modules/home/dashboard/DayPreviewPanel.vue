@@ -1,16 +1,16 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import TodoDialog from './TodoDialog.vue'
+import { computed, ref, watch } from 'vue'
 import type {
   CalendarEvent,
   CalendarEventStatus,
-  CalendarEventType,
   CalendarSpecialDay,
   CalendarTodoDraft,
   CalendarTodoForm,
   CalendarTodoUpdate,
   CalendarUser,
 } from './types'
+import { addDays, formatEventTime, formatFormDateTime, isRangeEvent, parseDate, ymd } from './todoDisplay'
+import { parseTodoText as mockParseTodoText } from './todoMock'
 
 const props = defineProps<{
   date: string
@@ -20,6 +20,8 @@ const props = defineProps<{
   currentUser: CalendarUser
   assignableUsers: CalendarUser[]
   showClose?: boolean
+  quickCreatePrompt?: string
+  quickCreateKey?: number
 }>()
 
 const emit = defineEmits<{
@@ -29,28 +31,13 @@ const emit = defineEmits<{
   close: []
 }>()
 
-type TodoDialogMode = 'create' | 'edit' | 'view'
+type PanelMode = 'list' | 'create' | 'edit'
 
-const isDialogOpen = ref(false)
-const dialogMode = ref<TodoDialogMode>('create')
+const panelMode = ref<PanelMode>('list')
 const editingId = ref('')
-const todoForm = ref<CalendarTodoForm>({
-  date: props.date,
-  time: '09:00',
-  title: '',
-  owner: '',
-  assigneeId: '',
-  assigneeName: '',
-  source: '',
-  completionIdeas: '',
-})
-
-const typeText: Record<CalendarEventType, string> = {
-  meeting: '会面',
-  task: '待办',
-  approval: '审批',
-  ai: '智能',
-}
+const aiPrompt = ref('')
+const isParsing = ref(false)
+const todoForm = ref<CalendarTodoForm>(createEmptyForm(props.date))
 
 const specialText: Record<CalendarSpecialDay['type'], string> = {
   holiday: '节假日',
@@ -58,10 +45,46 @@ const specialText: Record<CalendarSpecialDay['type'], string> = {
   'solar-term': '节气',
 }
 
-function resetTodoForm(date = props.date) {
-  todoForm.value = {
+const pendingCount = computed(() => props.events.filter((event) => event.status !== 'done').length)
+const doneCount = computed(() => props.events.length - pendingCount.value)
+const isFormMode = computed(() => panelMode.value !== 'list')
+const formTitle = computed(() => (panelMode.value === 'edit' ? '编辑待办' : '新增待办'))
+const canSubmit = computed(() => Boolean(todoForm.value.title.trim()))
+const formDateTimeLabel = computed(() => formatFormDateTime(todoForm.value))
+const isDeadlineMode = computed(() => todoForm.value.mode === 'deadline')
+const canChooseAssignee = computed(
+  () => props.currentUser.role === 'leader' && props.assignableUsers.length > 1,
+)
+
+watch(
+  () => props.date,
+  () => {
+    panelMode.value = 'list'
+    editingId.value = ''
+    aiPrompt.value = ''
+    isParsing.value = false
+    todoForm.value = createEmptyForm(props.date)
+  },
+)
+
+watch(
+  () => props.quickCreateKey,
+  async () => {
+    if (!props.quickCreatePrompt?.trim()) return
+
+    openCreateForm()
+    aiPrompt.value = props.quickCreatePrompt
+    await parseTodoText()
+  },
+  { immediate: true },
+)
+
+function createEmptyForm(date = props.date): CalendarTodoForm {
+  return {
+    mode: 'scheduled',
     date,
-    time: '09:00',
+    endDate: date,
+    time: '',
     title: '',
     owner: props.currentUser.name,
     assigneeId: props.currentUser.id,
@@ -71,19 +94,12 @@ function resetTodoForm(date = props.date) {
   }
 }
 
-function openCreateDialog() {
-  dialogMode.value = 'create'
-  editingId.value = ''
-  resetTodoForm(props.date)
-  isDialogOpen.value = true
-}
-
-function openEditDialog(event: CalendarEvent) {
-  dialogMode.value = 'edit'
-  editingId.value = event.id
-  todoForm.value = {
+function createFormFromEvent(event: CalendarEvent): CalendarTodoForm {
+  return {
+    mode: isRangeEvent(event) ? 'deadline' : 'scheduled',
     date: event.date,
-    time: event.time,
+    endDate: event.endDate ?? event.date,
+    time: event.time ?? '',
     title: event.title,
     owner: event.owner,
     assigneeId: event.assigneeId ?? props.currentUser.id,
@@ -91,48 +107,135 @@ function openEditDialog(event: CalendarEvent) {
     source: event.source ?? '',
     completionIdeas: event.completionIdeas ?? '',
   }
-  isDialogOpen.value = true
 }
 
-function openDetailDialog(event: CalendarEvent) {
-  if (event.editable) {
-    openEditDialog(event)
-    return
+function createFormCopy(form: CalendarTodoForm): CalendarTodoForm {
+  return {
+    mode: form.mode,
+    date: form.date,
+    endDate: form.endDate,
+    time: form.time,
+    title: form.title,
+    owner: form.owner,
+    assigneeId: form.assigneeId,
+    assigneeName: form.assigneeName,
+    source: form.source,
+    completionIdeas: form.completionIdeas,
   }
-
-  dialogMode.value = 'view'
-  editingId.value = event.id
-  todoForm.value = {
-    date: event.date,
-    time: event.time,
-    title: event.title,
-    owner: event.owner,
-    assigneeId: event.assigneeId ?? props.currentUser.id,
-    assigneeName: event.assigneeName ?? event.owner,
-    source: event.source ?? '',
-    completionIdeas: event.completionIdeas ?? '',
-  }
-  isDialogOpen.value = true
 }
 
-function closeDialog() {
-  isDialogOpen.value = false
+function openCreateForm() {
+  panelMode.value = 'create'
   editingId.value = ''
+  aiPrompt.value = ''
+  todoForm.value = createEmptyForm(props.date)
 }
 
-function submitTodo(payload: CalendarTodoForm) {
-  if (dialogMode.value === 'view') {
-    closeDialog()
+function openEditForm(event: CalendarEvent) {
+  if (!event.editable) return
+  panelMode.value = 'edit'
+  editingId.value = event.id
+  aiPrompt.value = ''
+  todoForm.value = createFormFromEvent(event)
+}
+
+function cancelForm() {
+  panelMode.value = 'list'
+  editingId.value = ''
+  aiPrompt.value = ''
+  isParsing.value = false
+  todoForm.value = createEmptyForm(props.date)
+}
+
+async function parseTodoText() {
+  if (!aiPrompt.value.trim()) return
+
+  isParsing.value = true
+  const parsed = await mockParseTodoText(
+    aiPrompt.value,
+    props.currentUser,
+    props.assignableUsers,
+    todoForm.value,
+  )
+  todoForm.value = {
+    ...todoForm.value,
+    ...parsed,
+    mode: parsed.endDate && parsed.endDate !== parsed.date ? 'deadline' : todoForm.value.mode,
+    endDate: parsed.endDate ?? parsed.date ?? todoForm.value.endDate,
+    time: parsed.time ?? todoForm.value.time,
+    completionIdeas: todoForm.value.completionIdeas,
+  }
+  isParsing.value = false
+}
+
+function setMode(mode: CalendarTodoForm['mode']) {
+  todoForm.value.mode = mode
+  if (mode === 'scheduled') {
+    todoForm.value.endDate = todoForm.value.date
     return
   }
 
-  if (!payload.title.trim()) return
+  if (!todoForm.value.endDate || todoForm.value.endDate < todoForm.value.date) {
+    todoForm.value.endDate = todoForm.value.date
+  }
+  todoForm.value.time = ''
+}
 
-  if (dialogMode.value === 'edit' && editingId.value) {
+function applyQuickRange(type: 'today' | 'week' | 'nextWeek' | 'month') {
+  const start = parseDate(props.date)
+  todoForm.value.date = ymd(start)
+  todoForm.value.mode = 'deadline'
+  todoForm.value.time = ''
+
+  if (type === 'today') {
+    todoForm.value.endDate = todoForm.value.date
+    return
+  }
+
+  if (type === 'week') {
+    const day = start.getDay() || 7
+    todoForm.value.endDate = ymd(addDays(start, 7 - day))
+  } else if (type === 'nextWeek') {
+    const day = start.getDay() || 7
+    todoForm.value.endDate = ymd(addDays(start, 8 - day))
+  } else {
+    todoForm.value.endDate = ymd(new Date(start.getFullYear(), start.getMonth() + 1, 0))
+  }
+}
+
+function syncDateRange() {
+  if (todoForm.value.mode === 'scheduled') {
+    todoForm.value.endDate = todoForm.value.date
+    return
+  }
+
+  if (todoForm.value.endDate < todoForm.value.date) {
+    todoForm.value.endDate = todoForm.value.date
+  }
+}
+
+function selectAssignee(id: string) {
+  const assignee = props.assignableUsers.find((user) => user.id === id) ?? props.currentUser
+  todoForm.value.assigneeId = assignee.id
+  todoForm.value.assigneeName = assignee.name
+  todoForm.value.owner = assignee.name
+}
+
+function onAssigneeChange(event: Event) {
+  selectAssignee((event.target as HTMLSelectElement).value)
+}
+
+function submitTodo() {
+  if (!todoForm.value.title.trim()) return
+
+  const payload = createFormCopy(todoForm.value)
+
+  if (panelMode.value === 'edit' && editingId.value) {
     emit('updateTodo', {
       id: editingId.value,
       date: payload.date,
-      time: payload.time,
+      endDate: payload.mode === 'deadline' ? payload.endDate : undefined,
+      time: payload.mode === 'scheduled' ? payload.time || undefined : undefined,
       title: payload.title,
       owner: payload.owner || '未指定',
       source: payload.source,
@@ -143,7 +246,8 @@ function submitTodo(payload: CalendarTodoForm) {
   } else {
     emit('createTodo', {
       date: payload.date,
-      time: payload.time,
+      endDate: payload.mode === 'deadline' ? payload.endDate : undefined,
+      time: payload.mode === 'scheduled' ? payload.time || undefined : undefined,
       title: payload.title,
       owner: payload.owner,
       source: payload.source,
@@ -153,7 +257,7 @@ function submitTodo(payload: CalendarTodoForm) {
     })
   }
 
-  closeDialog()
+  cancelForm()
 }
 
 function toggleStatus(event: CalendarEvent) {
@@ -164,105 +268,216 @@ function toggleStatus(event: CalendarEvent) {
 function shouldShowEventMeta(event: CalendarEvent) {
   return Boolean((event.scope === 'assigned_to_me' && event.creatorName) || event.source)
 }
+
+function statusText(event: CalendarEvent) {
+  if (event.status === 'done') return '已完成'
+  return '待处理'
+}
 </script>
 
 <template>
-  <section class="preview-panel">
+  <section class="preview-panel" :class="{ 'is-form-mode': isFormMode }">
     <header class="preview-head">
       <div>
-        <p>这一天</p>
-        <h2>{{ props.dateLabel }}</h2>
+        <p>{{ isFormMode ? '整理待办' : '待办详情' }}</p>
+        <h2>{{ isFormMode ? formTitle : props.dateLabel }}</h2>
+        <span v-if="isFormMode" class="form-date">{{ props.dateLabel }}</span>
       </div>
-      <div class="preview-actions">
-        <span class="event-count">{{ events.length ? `${events.length} 个安排` : '空闲' }}</span>
-        <button class="add-btn" type="button" @click="openCreateDialog">新增</button>
-        <button v-if="showClose" class="close-btn" type="button" aria-label="关闭当天待办" @click="emit('close')">
-          ×
-        </button>
-      </div>
+      <button
+        v-if="showClose"
+        class="close-btn"
+        type="button"
+        aria-label="关闭当天待办"
+        @click="emit('close')"
+      >
+        ×
+      </button>
     </header>
 
-    <div v-if="specialDays.length" class="special-row">
-      <span
-        v-for="item in specialDays"
-        :key="`${item.type}-${item.name}`"
-        class="special-chip"
-        :class="`special-${item.type}`"
-      >
-        {{ specialText[item.type] }} · {{ item.name }}
-      </span>
-    </div>
+    <template v-if="!isFormMode">
+      <div class="preview-toolbar">
+        <span class="event-count">{{ events.length ? `${events.length} 个待办` : '当天空闲' }}</span>
+        <button class="add-btn" type="button" @click="openCreateForm">+ 新增</button>
+      </div>
 
-    <div v-if="events.length" class="timeline">
-      <article
-        v-for="event in events"
-        :key="event.id"
-        class="timeline-item"
-        :class="[
-          `type-${event.type}`,
-          `status-${event.status}`,
-          event.scope ? `scope-${event.scope}` : '',
-        ]"
-        tabindex="0"
-        @click="openDetailDialog(event)"
-        @keydown.enter.prevent="openDetailDialog(event)"
-      >
-        <time>{{ event.time }}</time>
-        <div class="event-body">
-          <div class="event-topline">
-            <span class="event-type">{{ typeText[event.type] }}</span>
-            <span v-if="event.scope === 'assigned_by_me'" class="dispatch-target">
-              派发：{{ event.assigneeName ?? event.owner }}
-            </span>
-            <span
-              v-if="event.priority === 'urgent' && event.status !== 'done'"
-              class="event-priority"
-              >优先</span
-            >
-            <span v-if="event.completionIdeas" class="event-ideas-chip">已有完成思路</span>
-          </div>
-          <div class="event-title-row">
-            <h3>{{ event.title }}</h3>
-            <div class="item-actions">
-              <button
-                v-if="event.completable"
-                class="status-toggle"
-                type="button"
-                :class="{ 'is-done': event.status === 'done' }"
-                @click.stop="toggleStatus(event)"
-              >
-                <span aria-hidden="true">{{ event.status === 'done' ? '✓' : '' }}</span>
-                {{ event.status === 'done' ? '已完成' : '完成' }}
-              </button>
-              <button v-if="event.editable" type="button" @click.stop="openEditDialog(event)">
-                编辑
-              </button>
+      <div class="summary-grid" aria-label="当天待办概览">
+        <span>
+          <strong>{{ events.length }}</strong>
+          待办总数
+        </span>
+        <span>
+          <strong>{{ pendingCount }}</strong>
+          待处理
+        </span>
+        <span>
+          <strong>{{ doneCount }}</strong>
+          已完成
+        </span>
+      </div>
+
+      <div v-if="specialDays.length" class="special-row">
+        <span
+          v-for="item in specialDays"
+          :key="`${item.type}-${item.name}`"
+          class="special-chip"
+          :class="`special-${item.type}`"
+        >
+          {{ specialText[item.type] }} · {{ item.name }}
+        </span>
+      </div>
+
+      <div v-if="events.length" class="timeline">
+        <article
+          v-for="event in events"
+          :key="event.id"
+          class="timeline-item"
+          :class="[
+            `type-${event.type}`,
+            `status-${event.status}`,
+            event.scope ? `scope-${event.scope}` : '',
+          ]"
+          tabindex="0"
+          @click="openEditForm(event)"
+          @keydown.enter.prevent="openEditForm(event)"
+        >
+          <time>{{ formatEventTime(event) }}</time>
+          <div class="event-body">
+            <div class="event-topline">
+              <span v-if="event.scope === 'assigned_by_me'" class="dispatch-target">
+                派发：{{ event.assigneeName ?? event.owner }}
+              </span>
+              <span v-if="event.completionIdeas" class="event-ideas-chip">已有完成思路</span>
+            </div>
+            <div class="event-title-row">
+              <div class="event-title-block">
+                <h3>{{ event.title }}</h3>
+                <span
+                  class="event-status"
+                  :class="{
+                    'is-done': event.status === 'done',
+                  }"
+                >
+                  {{ statusText(event) }}
+                </span>
+              </div>
+              <div class="item-actions">
+                <button
+                  v-if="event.completable"
+                  class="status-toggle"
+                  type="button"
+                  :class="{ 'is-done': event.status === 'done' }"
+                  @click.stop="toggleStatus(event)"
+                >
+                  <span aria-hidden="true">{{ event.status === 'done' ? '✓' : '' }}</span>
+                  {{ event.status === 'done' ? '撤回' : '完成' }}
+                </button>
+                <button
+                  v-if="event.editable"
+                  class="edit-action"
+                  type="button"
+                  @click.stop="openEditForm(event)"
+                >
+                  编辑
+                </button>
+              </div>
+            </div>
+            <div v-if="shouldShowEventMeta(event)" class="event-note">
+              <p v-if="event.scope === 'assigned_to_me' && event.creatorName">
+                派发人：{{ event.creatorName }}
+              </p>
+              <p v-if="event.source">备注：{{ event.source }}</p>
             </div>
           </div>
-          <div v-if="shouldShowEventMeta(event)" class="event-note">
-            <p v-if="event.scope === 'assigned_to_me' && event.creatorName">
-              派发人：{{ event.creatorName }}.
-            </p>
-            <p v-if="event.source">备注：{{ event.source }}</p>
+        </article>
+      </div>
+
+      <div v-else class="empty">
+        <h3>当天暂无待办</h3>
+        <p>可以安排一个待办，或者先浏览本月日程。</p>
+      </div>
+    </template>
+
+    <form v-else class="inline-todo-form" @submit.prevent="submitTodo">
+      <section class="inline-section ai-inline-section">
+        <label class="field field-full">
+          <span>一句话创建待办</span>
+          <div class="ai-inline-row">
+            <input
+              v-model="aiPrompt"
+              type="text"
+              placeholder="例如：明天下午给刘畅布置一项开发公司官方网站的任务"
+            />
+            <button type="button" :disabled="isParsing || !aiPrompt.trim()" @click="parseTodoText">
+              {{ isParsing ? '解析中' : 'AI 解析' }}
+            </button>
           </div>
+        </label>
+      </section>
+
+      <section class="inline-section">
+        <div class="section-title">
+          <h3>基础信息</h3>
+          <span>{{ formDateTimeLabel }}</span>
         </div>
-      </article>
-    </div>
+        <div class="mode-switch" aria-label="待办时间模式">
+          <button
+            type="button"
+            :class="{ active: todoForm.mode === 'scheduled' }"
+            @click="setMode('scheduled')"
+          >
+            指定时间
+          </button>
+          <button
+            type="button"
+            :class="{ active: todoForm.mode === 'deadline' }"
+            @click="setMode('deadline')"
+          >
+            截止日期
+          </button>
+        </div>
+        <div class="form-grid">
+          <label class="field" :class="{ 'field-date-range': isDeadlineMode }">
+            <span>日期</span>
+            <input v-model="todoForm.date" type="date" required @change="syncDateRange" />
+          </label>
+          <label v-if="!isDeadlineMode" class="field">
+            <span>时间</span>
+            <input v-model="todoForm.time" type="time" />
+          </label>
+          <label v-else class="field">
+            <span>截止</span>
+            <input v-model="todoForm.endDate" type="date" required @change="syncDateRange" />
+          </label>
+          <div v-if="isDeadlineMode" class="quick-range-row field-full" aria-label="快捷时间">
+            <button type="button" @click="applyQuickRange('today')">今天</button>
+            <button type="button" @click="applyQuickRange('week')">本周内</button>
+            <button type="button" @click="applyQuickRange('nextWeek')">下周前</button>
+            <button type="button" @click="applyQuickRange('month')">本月内</button>
+          </div>
+          <label class="field field-full">
+            <span>待办内容</span>
+            <input v-model="todoForm.title" type="text" required placeholder="输入待办内容" />
+          </label>
+          <label v-if="canChooseAssignee" class="field">
+            <span>负责人</span>
+            <select v-model="todoForm.assigneeId" @change="onAssigneeChange">
+              <option v-for="user in assignableUsers" :key="user.id" :value="user.id">
+                {{ user.name }}
+              </option>
+            </select>
+          </label>
+          <label class="field" :class="{ 'field-full': !canChooseAssignee }">
+            <span>备注</span>
+            <input v-model="todoForm.source" type="text" placeholder="备注或来源" />
+          </label>
+        </div>
+      </section>
 
-    <div v-else class="empty">
-      <h3>这一天暂时很清爽</h3>
-      <p>可以安排一个待办，或者先浏览本月日程。</p>
-    </div>
-
-    <TodoDialog
-      v-model:show="isDialogOpen"
-      :mode="dialogMode"
-      :form="todoForm"
-      :current-user="currentUser"
-      :assignable-users="assignableUsers"
-      @save="submitTodo"
-      @closed="closeDialog"
-    />
+      <div class="form-actions">
+        <button type="button" @click="cancelForm">取消</button>
+        <button type="submit" :disabled="!canSubmit">保存</button>
+      </div>
+    </form>
   </section>
 </template>
 
@@ -271,43 +486,51 @@ function shouldShowEventMeta(event: CalendarEvent) {
   padding: 2px 2px 0;
   display: flex;
   flex-direction: column;
-  gap: 18px;
-}
-
-.preview-head {
-  padding: 2px 0 16px;
-  border-bottom: 1px dashed rgba(148, 163, 184, 0.46);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   gap: 14px;
 }
 
-.preview-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  flex: 0 0 auto;
+.preview-head {
+  padding: 0 0 12px;
+  border-bottom: 1px dashed rgba(148, 163, 184, 0.34);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
 }
 
 .preview-head p {
   margin: 0 0 7px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 760;
   color: #8a6a35;
 }
 
 .preview-head h2 {
   margin: 0;
   color: #1f2937;
-  font-size: 24px;
+  font-size: 25px;
   font-weight: 850;
-  line-height: 1.05;
+  line-height: 1.08;
+}
+
+.form-date {
+  margin-top: 7px;
+  display: inline-flex;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.preview-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .event-count {
-  min-height: 30px;
-  padding: 0 12px;
+  min-height: 28px;
+  padding: 0 11px;
   border-radius: 999px;
   background: #fff7ed;
   color: #9a3412;
@@ -315,13 +538,44 @@ function shouldShowEventMeta(event: CalendarEvent) {
   align-items: center;
   justify-content: center;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 820;
   white-space: nowrap;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.summary-grid span {
+  min-height: 56px;
+  box-sizing: border-box;
+  border: 1px solid rgba(226, 232, 240, 0.72);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #64748b;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 820;
+}
+
+.summary-grid strong {
+  color: #0f172a;
+  font-size: 22px;
+  line-height: 1;
+  font-weight: 930;
 }
 
 .add-btn,
 .close-btn,
-.item-actions button {
+.item-actions button,
+.form-actions button,
+.ai-inline-row button {
   min-height: 30px;
   border: 1px solid #e5edf6;
   border-radius: 999px;
@@ -335,10 +589,13 @@ function shouldShowEventMeta(event: CalendarEvent) {
   transition:
     border-color 0.18s ease,
     background 0.18s ease,
-    color 0.18s ease;
+    color 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
-.add-btn {
+.add-btn,
+.form-actions button[type='submit'],
+.ai-inline-row button {
   border-color: #111827;
   background: #111827;
   color: #ffffff;
@@ -351,14 +608,26 @@ function shouldShowEventMeta(event: CalendarEvent) {
   color: #64748b;
   font-size: 20px;
   line-height: 1;
+  flex: 0 0 auto;
 }
 
 .add-btn:hover,
 .close-btn:hover,
-.item-actions button:hover {
+.item-actions button:hover,
+.form-actions button:hover,
+.ai-inline-row button:hover {
   border-color: #cbd5e1;
   background: #f8fafc;
   color: #111827;
+}
+
+.form-actions button:disabled,
+.ai-inline-row button:disabled {
+  border-color: #e5edf6;
+  background: #f1f5f9;
+  color: #94a3b8;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 .special-row {
@@ -368,31 +637,31 @@ function shouldShowEventMeta(event: CalendarEvent) {
 }
 
 .special-chip {
-  min-height: 24px;
+  min-height: 23px;
   padding: 0 10px;
   border-radius: 999px;
   border: 1px solid transparent;
   display: inline-flex;
   align-items: center;
   font-size: 11px;
-  font-weight: 900;
+  font-weight: 860;
 }
 
 .special-holiday {
-  background: rgba(254, 226, 226, 0.62);
-  border-color: rgba(185, 28, 28, 0.12);
+  background: rgba(254, 226, 226, 0.58);
+  border-color: rgba(185, 28, 28, 0.1);
   color: #b91c1c;
 }
 
 .special-workday {
-  background: rgba(226, 232, 240, 0.72);
-  border-color: rgba(75, 85, 99, 0.1);
+  background: rgba(226, 232, 240, 0.66);
+  border-color: rgba(75, 85, 99, 0.08);
   color: #4b5563;
 }
 
 .special-solar-term {
-  background: rgba(204, 251, 241, 0.64);
-  border-color: rgba(15, 118, 110, 0.12);
+  background: rgba(204, 251, 241, 0.58);
+  border-color: rgba(15, 118, 110, 0.1);
   color: #0f766e;
 }
 
@@ -405,19 +674,31 @@ function shouldShowEventMeta(event: CalendarEvent) {
 
 .timeline-item {
   position: relative;
-  padding: 12px 0;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  padding: 11px 8px;
   display: grid;
-  grid-template-columns: 50px minmax(0, 1fr);
-  gap: 14px;
-  cursor: pointer;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 12px;
+  cursor: default;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
 .timeline-item + .timeline-item {
-  border-top: 1px dashed rgba(203, 213, 225, 0.78);
+  border-top-color: rgba(226, 232, 240, 0.66);
+}
+
+.timeline-item:hover {
+  border-color: rgba(191, 219, 254, 0.68);
+  background: rgba(248, 250, 252, 0.52);
+  box-shadow: 0 14px 26px -28px rgba(15, 23, 42, 0.34);
 }
 
 .timeline-item:focus-visible {
-  outline: 2px solid rgba(79, 124, 255, 0.36);
+  outline: 2px solid rgba(79, 124, 255, 0.3);
   outline-offset: 4px;
 }
 
@@ -432,7 +713,7 @@ time {
 .event-body {
   position: relative;
   min-width: 0;
-  padding: 0 0 0 16px;
+  padding: 0 0 0 14px;
 }
 
 .event-body::before {
@@ -444,7 +725,7 @@ time {
   height: 34px;
   border-radius: 999px;
   background: #f59e0b;
-  opacity: 0.72;
+  opacity: 0.66;
 }
 
 .event-topline {
@@ -455,9 +736,7 @@ time {
   flex-wrap: wrap;
 }
 
-.event-type,
 .dispatch-target,
-.event-priority,
 .event-ideas-chip {
   min-height: 19px;
   padding: 0 7px;
@@ -468,19 +747,9 @@ time {
   align-items: center;
 }
 
-.event-type {
-  background: rgba(255, 251, 235, 0.78);
-  border: 1px solid rgba(251, 191, 36, 0.22);
-}
-
 .dispatch-target {
   background: #ecfeff;
   color: #0e7490;
-}
-
-.event-priority {
-  background: #fee2e2;
-  color: #b91c1c;
 }
 
 .event-ideas-chip {
@@ -491,7 +760,7 @@ time {
 .timeline-item.scope-assigned_by_me {
   margin: 2px 0;
   border-radius: 14px;
-  background: linear-gradient(90deg, rgba(236, 254, 255, 0.82), rgba(255, 255, 255, 0));
+  background: linear-gradient(90deg, rgba(236, 254, 255, 0.72), rgba(255, 255, 255, 0));
 }
 
 .timeline-item.scope-assigned_by_me + .timeline-item {
@@ -520,13 +789,12 @@ h3 {
   color: #1f2937;
   font-size: 14px;
   font-weight: 780;
-  line-height: 1.3;
+  line-height: 1.32;
   min-width: 0;
-  flex: 1;
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
 }
 
 p {
@@ -552,18 +820,43 @@ p {
 
 .event-title-row {
   min-width: 0;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+}
+
+.event-title-block {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+}
+
+.event-status {
+  width: fit-content;
+  min-height: 22px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.event-status.is-done {
+  background: #dcfce7;
+  color: #166534;
 }
 
 .item-actions {
   display: flex;
   gap: 8px;
-  margin-top: 0;
   flex: 0 0 auto;
   flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .status-toggle {
@@ -590,35 +883,28 @@ p {
   background: #16a34a;
 }
 
-.type-meeting .event-type {
-  color: #2563eb;
+.edit-action {
+  background: rgba(255, 255, 255, 0.62) !important;
+  color: #64748b !important;
 }
+
 .type-meeting .event-body::before {
   background: #93c5fd;
-}
-.type-task .event-type {
-  color: #047857;
 }
 .type-task .event-body::before {
   background: #86efac;
 }
-.type-approval .event-type {
-  color: #b45309;
-}
 .type-approval .event-body::before {
   background: #fcd34d;
-}
-.type-ai .event-type {
-  color: #7c3aed;
 }
 .type-ai .event-body::before {
   background: #c4b5fd;
 }
 
 .empty {
-  min-height: 150px;
-  border-left: 2px solid rgba(148, 163, 184, 0.55);
-  background: linear-gradient(90deg, rgba(248, 250, 252, 0.84), rgba(248, 250, 252, 0));
+  min-height: 140px;
+  border-left: 2px solid rgba(148, 163, 184, 0.42);
+  background: linear-gradient(90deg, rgba(248, 250, 252, 0.72), rgba(248, 250, 252, 0));
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -629,15 +915,191 @@ p {
   font-size: 15px;
 }
 
+.inline-todo-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.inline-section {
+  display: grid;
+  gap: 10px;
+}
+
+.inline-section + .inline-section {
+  padding-top: 12px;
+  border-top: 1px solid rgba(226, 232, 240, 0.72);
+}
+
+.ai-inline-section {
+  padding: 10px;
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.72);
+}
+
+.ai-inline-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.mode-switch,
+.quick-range-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.mode-switch {
+  width: fit-content;
+  padding: 3px;
+  border: 1px solid #e5edf6;
+  border-radius: 999px;
+  background: #f8fafc;
+}
+
+.mode-switch button,
+.quick-range-row button {
+  min-height: 28px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #64748b;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.mode-switch button.active {
+  background: #111827;
+  color: #ffffff;
+}
+
+.quick-range-row button {
+  border: 1px solid #e5edf6;
+  background: #ffffff;
+}
+
+.quick-range-row button:hover {
+  border-color: #cbd5e1;
+  color: #111827;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.section-title h3 {
+  color: #1f2937;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.3;
+}
+
+.section-title span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.field-full {
+  grid-column: 1 / -1;
+}
+
+.field span {
+  color: #475569;
+  font-size: 12px;
+  font-weight: 820;
+}
+
+.field input,
+.field select,
+.field textarea {
+  min-width: 0;
+  box-sizing: border-box;
+  border: 1px solid #dfe8f3;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111827;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease;
+}
+
+.field input,
+.field select {
+  height: 36px;
+}
+
+.field textarea {
+  min-height: 76px;
+  padding: 10px;
+  resize: none;
+  line-height: 1.45;
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  border-color: #111827;
+  box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.07);
+}
+
+.form-actions {
+  padding-top: 2px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 @media (max-width: 760px) {
   .preview-head {
-    align-items: flex-start;
-    flex-direction: column;
+    gap: 10px;
+  }
+
+  .preview-head h2 {
+    font-size: 22px;
   }
 
   .event-title-row {
+    grid-template-columns: 1fr;
     align-items: flex-start;
-    flex-wrap: wrap;
+  }
+
+  .item-actions {
+    justify-content: flex-start;
+  }
+
+  .summary-grid,
+  .form-grid,
+  .ai-inline-row {
+    grid-template-columns: 1fr;
   }
 }
 </style>
