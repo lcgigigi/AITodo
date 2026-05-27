@@ -55,6 +55,27 @@ const isDeadlineMode = computed(() => todoForm.value.mode === 'deadline')
 const canChooseAssignee = computed(
   () => props.currentUser.role === 'leader' && props.assignableUsers.length > 1,
 )
+const timePickerValue = computed<number | null>({
+  get() {
+    if (!todoForm.value.time) return null
+
+    const [hour, minute] = todoForm.value.time.split(':').map(Number)
+    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null
+
+    const value = new Date()
+    value.setHours(hour, minute, 0, 0)
+    return value.getTime()
+  },
+  set(value) {
+    if (value === null) {
+      todoForm.value.time = ''
+      return
+    }
+
+    const date = new Date(value)
+    todoForm.value.time = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+  },
+})
 
 watch(
   () => props.date,
@@ -438,15 +459,36 @@ function statusText(event: CalendarEvent) {
         <div class="form-grid">
           <label class="field" :class="{ 'field-date-range': isDeadlineMode }">
             <span>日期</span>
-            <input v-model="todoForm.date" type="date" required @change="syncDateRange" />
+            <n-date-picker
+              v-model:formatted-value="todoForm.date"
+              class="soft-picker"
+              type="date"
+              value-format="yyyy-MM-dd"
+              format="yyyy/MM/dd"
+              :clearable="false"
+              @update:formatted-value="syncDateRange"
+            />
           </label>
           <label v-if="!isDeadlineMode" class="field">
             <span>时间</span>
-            <input v-model="todoForm.time" type="time" />
+            <n-time-picker
+              v-model:value="timePickerValue"
+              class="soft-picker"
+              format="HH:mm"
+              :clearable="true"
+            />
           </label>
           <label v-else class="field">
             <span>截止</span>
-            <input v-model="todoForm.endDate" type="date" required @change="syncDateRange" />
+            <n-date-picker
+              v-model:formatted-value="todoForm.endDate"
+              class="soft-picker"
+              type="date"
+              value-format="yyyy-MM-dd"
+              format="yyyy/MM/dd"
+              :clearable="false"
+              @update:formatted-value="syncDateRange"
+            />
           </label>
           <div v-if="isDeadlineMode" class="quick-range-row field-full" aria-label="快捷时间">
             <button type="button" @click="applyQuickRange('today')">今天</button>
@@ -1055,6 +1097,36 @@ p {
 .field input,
 .field select {
   height: 36px;
+}
+
+.soft-picker {
+  width: 100%;
+}
+
+.soft-picker :deep(.n-input) {
+  height: 36px;
+  border-radius: 10px;
+  background: #ffffff;
+  --n-border: 1px solid #dfe8f3 !important;
+  --n-border-hover: 1px solid #c9d6e6 !important;
+  --n-border-focus: 1px solid #111827 !important;
+  --n-box-shadow-focus: 0 0 0 3px rgba(17, 24, 39, 0.07) !important;
+  --n-caret-color: #111827 !important;
+}
+
+.soft-picker :deep(.n-input__input-el) {
+  color: #111827;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.soft-picker :deep(.n-input__suffix) {
+  color: #475569;
+}
+
+.soft-picker :deep(.n-input__border),
+.soft-picker :deep(.n-input__state-border) {
+  border-radius: 10px;
 }
 
 .field textarea {

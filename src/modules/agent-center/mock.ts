@@ -1,233 +1,199 @@
-import { PERMISSIONS } from '@/shared/constants/permission'
-import type { AgentEntry, AgentLevel, PermissionState, SkillEntry } from './types'
+export type ThemeName = 'blue' | 'green' | 'purple' | 'orange' | 'indigo' | 'pink' | 'yellow'
 
-export const levelDescriptions: Record<AgentLevel, string> = {
-  L1: '问答/单点工具型，用户明确指令后执行。',
-  L2: '流程辅助型，可串联固定步骤。',
-  L3: '半自主任务型，可基于目标规划并执行多步任务。',
-  L4: '高自治协同型，可持续跟踪、调用多能力并反馈结果。',
+export interface CategoryItem {
+  key: string
+  label: string
+  count: number
+  icon: string
 }
 
-export const permissionLabels: Record<PermissionState, string> = {
-  available: '可用',
-  locked: '需申请',
-  'admin-only': '管理者',
+export interface AgentItem {
+  id: number
+  name: string
+  desc: string
+  categoryKey: string
+  categoryName: string
+  icon: string
+  theme: ThemeName
+  monthlyToken: number
+  calls: number
+  points: number
+  progress: number
+  sparkline: number[]
+  status: string
 }
 
-export const mockViewerProfiles = {
-  user: {
-    label: '员工视角',
-    role: 'user',
-    permissions: [PERMISSIONS.AGENT_LIST_VIEW, PERMISSIONS.AGENT_USE, PERMISSIONS.SKILL_USE],
-  },
-  admin: {
-    label: '管理者视角',
-    role: 'admin',
-    permissions: [
-      PERMISSIONS.AGENT_LIST_VIEW,
-      PERMISSIONS.AGENT_ADMIN_VIEW,
-      PERMISSIONS.AGENT_USE,
-      PERMISSIONS.SKILL_USE,
-    ],
-  },
-} as const
+export interface RankItem {
+  name: string
+  value: number
+}
 
-export const mockSkills: SkillEntry[] = [
-  {
-    id: 'skill-knowledge-search',
-    name: '知识库检索',
-    description: '跨制度、流程、FAQ 进行语义检索，并返回引用来源。',
-    capabilityType: '知识检索',
-    callableByAgentIds: ['agent-policy', 'agent-ops-copilot'],
-    callType: '检索增强',
-    status: 'ready',
-    owner: '知识库团队',
-    updatedAt: '2026-05-10',
-    permissionState: 'available',
-    boundary: '只检索已入库内容，不生成未验证政策结论。',
-    recommended: true,
-  },
-  {
-    id: 'skill-meeting-summary',
-    name: '会议纪要抽取',
-    description: '从会议文本中提取结论、风险、负责人和待办时间。',
-    capabilityType: '文本结构化',
-    callableByAgentIds: ['agent-meeting', 'agent-project-pulse'],
-    callType: '异步任务',
-    status: 'ready',
-    owner: '效率工具组',
-    updatedAt: '2026-05-08',
-    permissionState: 'available',
-    boundary: '输入需为会议文本或转写结果，不负责音频转写。',
-  },
-  {
-    id: 'skill-slide-outline',
-    name: '汇报大纲生成',
-    description: '根据主题、受众和素材生成汇报结构与页面要点。',
-    capabilityType: '内容生成',
-    callableByAgentIds: ['agent-ppt', 'agent-ops-copilot'],
-    callType: '同步调用',
-    status: 'beta',
-    owner: '增长支持组',
-    updatedAt: '2026-05-06',
-    permissionState: 'locked',
-    boundary: '生成初稿建议，不替代人工审核品牌、数据和法务表述。',
-  },
-  {
-    id: 'skill-image-reading',
-    name: '图文素材识别',
-    description: '识别素材中的主体、文案、布局和可复用卖点。',
-    capabilityType: '多模态分析',
-    callableByAgentIds: ['agent-creative-review'],
-    callType: '批处理',
-    status: 'ready',
-    owner: '市场中台',
-    updatedAt: '2026-05-09',
-    permissionState: 'available',
-    boundary: '支持常见图片格式，不处理敏感证件和个人隐私图片。',
-  },
-  {
-    id: 'skill-approval-audit',
-    name: '流程合规校验',
-    description: '对申请单、审批链路和关键字段做规则校验。',
-    capabilityType: '规则校验',
-    callableByAgentIds: ['agent-approval-guard', 'agent-ops-copilot'],
-    callType: '规则引擎',
-    status: 'maintenance',
-    owner: '流程平台组',
-    updatedAt: '2026-05-03',
-    permissionState: 'admin-only',
-    boundary: '仅提示疑点，不自动拦截正式审批流程。',
-  },
-  {
-    id: 'skill-project-risk',
-    name: '项目风险扫描',
-    description: '聚合项目纪要、待办延期和阻塞标签，输出风险摘要。',
-    capabilityType: '数据分析',
-    callableByAgentIds: ['agent-project-pulse'],
-    callType: '定时扫描',
-    status: 'beta',
-    owner: '项目管理办',
-    updatedAt: '2026-05-11',
-    permissionState: 'locked',
-    boundary: '依赖项目数据完整性，结果用于提醒而非绩效评价。',
-    recommended: true,
-  },
+export interface TrendItem {
+  date: string
+  value: number
+}
+
+export interface SummaryItem {
+  label: string
+  value: string
+  unit: string
+  rate: number
+  icon: string
+  sparkline: number[]
+}
+
+export const categories: CategoryItem[] = [
+  { key: 'all', label: '全部智能体', count: 6, icon: '⌂' },
+  { key: 'knowledge', label: '知识问答', count: 1, icon: '☷' },
+  { key: 'data', label: '数据分析', count: 1, icon: '↗' },
+  { key: 'content', label: '内容创作', count: 1, icon: '✎' },
+  { key: 'dev', label: '研发辅助', count: 1, icon: '⌘' },
+  { key: 'meeting', label: '会议效率', count: 1, icon: '◉' },
+  { key: 'interview', label: '面试招聘', count: 1, icon: '◎' }
 ]
 
-export const mockAgents: AgentEntry[] = [
+export const agents: AgentItem[] = [
   {
-    id: 'agent-policy',
+    id: 1,
     name: '力宝百问',
-    description: '面向制度、流程和企业知识库的问答智能体。',
-    level: 'L1',
-    category: '知识服务',
-    status: 'online',
-    owner: '知识库团队',
-    usageCount: 2480,
-    updatedAt: '2026-05-10',
-    permissionState: 'available',
-    skillIds: ['skill-knowledge-search'],
-    scenarios: ['制度查询', '流程入口定位', 'FAQ 快速答疑'],
-    inputExample: '报销发票抬头填错了应该怎么处理？',
-    outputExample: '返回处理步骤、适用制度条款和可联系负责人。',
-    recommended: true,
+    desc: '企业知识中枢，智能检索与问答',
+    categoryKey: 'knowledge',
+    categoryName: '知识问答',
+    icon: '问',
+    theme: 'blue',
+    monthlyToken: 128450,
+    calls: 432,
+    points: 12840,
+    progress: 64,
+    sparkline: [18, 24, 20, 28, 25, 34, 31, 38, 35, 44, 41, 52],
+    status: '运行中'
   },
   {
-    id: 'agent-meeting',
-    name: '会议纪要助手',
-    description: '整理会议内容，自动提取结论、待办和风险。',
-    level: 'L2',
-    category: '效率办公',
-    status: 'online',
-    owner: '效率工具组',
-    usageCount: 1376,
-    updatedAt: '2026-05-08',
-    permissionState: 'available',
-    skillIds: ['skill-meeting-summary'],
-    scenarios: ['周会纪要', '项目复盘', '待办分配'],
-    inputExample: '粘贴一段会议转写文本。',
-    outputExample: '输出摘要、决策项、待办列表和负责人。',
+    id: 2,
+    name: '图文分析',
+    desc: '多模图文解析，洞察提取与归纳',
+    categoryKey: 'data',
+    categoryName: '数据分析',
+    icon: '图',
+    theme: 'orange',
+    monthlyToken: 72640,
+    calls: 241,
+    points: 7260,
+    progress: 36,
+    sparkline: [10, 12, 11, 18, 16, 20, 18, 27, 25, 31, 29, 26],
+    status: '运行中'
   },
   {
-    id: 'agent-ppt',
-    name: '智能 PPT 顾问',
-    description: '基于主题和素材生成汇报结构、页面文案和初稿建议。',
-    level: 'L2',
-    category: '内容创作',
-    status: 'beta',
-    owner: '增长支持组',
-    usageCount: 864,
-    updatedAt: '2026-05-06',
-    permissionState: 'locked',
-    skillIds: ['skill-slide-outline'],
-    scenarios: ['月度汇报', '方案提案', '复盘材料'],
-    inputExample: '我要给管理层汇报五月增长复盘。',
-    outputExample: '输出章节结构、每页标题和关键论点。',
-    recommended: true,
+    id: 3,
+    name: 'PPT创作',
+    desc: 'AI 一键生成演示文稿，高效汇报表达',
+    categoryKey: 'content',
+    categoryName: '内容创作',
+    icon: 'P',
+    theme: 'purple',
+    monthlyToken: 86530,
+    calls: 278,
+    points: 8650,
+    progress: 43,
+    sparkline: [16, 18, 15, 24, 22, 31, 28, 35, 29, 42, 38, 36],
+    status: '运行中'
   },
   {
-    id: 'agent-creative-review',
-    name: '图文分析师',
-    description: '识别营销素材内容，提炼卖点并生成优化建议。',
-    level: 'L1',
-    category: '市场分析',
-    status: 'online',
-    owner: '市场中台',
-    usageCount: 691,
-    updatedAt: '2026-05-09',
-    permissionState: 'available',
-    skillIds: ['skill-image-reading'],
-    scenarios: ['素材复盘', '卖点提炼', '竞品图片分析'],
-    inputExample: '上传一张活动海报。',
-    outputExample: '输出主体识别、信息层级和优化建议。',
+    id: 4,
+    name: '代码助手',
+    desc: '代码生成与优化，提升开发效率',
+    categoryKey: 'dev',
+    categoryName: '研发辅助',
+    icon: '</>',
+    theme: 'indigo',
+    monthlyToken: 24780,
+    calls: 88,
+    points: 2478,
+    progress: 12,
+    sparkline: [4, 8, 7, 9, 12, 18, 15, 17, 16, 19, 17, 21],
+    status: '运行中'
   },
   {
-    id: 'agent-project-pulse',
-    name: '项目脉冲',
-    description: '持续扫描项目动态，发现延期、阻塞和跨团队依赖。',
-    level: 'L3',
-    category: '项目协同',
-    status: 'beta',
-    owner: '项目管理办',
-    usageCount: 322,
-    updatedAt: '2026-05-11',
-    permissionState: 'locked',
-    skillIds: ['skill-meeting-summary', 'skill-project-risk'],
-    scenarios: ['项目风险提醒', '周报生成', '跨团队依赖跟踪'],
-    inputExample: '关注 CRM 改版项目本周风险。',
-    outputExample: '输出风险摘要、阻塞项和建议跟进人。',
+    id: 5,
+    name: '会议纪要',
+    desc: '会议记录与总结，智能整理要点',
+    categoryKey: 'meeting',
+    categoryName: '会议效率',
+    icon: '会',
+    theme: 'green',
+    monthlyToken: 96210,
+    calls: 315,
+    points: 9210,
+    progress: 48,
+    sparkline: [12, 20, 15, 18, 25, 22, 30, 28, 34, 29, 37, 35],
+    status: '运行中'
   },
   {
-    id: 'agent-approval-guard',
-    name: '审批守望',
-    description: '面向管理者的审批规则、异常链路和合规疑点检查。',
-    level: 'L3',
-    category: '流程治理',
-    status: 'maintenance',
-    owner: '流程平台组',
-    usageCount: 188,
-    updatedAt: '2026-05-03',
-    permissionState: 'admin-only',
-    skillIds: ['skill-approval-audit'],
-    scenarios: ['审批异常排查', '流程规则校验', '合规复核'],
-    inputExample: '检查本周采购审批中的异常单据。',
-    outputExample: '输出异常类型、影响范围和建议复核路径。',
-  },
-  {
-    id: 'agent-ops-copilot',
-    name: '运营协同驾驶舱',
-    description: '整合知识检索、内容生成和流程校验，辅助运营任务闭环。',
-    level: 'L4',
-    category: '运营管理',
-    status: 'draft',
-    owner: 'AI 平台部',
-    usageCount: 76,
-    updatedAt: '2026-05-12',
-    permissionState: 'admin-only',
-    skillIds: ['skill-knowledge-search', 'skill-slide-outline', 'skill-approval-audit'],
-    scenarios: ['运营专题跟踪', '跨系统任务编排', '管理者周报'],
-    inputExample: '持续跟踪新员工入职流程体验并每周汇报。',
-    outputExample: '输出问题趋势、处理状态、关联制度和周报草稿。',
-  },
+    id: 6,
+    name: '面试中心',
+    desc: '面试题生成、候选人评估与复盘',
+    categoryKey: 'interview',
+    categoryName: '面试招聘',
+    icon: '面',
+    theme: 'pink',
+    monthlyToken: 58930,
+    calls: 193,
+    points: 5890,
+    progress: 29,
+    sparkline: [9, 14, 12, 21, 19, 25, 23, 28, 26, 31, 29, 33],
+    status: '运行中'
+  }
+]
+
+export const tokenOverview = {
+  monthTotal: 467540,
+  today: 20320,
+  todayRate: 12.4,
+  average: 77923,
+  remaining: 1532460,
+  quotaUsed: 23,
+  categoryPercent: [
+    { name: '知识问答', percent: 27, color: '#2f68ff' },
+    { name: '会议效率', percent: 21, color: '#20b97a' },
+    { name: '内容创作', percent: 18, color: '#7b61ff' },
+    { name: '数据分析', percent: 16, color: '#f6b73c' },
+    { name: '面试招聘', percent: 13, color: '#f06aa6' },
+    { name: '研发辅助', percent: 5, color: '#465782' }
+  ]
+}
+
+export const tokenRanking: RankItem[] = [
+  { name: '力宝百问', value: 128450 },
+  { name: '会议纪要', value: 96210 },
+  { name: 'PPT创作', value: 86530 },
+  { name: '图文分析', value: 72640 },
+  { name: '面试中心', value: 58930 },
+  { name: '代码助手', value: 24780 }
+]
+
+export const pointsRanking: RankItem[] = [
+  { name: '力宝百问', value: 12840 },
+  { name: '会议纪要', value: 9210 },
+  { name: 'PPT创作', value: 8650 },
+  { name: '图文分析', value: 7260 },
+  { name: '面试中心', value: 5890 },
+  { name: '代码助手', value: 2478 }
+]
+
+export const trendData: TrendItem[] = [
+  { date: '05-16', value: 32460 },
+  { date: '05-17', value: 41280 },
+  { date: '05-18', value: 38170 },
+  { date: '05-19', value: 45620 },
+  { date: '05-20', value: 52930 },
+  { date: '05-21', value: 48610 },
+  { date: '05-22', value: 20320 }
+]
+
+export const summaryStats: SummaryItem[] = [
+  { label: '智能体总数', value: '6', unit: '个', rate: 9.1, icon: '▣', sparkline: [10, 12, 11, 14, 13, 18, 17, 22, 20, 23] },
+  { label: '本月调用次数', value: '1,547', unit: '次', rate: 12.6, icon: '↗', sparkline: [8, 10, 12, 11, 15, 18, 16, 24, 19, 26] },
+  { label: '累计 Token', value: '4,675,400', unit: '', rate: 18.3, icon: '☁', sparkline: [18, 22, 21, 25, 27, 31, 29, 36, 33, 41] },
+  { label: '活跃用户数', value: '428', unit: '人', rate: 8.7, icon: '👥', sparkline: [9, 11, 10, 13, 15, 14, 17, 19, 18, 22] },
+  { label: '积分总池', value: '46,328', unit: '分', rate: 14.2, icon: '★', sparkline: [13, 14, 16, 18, 17, 22, 20, 26, 24, 29] }
 ]

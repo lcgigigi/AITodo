@@ -1,9 +1,19 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import girlImage from '@/assets/girl.png'
+import IconBox from '~icons/lucide/box'
+import IconCalendarDays from '~icons/lucide/calendar-days'
+import IconClipboardList from '~icons/lucide/clipboard-list'
+import IconCode from '~icons/lucide/code'
+import IconCompass from '~icons/lucide/compass'
+import IconFileText from '~icons/lucide/file-text'
+import IconImage from '~icons/lucide/image'
+import IconMessageCircle from '~icons/lucide/message-circle'
+import IconPresentation from '~icons/lucide/presentation'
+import IconTrendingUp from '~icons/lucide/trending-up'
+import IconUsers from '~icons/lucide/users'
+import libaoImage from '@/assets/libao.png'
 import campusImage from '@/assets/modelone.png'
-import { useUserStore } from '@/stores/user.store'
 import CalendarMonth from './CalendarMonth.vue'
 import DayPreviewPanel from './DayPreviewPanel.vue'
 import type { CalendarDay, CalendarEvent, CalendarEventStatus, CalendarSpecialDay, CalendarTodoDraft, CalendarTodoUpdate } from './types'
@@ -23,7 +33,7 @@ const isTodayBubbleAutoHidden = ref(false)
 const quickCreatePrompt = ref('')
 const quickCreateKey = ref(0)
 const calendarViewMode = ref<'month' | 'week'>('month')
-const userStore = useUserStore()
+const trendStatMode = ref<'week' | 'month'>('week')
 const router = useRouter()
 let clockTimer: ReturnType<typeof setInterval> | undefined
 let todayBubbleTimer: ReturnType<typeof setTimeout> | undefined
@@ -41,48 +51,54 @@ onBeforeUnmount(() => {
   clearPanelCloseRestoreTimer()
 })
 
-const agents = [
+const campusTools = [
   {
     name: '力宝百问',
-    desc: '制度、流程与知识库问答',
-    badge: '知识',
-    status: '在线',
-    accent: '#2563eb',
+    icon: IconMessageCircle,
+    tone: 'blue',
+    position: 'qa',
   },
   {
     name: '会议纪要',
-    desc: '录音整理、待办提取和摘要',
-    badge: '效率',
-    status: '可用',
-    accent: '#059669',
+    icon: IconFileText,
+    tone: 'green',
+    position: 'meeting',
   },
   {
-    name: '智能PPT',
-    desc: '汇报结构、页面文案和初稿生成',
-    badge: '创作',
-    status: '推荐',
-    accent: '#7c3aed',
+    name: 'PPT创作',
+    icon: IconPresentation,
+    tone: 'violet',
+    position: 'ppt',
   },
   {
     name: '图文分析',
-    desc: '素材识别、卖点提炼与复盘',
-    badge: '分析',
-    status: '可用',
-    accent: '#d97706',
+    icon: IconImage,
+    tone: 'orange',
+    position: 'image',
   },
   {
-    name: '编码助手',
-    desc: '提升编码能力，获得构建项目所需的资源与建议',
-    badge: '开发',
-    status: '可用',
-    accent: '#06b6d4',
+    name: '面试中心',
+    icon: IconUsers,
+    tone: 'sky',
+    position: 'interview',
   },
   {
-    name: '学习辅导',
-    desc: '掌握新概念，温习知识点，获得个性化学习建议',
-    badge: '学习',
-    status: '可用',
-    accent: '#60a5fa',
+    name: '代码辅助',
+    icon: IconCode,
+    tone: 'cyan',
+    position: 'code',
+  },
+  {
+    name: '智体工坊',
+    icon: IconBox,
+    tone: 'violet',
+    position: 'workshop',
+  },
+  {
+    name: '发现更多',
+    icon: IconCompass,
+    tone: 'slate',
+    position: 'more',
   },
 ]
 
@@ -164,6 +180,10 @@ function ymd(date: Date) {
 
 function getDaysInMonth(year: number, month: number) {
   return new Date(year, month + 1, 0).getDate()
+}
+
+function completedEventCountByDate(date: string) {
+  return events.value.filter((event) => event.status === 'done' && dateRange(event.date, event.endDate).includes(date)).length
 }
 
 const eventMap = computed(() => {
@@ -282,11 +302,29 @@ const selectedEvents = computed(() => eventMap.value.get(selectedDate.value) ?? 
 const selectedSpecialDays = computed(() => specialDayMap.value.get(selectedDate.value) ?? [])
 const todayEvents = computed(() => eventMap.value.get(todayDate.value) ?? [])
 const todayPendingEvents = computed(() => todayEvents.value.filter((event) => event.status !== 'done'))
+const currentWeekDates = computed(() => {
+  const start = new Date(`${todayDate.value}T12:00:00`)
+  const offset = (start.getDay() + 6) % 7
+  start.setDate(start.getDate() - offset)
+
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(start)
+    date.setDate(start.getDate() + index)
+    return ymd(date)
+  })
+})
+const weekPendingEvents = computed(() =>
+  events.value.filter(
+    (event) =>
+      event.status !== 'done' &&
+      dateRange(event.date, event.endDate).some((date) => currentWeekDates.value.includes(date)),
+  ),
+)
 const nextTodayEvent = computed(() => todayPendingEvents.value[0])
 const completedCount = computed(() => events.value.filter((event) => event.status === 'done').length)
 const userName = computed(() => currentUser.value.name)
 const userDepartment = computed(() => `${currentUser.value.department ?? 'AI平台'} · ${currentUser.value.role === 'leader' ? '领导' : '员工'}`)
-const avatarUrl = computed(() => currentUser.value.avatar ?? userStore.profile?.avatar ?? girlImage)
+const avatarUrl = computed(() => libaoImage)
 const greeting = computed(() => {
   const hour = now.value.getHours()
   if (hour < 6) return '夜深了'
@@ -313,8 +351,80 @@ const todayCompletedCount = computed(() => todayEvents.value.length - todayPendi
 const todayTaskProgress = computed(() =>
   todayEvents.value.length ? Math.round((todayCompletedCount.value / todayEvents.value.length) * 100) : 0,
 )
+const profileTaskInsight = computed(() => {
+  const todayCount = todayPendingEvents.value.length
+  const weekCount = weekPendingEvents.value.length
+
+  return {
+    todayCount,
+    weekCount,
+    nextText: nextTodayEvent.value
+      ? `下一项 ${formatEventTime(nextTodayEvent.value)} 处理「${nextTodayEvent.value.title}」`
+      : '可以补充新的重点安排',
+  }
+})
 const weekTaskCompleted = computed(() => Math.min(Math.max(completedCount.value, 5), Math.max(events.value.length, 1)))
 const weekTaskProgress = computed(() => Math.round((weekTaskCompleted.value / Math.max(events.value.length, 1)) * 100))
+const dashboardMetrics = computed(() => [
+  {
+    label: '今日待办',
+    value: todayPendingEvents.value.length,
+    unit: '项',
+    detail: `已完成 ${todayCompletedCount.value} 项`,
+    progress: todayTaskProgress.value,
+    icon: IconCalendarDays,
+    tone: 'blue',
+  },
+  {
+    label: '本周任务',
+    value: events.value.length,
+    unit: '项',
+    detail: `已完成 ${weekTaskCompleted.value} 项`,
+    trend: '较上周 +14% ↑',
+    progress: weekTaskProgress.value,
+    icon: IconClipboardList,
+    tone: 'green',
+  },
+])
+const trendSeries = computed(() => trendStatMode.value === 'week' ? weekTrendSeries.value : monthTrendSeries.value)
+const weekTrendSeries = computed(() =>
+  weekDays.value.map((day) => ({
+    label: ['日', '一', '二', '三', '四', '五', '六'][new Date(`${day.date}T12:00:00`).getDay()],
+    value: completedEventCountByDate(day.date),
+  })),
+)
+const monthTrendSeries = computed(() => {
+  const rows: Array<{ label: string; value: number }> = []
+
+  for (let row = 0; row < 6; row += 1) {
+    const rowDays = days.value.slice(row * 7, row * 7 + 7).filter((day) => day.inMonth)
+    if (!rowDays.length) continue
+
+    rows.push({
+      label: `${rows.length + 1}周`,
+      value: rowDays.reduce((total, day) => total + completedEventCountByDate(day.date), 0),
+    })
+  }
+
+  return rows
+})
+const trendTotal = computed(() => trendSeries.value.reduce((total, item) => total + item.value, 0))
+const trendMaxValue = computed(() => Math.max(...trendSeries.value.map((item) => item.value), 1))
+const trendChartPoints = computed(() => {
+  const series = trendSeries.value
+  const width = 210
+  const height = 56
+  const top = 8
+  const count = Math.max(series.length - 1, 1)
+
+  return series.map((item, index) => {
+    const x = Number(((index / count) * width).toFixed(1))
+    const y = Number((top + (1 - item.value / trendMaxValue.value) * height).toFixed(1))
+    return { ...item, x, y }
+  })
+})
+const trendLinePoints = computed(() => trendChartPoints.value.map((point) => `${point.x},${point.y}`).join(' '))
+const trendAreaPoints = computed(() => `0,74 ${trendLinePoints.value} 210,74`)
 const welcomeSummary = computed(() => {
   if (!todayPendingEvents.value.length) {
     return ['今日暂无待办安排。', '可以查看本月日程，或新增一个待办。']
@@ -369,15 +479,6 @@ function closeTodayBubble() {
   isTodayBubbleVisible.value = false
   isTodayBubbleAutoHidden.value = false
   isTodayBubbleManualClosed.value = true
-}
-
-function openTodayBubble() {
-  clearTodayBubbleTimer()
-  clearPanelCloseRestoreTimer()
-  selectDate(todayDate.value)
-  isTodayBubbleManualClosed.value = false
-  isTodayBubbleAutoHidden.value = false
-  isTodayBubbleVisible.value = true
 }
 
 function openTodoPanel() {
@@ -499,9 +600,17 @@ function openAgentList() {
             <img class="avatar" :src="avatarUrl" alt="用户头像" />
             <span class="profile-copy">
               <strong>{{ greeting }}，{{ userName }}</strong>
-              <span>{{ userDepartment }}</span>
             </span>
           </button>
+
+          <div class="profile-task-summary" aria-label="待办摘要">
+            <p>
+              今日 <strong>{{ profileTaskInsight.todayCount }}</strong> 项待办
+              <i></i>
+              本周 <strong>{{ profileTaskInsight.weekCount }}</strong> 项待推进
+            </p>
+            <span>{{ profileTaskInsight.nextText }}</span>
+          </div>
 
           <section
             v-if="isProfileDialogOpen"
@@ -549,55 +658,91 @@ function openAgentList() {
         </div>
       </section>
 
-      <div class="time-block">
-        <span>{{ dateLabel }}</span>
-      </div>
-
       <section class="welcome-panel">
-        <div class="welcome-main">
-          <p>
-            {{ welcomeSummary[0] }}<br />
-            {{ welcomeSummary[1] }}<br />
-            AI 已为你整理重点。
-          </p>
-          <span class="data-update">
-            {{ dataUpdateLabel }}
-            <i aria-hidden="true">↻</i>
-          </span>
-        </div>
-
-        <div class="campus-visual" aria-hidden="true">
+        <div class="campus-visual">
           <img :src="campusImage" alt="" />
+
+          <button
+            v-for="tool in campusTools"
+            :key="tool.name"
+            class="campus-tool"
+            :class="[`tone-${tool.tone}`, `position-${tool.position}`]"
+            type="button"
+            @click="openAgentList"
+          >
+            <span class="campus-tool-content">
+              <span class="campus-tool-icon">
+                <component :is="tool.icon" />
+              </span>
+              <strong>{{ tool.name }}</strong>
+            </span>
+          </button>
         </div>
 
         <div class="quick-metrics">
-          <article class="metric-card metric-card-today">
-            <span>今日待办</span>
-            <strong><em>{{ todayPendingEvents.length }}</em>项</strong>
-            <p>已完成 {{ todayCompletedCount }} 项</p>
-            <div class="metric-ring" :style="{ '--progress': `${todayTaskProgress * 3.6}deg` }">
-              <b>{{ todayTaskProgress }}%</b>
+          <article
+            v-for="metric in dashboardMetrics"
+            :key="metric.label"
+            class="metric-card"
+            :class="`metric-card-${metric.tone}`"
+          >
+            <span class="metric-icon">
+              <component :is="metric.icon" />
+            </span>
+            <div class="metric-copy">
+              <span>{{ metric.label }}</span>
+              <strong><em>{{ metric.value }}</em>{{ metric.unit }}</strong>
+              <p>
+                {{ metric.detail }}
+                <i v-if="metric.trend">{{ metric.trend }}</i>
+              </p>
+            </div>
+            <div class="metric-ring" :style="{ '--progress': `${metric.progress * 3.6}deg` }">
+              <b>{{ metric.progress }}%</b>
             </div>
           </article>
 
-          <article class="metric-card metric-card-week">
-            <span>本周任务</span>
-            <strong><em>{{ events.length }}</em>项</strong>
-            <p>
-              已完成 {{ weekTaskCompleted }} 项<br />
-              较上周 <i>+14% ↑</i>
-            </p>
-            <div class="metric-ring" :style="{ '--progress': `${weekTaskProgress * 3.6}deg` }">
-              <b>{{ weekTaskProgress }}%</b>
-            </div>
-          </article>
+          <article class="metric-card trend-metric-card">
+            <header class="trend-card-head">
+              <span class="metric-icon metric-icon-violet">
+                <IconTrendingUp />
+              </span>
+              <div class="trend-title">
+                <span>月/周统计</span>
+                <strong>{{ trendTotal }}<em>项</em></strong>
+              </div>
+              <div class="trend-switch" aria-label="统计周期">
+                <button
+                  type="button"
+                  :class="{ active: trendStatMode === 'week' }"
+                  @click="trendStatMode = 'week'"
+                >
+                  周
+                </button>
+                <button
+                  type="button"
+                  :class="{ active: trendStatMode === 'month' }"
+                  @click="trendStatMode = 'month'"
+                >
+                  月
+                </button>
+              </div>
+            </header>
 
-          <article class="metric-card metric-card-completion">
-            <span>本周完成率</span>
-            <strong><em>{{ weekTaskProgress }}</em>%</strong>
-            <p>已完成 {{ weekTaskCompleted }} / {{ events.length }} 项</p>
-            <div class="metric-ring" :style="{ '--progress': `${weekTaskProgress * 3.6}deg` }">
-              <b>{{ weekTaskProgress }}%</b>
+            <svg class="trend-chart" viewBox="0 0 210 82" preserveAspectRatio="none" aria-hidden="true">
+              <line v-for="y in [18, 42, 66]" :key="y" x1="0" :y1="y" x2="210" :y2="y" />
+              <polygon :points="trendAreaPoints" />
+              <polyline :points="trendLinePoints" />
+              <circle
+                v-for="point in trendChartPoints"
+                :key="`${point.label}-${point.x}`"
+                :cx="point.x"
+                :cy="point.y"
+                r="3"
+              />
+            </svg>
+            <div class="trend-labels">
+              <span v-for="point in trendChartPoints" :key="point.label">{{ point.label }}</span>
             </div>
           </article>
         </div>
@@ -610,32 +755,6 @@ function openAgentList() {
       role="presentation"
       @click="isProfileDialogOpen = false"
     ></div>
-
-    <section class="panel agent-panel" aria-label="智能体">
-      <header class="section-head">
-        <div>
-          <h2>常用智能体</h2>
-        </div>
-        <div class="section-actions">
-          <span>{{ agents.length }} 个</span>
-          <button type="button" @click="openAgentList">查看更多</button>
-        </div>
-      </header>
-
-      <div class="agent-list">
-        <article v-for="agent in agents" :key="agent.name" class="agent-card">
-          <div class="agent-icon" :style="{ background: agent.accent }">{{ agent.name.slice(0, 1) }}</div>
-          <div class="agent-main">
-            <div class="agent-title">
-              <h3>{{ agent.name }}</h3>
-            </div>
-            <p>{{ agent.desc }}</p>
-          </div>
-          <span class="agent-badge">{{ agent.badge }}</span>
-          <button class="agent-menu" type="button" :aria-label="`${agent.name} 更多操作`">⋮</button>
-        </article>
-      </div>
-    </section>
 
     <section class="layout-column left-column" aria-label="日历与待办" @click.stop>
       <Transition name="day-preview-float">
@@ -674,11 +793,9 @@ function openAgentList() {
           :today-date="todayDate"
           :today-events="todayEvents"
           :show-today-bubble="shouldShowTodayBubble"
-          :can-open-today-bubble="isTodayBubbleManualClosed"
           @select="toggleDayPreview"
           @calendar-interaction="hideTodayBubbleTemporarily"
           @close-today-bubble="closeTodayBubble"
-          @open-today-bubble="openTodayBubble"
           @quick-create-today="quickCreateToday"
           @previous-period="changePeriod(-1)"
           @next-period="changePeriod(1)"
@@ -695,7 +812,7 @@ function openAgentList() {
   height: 100%;
   min-height: 0;
   box-sizing: border-box;
-  padding: 22px;
+  padding: 5px;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   grid-template-rows: minmax(370px, 1.5fr) minmax(240px, 1fr);
@@ -832,19 +949,36 @@ function openAgentList() {
   position: relative;
   isolation: isolate;
   grid-column: 1 / 3;
-  grid-row: 1;
+  grid-row: 1 / 3;
   min-height: 0;
-  padding: 22px 28px 16px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 20px 24px;
-  overflow: visible;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  backdrop-filter: none;
+  padding: 22px 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-x: clip;
+  overflow-y: visible;
+  border: 1px solid rgba(226, 232, 240, 0.58);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 18% 14%, rgba(219, 234, 254, 0.52), transparent 34%),
+    radial-gradient(circle at 80% 18%, rgba(237, 233, 254, 0.46), transparent 32%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(248, 251, 255, 0.74));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 20px 54px -46px rgba(30, 41, 59, 0.34);
+  backdrop-filter: blur(18px);
+}
+
+.profile-welcome-panel::before {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  content: '';
+  background:
+    radial-gradient(ellipse 58% 42% at 0% 0%, rgba(255, 255, 255, 0.96) 0%, rgba(255, 255, 255, 0.72) 34%, rgba(255, 255, 255, 0) 76%),
+    linear-gradient(135deg, rgba(235, 244, 255, 0.74) 0%, rgba(235, 244, 255, 0.32) 24%, rgba(235, 244, 255, 0) 52%);
 }
 
 .profile-welcome-panel.has-profile-dialog {
@@ -861,60 +995,24 @@ function openAgentList() {
 .profile-welcome-panel .profile-panel {
   border-radius: 0;
   background: transparent;
+  flex: 0 0 auto;
 }
 
 .profile-welcome-panel .welcome-panel {
   position: relative;
   z-index: 1;
-  grid-column: 1 / -1;
-  grid-row: 2;
   border-radius: 0;
 }
 
 .welcome-panel {
-  height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
   padding: 0;
   display: grid;
-  grid-template-columns: minmax(230px, 0.88fr) minmax(280px, 1.12fr);
-  grid-template-rows: minmax(190px, 1fr) 124px;
-  gap: 18px 24px;
+  grid-template-rows: minmax(0, 1fr) 136px;
+  gap: 14px;
   background: transparent;
   color: #111827;
-}
-
-.time-block {
-  position: relative;
-  z-index: 3;
-  grid-column: 2;
-  grid-row: 1;
-  justify-self: end;
-  align-self: start;
-  margin-top: 9px;
-  min-width: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: none;
-}
-
-.time-block span {
-  color: #334155;
-  font-size: 20px;
-  font-weight: 900;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.welcome-main {
-  grid-column: 1;
-  grid-row: 1;
-  align-self: start;
-  max-width: 310px;
-  padding: 36px 0 0;
 }
 
 .eyebrow {
@@ -934,47 +1032,13 @@ p {
   margin: 0;
 }
 
-.welcome-main h1 {
-  margin: 0;
-  color: #0f172a;
-  font-size: clamp(22px, 1.9vw, 30px);
-  line-height: 1.08;
-  font-weight: 900;
-  letter-spacing: 0;
-}
-
-.welcome-main p {
-  margin-top: 0;
-  color: #64748b;
-  font-size: 14px;
-  font-weight: 850;
-  line-height: 1.58;
-}
-
-.data-update {
-  margin-top: 28px;
-  color: #94a3b8;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-  font-weight: 850;
-}
-
-.data-update i {
-  color: #64748b;
-  font-style: normal;
-  font-size: 15px;
-  line-height: 1;
-}
-
 .campus-visual {
   position: relative;
-  grid-column: 2;
   grid-row: 1;
   align-self: stretch;
   min-height: 0;
-  padding-top: 12px;
+  overflow: visible;
+  border-radius: 0;
 }
 
 .campus-visual::before,
@@ -985,40 +1049,243 @@ p {
 }
 
 .campus-visual::before {
-  inset: 22px 10px 18px 12px;
-  border-radius: 999px;
-  background:
-    radial-gradient(circle at 64% 30%, rgba(34, 197, 94, 0.14), transparent 38%),
-    radial-gradient(circle at 35% 58%, rgba(37, 99, 235, 0.15), transparent 44%);
-  filter: blur(10px);
+  z-index: 3;
+  top: -90px;
+  right: -90px;
+  left: -90px;
+  height: 170px;
+  background: linear-gradient(180deg, rgba(249, 251, 255, 1) 0%, rgba(249, 251, 255, 0.9) 42%, rgba(249, 251, 255, 0) 100%);
+  filter: blur(1px);
 }
 
 .campus-visual::after {
-  right: 8%;
-  bottom: -2px;
-  width: 76%;
-  height: 74px;
-  border-radius: 50%;
+  z-index: 3;
+  inset: auto -10% -46px;
+  height: 40%;
   background:
-    radial-gradient(ellipse at center, rgba(15, 23, 42, 0.15), transparent 64%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0), rgba(241, 245, 249, 0.72));
-  filter: blur(2px);
+    linear-gradient(180deg, rgba(255, 255, 255, 0), rgba(249, 251, 255, 0.98) 58%),
+    radial-gradient(ellipse at center, rgba(255, 255, 255, 0.94), transparent 74%);
 }
 
 .campus-visual img {
   position: absolute;
   z-index: 1;
-  right: -24px;
-  bottom: -10px;
-  width: min(118%, 575px);
-  max-height: 292px;
+  left: 50%;
+  bottom: -7%;
+  width: min(148%, 1040px);
+  max-width: none;
+  height: auto;
+  max-height: 114%;
   object-fit: contain;
+  transform: translateX(-50%);
   filter:
-    drop-shadow(0 30px 34px rgba(15, 23, 42, 0.13))
-    drop-shadow(0 0 28px rgba(37, 99, 235, 0.08));
+    drop-shadow(0 28px 30px rgba(15, 23, 42, 0.08))
+    drop-shadow(0 0 24px rgba(37, 99, 235, 0.06));
+  -webkit-mask-image:
+    linear-gradient(180deg, transparent 0%, #000 12%, #000 78%, transparent 98%),
+    radial-gradient(ellipse 86% 74% at 50% 54%, #000 56%, rgba(0, 0, 0, 0.74) 72%, transparent 96%);
+  mask-image:
+    linear-gradient(180deg, transparent 0%, #000 12%, #000 78%, transparent 98%),
+    radial-gradient(ellipse 86% 74% at 50% 54%, #000 56%, rgba(0, 0, 0, 0.74) 72%, transparent 96%);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+}
+
+.campus-tool {
+  --stem-h: 58px;
+  --stem-x: 50%;
+  position: absolute;
+  z-index: 4;
+  min-width: 118px;
+  min-height: 48px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #10172c;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 900;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.campus-tool-content {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 118px;
+  min-height: 48px;
+  border: 1px solid rgba(226, 232, 240, 0.68);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.82);
+  padding: 8px 14px 8px 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 14px 30px -27px rgba(15, 23, 42, 0.28);
+  transform-origin: center;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.campus-tool::after,
+.campus-tool::before {
+  content: '';
+  position: absolute;
+  left: var(--stem-x);
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.campus-tool::after {
+  top: 100%;
+  width: 1.5px;
+  height: var(--stem-h);
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.12), rgba(59, 130, 246, 0.68));
+}
+
+.campus-tool::before {
+  top: calc(100% + var(--stem-h));
+  width: 9px;
+  height: 9px;
+  border: 3px solid rgba(255, 255, 255, 0.88);
+  border-radius: 999px;
+  background: #3b82f6;
+  box-shadow: 0 0 0 5px rgba(59, 130, 246, 0.12);
+}
+
+.position-interview::after,
+.position-code::after,
+.position-workshop::after {
+  top: auto;
+  bottom: 100%;
+  background: linear-gradient(0deg, rgba(59, 130, 246, 0.12), rgba(59, 130, 246, 0.68));
+}
+
+.position-interview::before,
+.position-code::before,
+.position-workshop::before {
+  top: auto;
+  bottom: calc(100% + var(--stem-h));
+}
+
+.campus-tool:hover .campus-tool-content {
+  transform: scale(1.06);
+  border-color: rgba(147, 197, 253, 0.9);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.98),
+    0 18px 38px -24px rgba(37, 99, 235, 0.4);
+}
+
+.campus-tool-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.campus-tool-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.tone-blue .campus-tool-icon,
+.metric-card-blue .metric-icon {
+  background: linear-gradient(145deg, #1d7cff, #155eef);
+}
+
+.tone-green .campus-tool-icon,
+.metric-card-green .metric-icon {
+  background: linear-gradient(145deg, #19c785, #059669);
+}
+
+.tone-violet .campus-tool-icon,
+.metric-card-violet .metric-icon {
+  background: linear-gradient(145deg, #8b5cf6, #6d4df2);
+}
+
+.tone-orange .campus-tool-icon {
+  background: linear-gradient(145deg, #fb923c, #f97316);
+}
+
+.tone-sky .campus-tool-icon {
+  background: linear-gradient(145deg, #38bdf8, #0ea5e9);
+}
+
+.tone-cyan .campus-tool-icon {
+  background: linear-gradient(145deg, #2dd4bf, #06b6d4);
+}
+
+.tone-slate .campus-tool-icon {
+  background: linear-gradient(145deg, #64748b, #334155);
+}
+
+.position-image {
+  --stem-h: 68px;
+  --stem-x: 46%;
+  left: 9%;
+  top: 21%;
+}
+
+.position-qa {
+  --stem-h: 62px;
+  left: 33%;
+  top: 10%;
+}
+
+.position-meeting {
+  --stem-h: 62px;
+  left: 56%;
+  top: 8%;
+}
+
+.position-ppt {
+  --stem-h: 74px;
+  right: 4%;
+  top: 20%;
+}
+
+.position-interview,
+.position-code,
+.position-workshop,
+.position-more {
+  --stem-h: 40px;
+}
+
+.position-interview {
+  left: 21%;
+  bottom: 13%;
+}
+
+.position-code {
+  left: 48%;
+  bottom: 29%;
+}
+
+.position-workshop {
+  right: 3%;
+  bottom: 43%;
+}
+
+.position-more {
+  left: 26%;
+  bottom: 60%;
 }
 
 .quick-metrics {
+  position: relative;
+  z-index: 5;
   grid-column: 1 / -1;
   grid-row: 2;
   display: grid;
@@ -1028,65 +1295,100 @@ p {
 
 .metric-card {
   position: relative;
-  min-height: 106px;
+  min-height: 126px;
   box-sizing: border-box;
-  border: 1px solid rgba(226, 232, 240, 0.9);
-  border-radius: 14px;
+  border: 1px solid rgba(226, 232, 240, 0.62);
+  border-radius: 16px;
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.86), rgba(248, 250, 252, 0.72)),
-    rgba(255, 255, 255, 0.76);
-  padding: 13px 18px;
+    linear-gradient(140deg, rgba(255, 255, 255, 0.9), rgba(249, 251, 255, 0.72)),
+    rgba(255, 255, 255, 0.7);
+  padding: 16px 54px 14px 56px;
   color: #64748b;
   font-size: 12px;
   font-weight: 800;
   overflow: hidden;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.74),
-    0 16px 32px -34px rgba(15, 23, 42, 0.32);
+    0 14px 30px -35px rgba(15, 23, 42, 0.22);
+}
+
+.metric-icon {
+  position: absolute;
+  top: 18px;
+  left: 16px;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 12px 22px -17px rgba(15, 23, 42, 0.44);
+}
+
+.metric-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.metric-copy {
+  min-width: 0;
 }
 
 .metric-card strong {
   display: block;
-  margin-top: 10px;
-  margin-bottom: 5px;
+  margin-top: 7px;
+  margin-bottom: 6px;
   color: #0f172a;
   font-size: 14px;
   line-height: 1;
   font-weight: 900;
+  white-space: nowrap;
 }
 
 .metric-card strong em {
   margin-right: 4px;
   color: #0f172a;
   font-style: normal;
-  font-size: 28px;
+  font-size: 25px;
   font-weight: 950;
 }
 
-.metric-card-today strong em {
+.metric-card-blue strong em {
   color: #2563eb;
 }
 
-.metric-card-completion strong em {
+.metric-card-green strong em {
   color: #059669;
 }
 
-.metric-card > span {
+.metric-card-violet strong em {
+  color: #6d4df2;
+}
+
+.metric-icon-violet {
+  background: linear-gradient(145deg, #8b5cf6, #6d4df2);
+}
+
+.metric-copy > span {
   display: block;
   color: #334155;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 900;
+  white-space: nowrap;
 }
 
 .metric-card p {
   margin-top: 0;
   color: #64748b;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 850;
-  line-height: 1.35;
+  line-height: 1.25;
 }
 
 .metric-card p i {
+  display: block;
+  margin-top: 2px;
   color: #10b981;
   font-style: normal;
   font-weight: 950;
@@ -1094,10 +1396,10 @@ p {
 
 .metric-ring {
   position: absolute;
-  right: 28px;
+  right: 10px;
   top: 50%;
-  width: 58px;
-  height: 58px;
+  width: 42px;
+  height: 42px;
   border-radius: 999px;
   background: conic-gradient(#059669 var(--progress), #e5e7eb 0);
   transform: translateY(-50%);
@@ -1109,7 +1411,7 @@ p {
 .metric-ring::before {
   content: '';
   position: absolute;
-  inset: 8px;
+  inset: 6px;
   border-radius: inherit;
   background: #ffffff;
 }
@@ -1117,19 +1419,122 @@ p {
 .metric-ring b {
   position: relative;
   color: #0f172a;
-  font-size: 14px;
+  font-size: 11px;
   font-weight: 950;
 }
 
-.metric-card-today .metric-ring {
+.metric-card-blue .metric-ring {
   background: conic-gradient(#2563eb var(--progress), #e5e7eb 0);
 }
 
-.agent-panel {
-  padding: 20px;
+.metric-card-violet .metric-ring {
+  background: conic-gradient(#6d4df2 var(--progress), #e5e7eb 0);
+}
+
+.trend-metric-card {
+  padding: 13px 12px 8px;
+}
+
+.trend-card-head {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 42px;
+  padding-left: 46px;
+}
+
+.trend-title {
+  min-width: 0;
+}
+
+.trend-title > span {
+  display: block;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.trend-title strong {
+  margin-top: 6px;
+  margin-bottom: 0;
+  color: #6d4df2;
+}
+
+.trend-title strong em {
+  margin-left: 2px;
+  color: #0f172a;
+  font-size: 13px;
+  font-style: normal;
+}
+
+.trend-switch {
+  flex: 0 0 auto;
+  padding: 2px;
+  border-radius: 999px;
+  background: rgba(241, 245, 249, 0.86);
+  display: inline-flex;
+  gap: 2px;
+}
+
+.trend-switch button {
+  width: 26px;
+  height: 22px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #64748b;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.trend-switch button.active {
+  background: #ffffff;
+  color: #6d4df2;
+  box-shadow: 0 6px 14px -12px rgba(15, 23, 42, 0.4);
+}
+
+.trend-chart {
+  width: 100%;
+  height: 58px;
+  margin-top: 4px;
+  overflow: visible;
+  display: block;
+}
+
+.trend-chart line {
+  stroke: rgba(203, 213, 225, 0.58);
+  stroke-width: 1;
+}
+
+.trend-chart polygon {
+  fill: rgba(109, 77, 242, 0.1);
+}
+
+.trend-chart polyline {
+  fill: none;
+  stroke: #6d4df2;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.trend-chart circle {
+  fill: #ffffff;
+  stroke: #6d4df2;
+  stroke-width: 2;
+}
+
+.trend-labels {
+  margin-top: -7px;
+  display: flex;
+  justify-content: space-between;
+  color: #94a3b8;
+  font-size: 9px;
+  font-weight: 850;
 }
 
 .agent-panel {
@@ -1348,7 +1753,7 @@ p {
 
 .profile-menu-anchor {
   position: relative;
-  width: fit-content;
+  width: min(100%, 520px);
   max-width: 100%;
 }
 
@@ -1363,7 +1768,7 @@ p {
   font: inherit;
   display: inline-flex;
   align-items: center;
-  gap: 16px;
+  gap: 13px;
   text-align: left;
   cursor: pointer;
 }
@@ -1373,11 +1778,55 @@ p {
   outline-offset: 6px;
 }
 
+.profile-task-summary {
+  max-width: min(100%, 520px);
+  color: #64748b;
+  transform: translate(10px,20px);
+}
+
+.profile-task-summary p {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.profile-task-summary strong {
+  color: #2563eb;
+  font-size: 15px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.profile-task-summary i {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: #cbd5e1;
+}
+
+.profile-task-summary span {
+  display: -webkit-box;
+  max-width: 100%;
+  margin-top: 5px;
+  overflow: hidden;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .avatar {
-  width: 50px;
-  height: 50px;
+  width: 42px;
+  height: 42px;
   border: 1px solid rgba(226, 232, 240, 0.76);
-  border-radius: 16px;
+  border-radius: 14px;
   background: rgba(255, 255, 255, 0.42);
   object-fit: cover;
   flex: 0 0 auto;
@@ -1387,22 +1836,15 @@ p {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
 }
 
 .profile-copy strong {
   color: #111827;
-  font-size: clamp(20px, 1.55vw, 26px);
+  font-size: clamp(18px, 1.28vw, 22px);
   font-weight: 900;
   line-height: 1.08;
   letter-spacing: 0;
-}
-
-.profile-copy span {
-  color: #64748b;
-  font-size: 13px;
-  font-weight: 850;
-  line-height: 1.35;
 }
 
 .role-switch {
@@ -1554,12 +1996,8 @@ p {
     grid-row: auto;
   }
 
-  .agent-panel {
-    grid-row: auto;
-  }
-
-  .agent-panel {
-    grid-column: 1 / -1;
+  .profile-welcome-panel {
+    min-height: 720px;
   }
 }
 
@@ -1575,11 +2013,6 @@ p {
   .profile-welcome-panel {
     display: flex;
     flex-direction: column;
-  }
-
-  .agent-panel {
-    grid-column: auto;
-    grid-row: auto;
   }
 
   .calendar-panel {
@@ -1602,9 +2035,8 @@ p {
     transform: none;
   }
 
-  .agent-panel {
-    max-height: none;
-    overflow: visible;
+  .profile-welcome-panel {
+    min-height: 680px;
   }
 }
 
@@ -1621,7 +2053,6 @@ p {
 
   .welcome-panel,
   .profile-panel,
-  .agent-panel,
   .day-preview-popover {
     padding: 14px;
     border-radius: 16px;
@@ -1643,19 +2074,10 @@ p {
   }
 
   .welcome-panel {
-    height: auto;
-    display: flex;
-    flex-direction: column;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: 390px auto;
     gap: 14px;
-  }
-
-  .time-block {
-    position: relative;
-    top: auto;
-    right: auto;
-    align-self: flex-end;
-    min-width: 116px;
-    padding: 9px 10px;
   }
 
   .section-head {
@@ -1663,25 +2085,20 @@ p {
     align-items: center;
   }
 
-  .welcome-main {
-    order: 1;
-    max-width: 100%;
-    padding: 0;
-  }
-
   .campus-visual {
-    order: 2;
     width: 100%;
-    min-height: 176px;
+    min-height: 390px;
     padding-top: 0;
     overflow: hidden;
   }
 
   .campus-visual img {
-    right: -54px;
-    bottom: -4px;
-    width: min(128%, 440px);
-    max-height: 176px;
+    left: 50%;
+    right: auto;
+    bottom: 12px;
+    width: 760px;
+    max-height: 340px;
+    transform: translateX(-48%);
   }
 
   .campus-visual::before {
@@ -1689,14 +2106,77 @@ p {
   }
 
   .campus-visual::after {
-    right: 10%;
-    bottom: -8px;
-    width: 82%;
+    inset: auto -8% -2px;
+    width: auto;
+  }
+
+  .campus-tool {
+    min-width: 112px;
+    min-height: 46px;
+    font-size: 12px;
+  }
+
+  .campus-tool-content {
+    min-width: 112px;
+    min-height: 46px;
+    border-radius: 14px;
+    padding: 8px 12px 8px 9px;
+    gap: 8px;
+  }
+
+  .campus-tool-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 9px;
+  }
+
+  .campus-tool-icon svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .position-image {
+    left: 1%;
+    top: 30%;
+  }
+
+  .position-qa {
+    left: 21%;
+    top: 12%;
+  }
+
+  .position-meeting {
+    left: 48%;
+    top: 7%;
+  }
+
+  .position-ppt {
+    right: 1%;
+    top: 24%;
+  }
+
+  .position-interview {
+    left: 3%;
+    bottom: 10%;
+  }
+
+  .position-code {
+    left: 36%;
+    bottom: 7%;
+  }
+
+  .position-workshop {
+    right: 1%;
+    bottom: 10%;
   }
 
   .quick-metrics {
-    order: 3;
     grid-template-columns: 1fr;
+  }
+
+  .metric-card {
+    min-height: 106px;
+    padding: 18px 86px 16px 66px;
   }
 
   .calendar-panel {

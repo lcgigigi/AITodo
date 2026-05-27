@@ -14,9 +14,9 @@
   "message": "ok",
   "data": {
     "id": "leader-zhang",
-    "name": "张经理",
+    "name": "刘美华",
     "role": "leader",
-    "department": "AI平台部",
+    "department": "信息技术部",
     "leaderId": null,
     "teamMembers": [
       {
@@ -109,7 +109,7 @@ interface Todo {
       "source": "AI预填",
       "completionIdeas": "先确认官网栏目结构，再拆首页组件和素材需求。",
       "creatorId": "leader-zhang",
-      "creatorName": "张经理",
+      "creatorName": "刘美华",
       "assigneeId": "employee-liu",
       "assigneeName": "刘畅",
       "scope": "assigned_by_me",

@@ -5,9 +5,9 @@ export const agentCenterRoutes: RouteRecordRaw[] = [
   {
     path: '/agents',
     name: 'AgentList',
-    component: () => import('./AgentListPage.vue'),
+    component: () => import('./index.vue'),
     meta: {
-      title: '智能体列表',
+      title: '智能体中心',
       requiresAuth: false,
       permission: PERMISSIONS.AGENT_LIST_VIEW,
     },

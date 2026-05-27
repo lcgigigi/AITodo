@@ -3,25 +3,26 @@ import { computed } from 'vue'
 import IconBell from '~icons/lucide/bell'
 import IconMessageCircle from '~icons/lucide/message-circle'
 import IconSettings from '~icons/lucide/settings'
-import girlImage from '@/assets/girl.png'
+import girlImage from '@/assets/libao.png'
+import logoDarkImage from '@/assets/logoDark1.png'
 import { useUserStore } from '@/stores/user.store'
 
 const userStore = useUserStore()
 
-const displayName = computed(() => userStore.profile?.name ?? '张经理')
-const department = computed(() => userStore.profile?.department ?? 'AI平台部')
+const displayName = computed(() => userStore.profile?.name ?? '刘美华')
+const department = computed(() => userStore.profile?.department ?? '信息技术部')
 const avatarUrl = computed(() => userStore.profile?.avatar ?? girlImage)
 </script>
 
 <template>
   <header class="dashboard-topbar" aria-label="顶部导航">
-    <div class="brand-block" aria-label="AI Workbench">
+    <div class="brand-block" aria-label="华力企业级AI平台">
       <span class="logo-mark" aria-hidden="true">
-        <span>A</span>
+        <img :src="logoDarkImage" alt="" />
       </span>
       <div class="brand-copy">
-        <strong>AI Workbench</strong>
-        <span>智能办公中台</span>
+        <strong>华力企业级AI平台</strong>
+        <span>员工办公中台</span>
       </div>
     </div>
 
@@ -73,23 +74,20 @@ const avatarUrl = computed(() => userStore.profile?.avatar ?? girlImage)
 .logo-mark {
   width: 38px;
   height: 38px;
-  border-radius: 13px;
-  background:
-    radial-gradient(circle at 28% 20%, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0) 34%),
-    linear-gradient(135deg, #0f172a 0%, #2563eb 52%, #059669 100%);
-  color: #ffffff;
+  border-radius: 10px;
+  background: transparent;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 16px 30px -22px rgba(15, 23, 42, 0.72);
   flex: 0 0 auto;
+  overflow: hidden;
 }
 
-.logo-mark span {
-  font-size: 19px;
-  line-height: 1;
-  font-weight: 950;
-  letter-spacing: 0;
+.logo-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
 }
 
 .brand-copy {

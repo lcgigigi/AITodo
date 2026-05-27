@@ -4,11 +4,23 @@ import type { CalendarDay, CalendarEvent } from './types'
 import { formatEventTime, formatMonthEventTime, isAllDayEvent, isRangeEvent } from './todoDisplay'
 
 type CalendarViewMode = 'month' | 'week'
+type MonthRangeDisplayMode = 'daily' | 'bar'
 type TimelineSlot = {
   key: string
   label: string
   hour?: number
   isGap?: boolean
+}
+type MonthRangeSegment = {
+  key: string
+  event: CalendarEvent
+  row: number
+  startColumn: number
+  endColumn: number
+  lane: number
+  isStart: boolean
+  isEnd: boolean
+  showTitle: boolean
 }
 
 const props = defineProps<{
@@ -20,7 +32,6 @@ const props = defineProps<{
   todayDate: string
   todayEvents: CalendarEvent[]
   showTodayBubble: boolean
-  canOpenTodayBubble: boolean
 }>()
 
 const emit = defineEmits<{
@@ -29,7 +40,6 @@ const emit = defineEmits<{
   nextPeriod: []
   calendarInteraction: []
   closeTodayBubble: []
-  openTodayBubble: []
   quickCreateToday: [prompt: string]
   'update:viewMode': [mode: CalendarViewMode]
 }>()
@@ -42,6 +52,10 @@ const displayLabel = computed(() => (props.viewMode === 'week' ? props.weekLabel
 const periodActionLabel = computed(() => (props.viewMode === 'week' ? '周' : '月'))
 const weekTimelineDays = computed(() => props.days)
 const todayQuickInput = ref('')
+const hasTodayQuickInput = computed(() => Boolean(todayQuickInput.value.trim()))
+const headerQuickInput = ref('')
+const hasHeaderQuickInput = computed(() => Boolean(headerQuickInput.value.trim()))
+const monthRangeDisplayMode = ref<MonthRangeDisplayMode>('daily')
 const timelineSlots = computed<TimelineSlot[]>(() => {
   const hours = new Set([9, 10, 11, 16])
 
@@ -62,6 +76,90 @@ const timelineSlots = computed<TimelineSlot[]>(() => {
     slots.push({ key: String(hour), label: `${String(hour).padStart(2, '0')}:00`, hour })
     return slots
   }, [])
+})
+
+const monthRangeSegments = computed<MonthRangeSegment[]>(() => {
+  const rangeEvents = new Map<string, CalendarEvent>()
+
+  for (const day of props.days) {
+    for (const event of day.events) {
+      if (isRangeEvent(event) && !rangeEvents.has(event.id)) {
+        rangeEvents.set(event.id, event)
+      }
+    }
+  }
+
+  const lanesByRow: Array<Array<Array<{ start: number; end: number }>>> = Array.from(
+    { length: 6 },
+    () => [],
+  )
+  const segments: MonthRangeSegment[] = []
+
+  ;[...rangeEvents.values()]
+    .sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title))
+    .forEach((event) => {
+      const eventEndDate = event.endDate ?? event.date
+
+      for (let row = 0; row < 6; row += 1) {
+        let startColumn = -1
+        let endColumn = -1
+
+        for (let column = 0; column < 7; column += 1) {
+          const day = props.days[row * 7 + column]
+          if (!day || day.date < event.date || day.date > eventEndDate) continue
+
+          if (startColumn < 0) startColumn = column
+          endColumn = column
+        }
+
+        if (startColumn < 0) continue
+
+        const rowLanes = lanesByRow[row]
+        let lane = 0
+        while (
+          rowLanes[lane]?.some(({ start, end }) => !(endColumn < start || startColumn > end))
+        ) {
+          lane += 1
+        }
+
+        if (!rowLanes[lane]) rowLanes[lane] = []
+        rowLanes[lane].push({ start: startColumn, end: endColumn })
+
+        for (let column = startColumn; column <= endColumn; column += 1) {
+          const day = props.days[row * 7 + column]
+          if (!day) continue
+
+          segments.push({
+            key: `${event.id}-${row}-${column}`,
+            event,
+            row: row + 1,
+            startColumn: column + 1,
+            endColumn: column + 1,
+            lane,
+            isStart: day.date === event.date,
+            isEnd: day.date === eventEndDate,
+            showTitle: column === startColumn,
+          })
+        }
+      }
+    })
+
+  return segments
+})
+
+const monthRangeLaneCounts = computed(() => {
+  const counts = new Map<string, number>()
+
+  for (const segment of monthRangeSegments.value) {
+    for (let column = segment.startColumn; column <= segment.endColumn; column += 1) {
+      const day = props.days[(segment.row - 1) * 7 + (column - 1)]
+      if (!day) continue
+
+      counts.set(day.date, Math.max(counts.get(day.date) ?? 0, segment.lane + 1))
+    }
+  }
+
+  return counts
 })
 
 function weekdayText(date: string) {
@@ -90,32 +188,37 @@ function hiddenTimelineEventCount(day: CalendarDay, slot: TimelineSlot) {
   return Math.max(timelineEvents(day, slot).length - timelineEventLimit, 0)
 }
 
+function monthInlineEvents(day: CalendarDay) {
+  if (monthRangeDisplayMode.value === 'daily') return day.events
+  return day.events.filter((event) => !isRangeEvent(event))
+}
+
 function visibleMonthEvents(day: CalendarDay) {
-  return day.events.slice(0, monthEventLimit)
+  return monthInlineEvents(day).slice(0, monthEventLimit)
 }
 
 function hiddenMonthEventCount(day: CalendarDay) {
-  return Math.max(day.events.length - monthEventLimit, 0)
+  return Math.max(monthInlineEvents(day).length - monthEventLimit, 0)
 }
 
-function isRangeStart(event: CalendarEvent, date: string) {
-  return !isRangeEvent(event) || event.date === date
+function monthRangeLaneCount(date: string) {
+  if (monthRangeDisplayMode.value === 'daily') return 0
+  return monthRangeLaneCounts.value.get(date) ?? 0
 }
 
-function isRangeEnd(event: CalendarEvent, date: string) {
-  return !isRangeEvent(event) || event.endDate === date
+function toggleMonthRangeDisplayMode() {
+  monthRangeDisplayMode.value = monthRangeDisplayMode.value === 'daily' ? 'bar' : 'daily'
 }
 
 function shouldOpenBubbleLeft(index: number) {
   return index % 7 >= 4
 }
 
-function selectDay(day: CalendarDay) {
-  if (day.isToday && !props.showTodayBubble && props.canOpenTodayBubble) {
-    emit('openTodayBubble')
-    return
-  }
+function shouldOpenBubbleUp(index: number) {
+  return Math.floor(index / 7) >= 4
+}
 
+function selectDay(day: CalendarDay) {
   emit('select', day.date)
 }
 
@@ -125,6 +228,14 @@ function quickCreateToday() {
 
   emit('quickCreateToday', prompt)
   todayQuickInput.value = ''
+}
+
+function quickCreateFromHeader() {
+  const prompt = headerQuickInput.value.trim()
+  if (!prompt) return
+
+  emit('quickCreateToday', prompt)
+  headerQuickInput.value = ''
 }
 </script>
 
@@ -138,7 +249,24 @@ function quickCreateToday() {
       <div class="calendar-title-line">
         <h2>{{ displayLabel }}</h2>
       </div>
+      <form
+        class="calendar-quick-create"
+        :class="{ 'has-value': hasHeaderQuickInput }"
+        aria-label="一句话创建待办"
+        @submit.prevent="quickCreateFromHeader"
+      >
+        <input v-model="headerQuickInput" type="text" placeholder="一句话创建待办..." />
+        <button v-if="hasHeaderQuickInput" type="submit">AI解析</button>
+      </form>
       <div class="calendar-controls">
+        <button
+          v-if="viewMode === 'month'"
+          type="button"
+          class="range-style-toggle"
+          @click="toggleMonthRangeDisplayMode"
+        >
+          跨天：{{ monthRangeDisplayMode === 'daily' ? '每日' : '横条' }}
+        </button>
         <div class="view-switch" aria-label="日历视图切换">
           <button
             type="button"
@@ -240,9 +368,12 @@ function quickCreateToday() {
           'is-today': day.isToday,
           'is-selected': day.date === selectedDate,
           'has-events': day.events.length > 0,
+          'has-range-events': monthRangeLaneCount(day.date) > 0,
           'has-today-bubble': day.isToday && showTodayBubble,
           'is-bubble-left': day.isToday && shouldOpenBubbleLeft(index),
+          'is-bubble-up': day.isToday && shouldOpenBubbleUp(index),
         }"
+        :style="{ '--range-lanes': monthRangeLaneCount(day.date) }"
       >
         <button class="day-cell-main" type="button" @click="selectDay(day)">
           <span class="day-cell-head">
@@ -270,32 +401,18 @@ function quickCreateToday() {
               :class="[
                 `type-${event.type}`,
                 `status-${event.status}`,
-                {
-                  'is-range': isRangeEvent(event),
-                  'is-range-start': isRangeStart(event, day.date),
-                  'is-range-end': isRangeEnd(event, day.date),
-                },
+                { 'is-range': monthRangeDisplayMode === 'daily' && isRangeEvent(event) },
               ]"
               :aria-label="`${formatEventTime(event)} ${event.title}`"
             >
               <i></i>
-              <time>{{ formatMonthEventTime(event) }}</time>
+              <time v-if="!isRangeEvent(event)">{{ formatMonthEventTime(event) }}</time>
               <b>{{ event.title }}</b>
             </span>
             <span v-if="hiddenMonthEventCount(day)" class="more-count">
-              +{{ hiddenMonthEventCount(day) }} 项待办
+              ...
             </span>
           </span>
-        </button>
-
-        <button
-          v-if="day.isToday && !showTodayBubble && canOpenTodayBubble"
-          class="today-bubble-reopen"
-          type="button"
-          @click.stop="emit('openTodayBubble')"
-          @pointerdown.stop
-        >
-          今日待办 {{ todayEvents.length }}
         </button>
 
         <section
@@ -324,11 +441,39 @@ function quickCreateToday() {
             </button>
             <p v-if="!todayEvents.length" class="today-bubble-empty">今日暂无待办，轻松一下～</p>
           </div>
-          <form class="today-quick-create" @submit.prevent="quickCreateToday">
+          <form
+            class="today-quick-create"
+            :class="{ 'has-value': hasTodayQuickInput }"
+            @submit.prevent="quickCreateToday"
+          >
             <input v-model="todayQuickInput" type="text" placeholder="一句话创建待办..." />
-            <button type="submit" :disabled="!todayQuickInput.trim()">AI解析</button>
+            <button v-if="hasTodayQuickInput" type="submit">AI解析</button>
           </form>
         </section>
+      </div>
+
+      <div v-if="monthRangeDisplayMode === 'bar'" class="month-range-layer" aria-hidden="true">
+        <span
+          v-for="segment in monthRangeSegments"
+          :key="segment.key"
+          class="month-range-bar"
+          :class="[
+            `type-${segment.event.type}`,
+            `status-${segment.event.status}`,
+            {
+              'is-range-start': segment.isStart,
+              'is-range-end': segment.isEnd,
+            },
+          ]"
+          :style="{
+            gridColumn: `${segment.startColumn} / ${segment.endColumn + 1}`,
+            gridRow: `${segment.row}`,
+            '--range-lane': segment.lane,
+          }"
+        >
+          <i v-if="segment.showTitle"></i>
+          <b v-if="segment.showTitle">{{ segment.event.title }}</b>
+        </span>
       </div>
     </div>
   </section>
@@ -361,6 +506,7 @@ function quickCreateToday() {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+  flex: 0 0 auto;
 }
 
 .eyebrow {
@@ -382,6 +528,98 @@ h2 {
   align-items: center;
   gap: 10px;
   flex: 0 0 auto;
+}
+
+.calendar-quick-create {
+  position: relative;
+  flex: 1 1 auto;
+  max-width: 390px;
+  min-width: 220px;
+  min-height: 34px;
+}
+
+.calendar-quick-create input {
+  width: 100%;
+  height: 34px;
+  box-sizing: border-box;
+  border: 1px solid #e5edf6;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #111827;
+  padding: 0 14px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  outline: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    padding 0.18s ease;
+}
+
+.calendar-quick-create input::placeholder {
+  color: #94a3b8;
+  font-weight: 800;
+}
+
+.calendar-quick-create input:focus {
+  border-color: rgba(96, 165, 250, 0.9);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.calendar-quick-create.has-value input {
+  padding-right: 82px;
+}
+
+.calendar-quick-create button {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  height: 26px;
+  border: 0;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #ffffff;
+  padding: 0 11px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: 0 10px 20px -16px rgba(37, 99, 235, 0.86);
+  transition:
+    background 0.18s ease,
+    transform 0.18s ease;
+}
+
+.calendar-quick-create button:hover {
+  background: #1d4ed8;
+  transform: translateY(-1px);
+}
+
+.range-style-toggle {
+  min-height: 30px;
+  border: 1px solid #e5edf6;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #475569;
+  padding: 0 11px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.range-style-toggle:hover {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  box-shadow: 0 12px 20px -20px rgba(37, 99, 235, 0.5);
 }
 
 .view-switch {
@@ -682,6 +920,7 @@ h2 {
 .timeline-event.type-ai { color: #7c3aed; }
 
 .month-grid {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: grid;
@@ -692,6 +931,7 @@ h2 {
 
 .day-cell {
   position: relative;
+  z-index: 1;
   min-width: 0;
   min-height: 0;
   box-sizing: border-box;
@@ -854,28 +1094,6 @@ h2 {
   white-space: nowrap;
 }
 
-.today-bubble-reopen {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
-  min-height: 24px;
-  border: 1px solid rgba(147, 197, 253, 0.58);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.84);
-  color: #2563eb;
-  padding: 0 9px;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 900;
-  cursor: pointer;
-  box-shadow: 0 10px 18px -18px rgba(37, 99, 235, 0.56);
-}
-
-.today-bubble-reopen:hover {
-  border-color: rgba(59, 130, 246, 0.72);
-  background: #eff6ff;
-}
-
 .special-list {
   display: inline-flex;
   gap: 4px;
@@ -939,6 +1157,10 @@ h2 {
   overflow: hidden;
 }
 
+.day-cell.has-range-events .event-stack {
+  padding-top: calc(var(--range-lanes, 1) * 26px);
+}
+
 .month-event,
 .more-count {
   max-width: 100%;
@@ -995,32 +1217,31 @@ h2 {
 }
 
 .month-event.is-range {
-  position: relative;
-  z-index: 1;
-  border-color: rgba(37, 99, 235, 0.2);
-  border-radius: 0;
-  background: rgba(219, 234, 254, 0.92);
-  color: #2563eb;
-  box-shadow: 0 10px 18px -20px rgba(37, 99, 235, 0.7);
+  min-height: 24px;
+  border-color: rgba(226, 232, 240, 0.88);
+  background: rgba(255, 255, 255, 0.74);
+  color: #94a3b8;
+  padding: 4px 7px;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 5px;
+  box-shadow: none;
 }
 
-.month-event.is-range:not(.is-range-start) {
-  margin-left: -14px;
-  padding-left: 14px;
+.month-event.is-range i {
+  width: 4px;
+  height: 4px;
+  margin-top: 0;
 }
 
-.month-event.is-range:not(.is-range-end) {
-  width: calc(100% + 14px);
-}
-
-.month-event.is-range.is-range-start {
-  border-top-left-radius: 999px;
-  border-bottom-left-radius: 999px;
-}
-
-.month-event.is-range.is-range-end {
-  border-top-right-radius: 999px;
-  border-bottom-right-radius: 999px;
+.month-event.is-range b {
+  flex: 1 1 auto;
+  margin-left: 0;
+  color: #475569;
+  font-size: 9px;
+  font-weight: 850;
+  line-height: 1;
+  order: 0;
 }
 
 .month-event.status-done {
@@ -1032,15 +1253,85 @@ h2 {
   text-decoration: line-through;
 }
 
-.more-count {
-  width: fit-content;
-  min-height: 18px;
-  padding: 0 7px;
-  background: #eef2ff;
-  color: #4338ca;
+.month-range-layer {
+  position: absolute;
+  z-index: 6;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-rows: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+  pointer-events: none;
+}
+
+.month-range-bar {
+  min-width: 0;
+  height: 22px;
+  box-sizing: border-box;
+  align-self: start;
+  margin: calc(34px + var(--range-lane, 0) * 25px) 0 0;
+  border-radius: 0;
+  background: linear-gradient(90deg, rgba(221, 232, 255, 0.98), rgba(213, 226, 255, 0.96));
+  color: #7c3aed;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 0 0 1px rgba(124, 58, 237, 0.1),
+    0 8px 16px -18px rgba(79, 70, 229, 0.52);
+}
+
+.month-range-bar.is-range-start {
+  margin-left: 8px;
+  border-top-left-radius: 999px;
+  border-bottom-left-radius: 999px;
+}
+
+.month-range-bar.is-range-end {
+  margin-right: 8px;
+  border-top-right-radius: 999px;
+  border-bottom-right-radius: 999px;
+}
+
+.month-range-bar i {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+
+.month-range-bar b {
+  min-width: 0;
+  overflow: hidden;
+  color: #334155;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 10px;
   font-weight: 900;
-  line-height: 18px;
+  line-height: 1;
+}
+
+.month-range-bar.status-done {
+  opacity: 0.64;
+}
+
+.more-count {
+  width: 28px;
+  height: 12px;
+  min-height: 0;
+  border-radius: 999px;
+  background: rgba(238, 242, 255, 0.82);
+  color: #6366f1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0 3px;
+  font-size: 12px;
+  font-weight: 950;
+  line-height: 1;
   white-space: nowrap;
 }
 
@@ -1057,26 +1348,32 @@ h2 {
 .today-bubble {
   position: absolute;
   z-index: 30;
-  top: 20px;
+  top: -8px;
   left: calc(100% + 10px);
   width: 280px;
-  max-height: 400px;
+  max-height: min(400px, calc(100vh - 150px));
   box-sizing: border-box;
-  border: 1px solid rgba(147, 197, 253, 0.72);
-  border-radius: 16px;
+  border: 1px solid rgba(203, 213, 225, 0.9);
+  border-radius: 18px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 251, 255, 0.98)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(249, 250, 251, 0.96)),
     #ffffff;
   box-shadow:
-    0 22px 54px -34px rgba(37, 99, 235, 0.46),
-    0 12px 32px -24px rgba(15, 23, 42, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.96);
-  padding: 14px;
+    0 0 0 10px rgba(148, 163, 184, 0.05),
+    0 0 34px 8px rgba(100, 116, 139, 0.14),
+    0 34px 72px -34px rgba(15, 23, 42, 0.34),
+    0 18px 32px -24px rgba(15, 23, 42, 0.24),
+    0 2px 6px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.98),
+    inset 0 -1px 0 rgba(226, 232, 240, 0.52);
+  padding: 14px 14px 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 11px;
   cursor: default;
   backdrop-filter: blur(14px);
+  isolation: isolate;
+  overflow: visible;
 }
 
 .day-cell.is-bubble-left .today-bubble {
@@ -1084,28 +1381,57 @@ h2 {
   left: auto;
 }
 
+.day-cell.is-bubble-up .today-bubble {
+  top: auto;
+  bottom: -8px;
+}
+
 .today-bubble::before {
   position: absolute;
-  top: 18px;
-  left: -7px;
+  top: 31px;
+  left: -6px;
   width: 12px;
   height: 12px;
-  border-left: 1px solid rgba(147, 197, 253, 0.72);
-  border-bottom: 1px solid rgba(147, 197, 253, 0.72);
-  background: #ffffff;
+  border-left: 1px solid rgba(203, 213, 225, 0.86);
+  border-bottom: 1px solid rgba(203, 213, 225, 0.86);
+  border-radius: 3px 0 0 0;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(249, 250, 251, 0.96));
   content: '';
   transform: rotate(45deg);
+  z-index: 1;
+  box-shadow: -5px 5px 12px -12px rgba(15, 23, 42, 0.4);
+}
+
+.day-cell.is-bubble-up .today-bubble::before {
+  top: auto;
+  bottom: 31px;
+  border-radius: 0 0 0 3px;
+  box-shadow: -5px 5px 12px -12px rgba(15, 23, 42, 0.4);
+}
+
+.today-bubble::after {
+  position: absolute;
+  inset: -14px;
+  z-index: -1;
+  border-radius: 26px;
+  background:
+    radial-gradient(circle at 32% 32%, rgba(100, 116, 139, 0.12), transparent 58%),
+    radial-gradient(circle at 70% 74%, rgba(148, 163, 184, 0.1), transparent 62%);
+  content: '';
+  pointer-events: none;
 }
 
 .day-cell.is-bubble-left .today-bubble::before {
-  right: -7px;
+  right: -6px;
   left: auto;
   border: 0;
-  border-top: 1px solid rgba(147, 197, 253, 0.72);
-  border-right: 1px solid rgba(147, 197, 253, 0.72);
+  border-top: 1px solid rgba(203, 213, 225, 0.86);
+  border-right: 1px solid rgba(203, 213, 225, 0.86);
+  border-radius: 0 3px 0 0;
 }
 
 .today-bubble header {
+  flex: 0 0 auto;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -1115,38 +1441,38 @@ h2 {
 .today-bubble header div {
   min-width: 0;
   display: grid;
-  gap: 5px;
+  gap: 7px;
 }
 
 .today-bubble header strong {
   color: #0f172a;
-  font-size: 16px;
+  font-size: 17px;
   line-height: 1.1;
   font-weight: 900;
 }
 
 .today-bubble header span {
   width: fit-content;
-  min-height: 22px;
+  min-height: 21px;
   border-radius: 999px;
-  background: rgba(219, 234, 254, 0.76);
-  color: #2563eb;
-  padding: 0 9px;
+  background: rgba(241, 245, 249, 0.92);
+  color: #475569;
+  padding: 0 10px;
   display: inline-flex;
   align-items: center;
-  font-size: 12px;
-  font-weight: 850;
+  font-size: 13px;
+  font-weight: 900;
 }
 
 .today-bubble header button {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border: 0;
   border-radius: 999px;
-  background: rgba(241, 245, 249, 0.9);
+  background: rgba(241, 245, 249, 0.82);
   color: #64748b;
   font: inherit;
-  font-size: 18px;
+  font-size: 20px;
   line-height: 1;
   cursor: pointer;
   transition:
@@ -1156,36 +1482,68 @@ h2 {
 }
 
 .today-bubble header button:hover {
-  background: #e0f2fe;
-  color: #1d4ed8;
+  background: #e5e7eb;
+  color: #111827;
   transform: translateY(-1px);
 }
 
 .today-bubble-list {
-  min-height: 0;
-  max-height: 250px;
+  min-height: 84px;
+  flex: 1 1 auto;
+  max-height: none;
   overflow: auto;
   display: grid;
-  gap: 6px;
+  align-content: start;
+  gap: 0;
+  border: 1px solid rgba(226, 232, 240, 0.68);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.62);
+  overscroll-behavior: contain;
 }
 
 .today-bubble-item {
+  position: relative;
   min-width: 0;
-  border: 1px solid rgba(219, 234, 254, 0.74);
-  border-radius: 12px;
-  background: rgba(248, 250, 252, 0.72);
+  border: 0;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.58);
+  border-radius: 0;
+  background: transparent;
   color: #334155;
-  padding: 9px 10px;
+  padding: 10px 11px 10px 25px;
   display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
-  gap: 8px;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
   text-align: left;
   font: inherit;
   cursor: pointer;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease;
+}
+
+.today-bubble-item:last-child {
+  border-bottom: 0;
+}
+
+.today-bubble-item:hover {
+  background: rgba(239, 246, 255, 0.7);
+}
+
+.today-bubble-item::before {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: #94a3b8;
+  content: '';
+  transform: translateY(-50%);
 }
 
 .today-bubble-item time {
-  color: #2563eb;
+  color: #475569;
   font-size: 11px;
   font-weight: 950;
   font-variant-numeric: tabular-nums;
@@ -1197,7 +1555,7 @@ h2 {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 900;
 }
 
 .today-bubble-empty {
@@ -1217,30 +1575,43 @@ h2 {
 }
 
 .today-quick-create {
-  padding: 9px;
-  border: 1px solid rgba(226, 232, 240, 0.86);
-  border-radius: 14px;
-  background: rgba(248, 250, 252, 0.72);
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
+  position: relative;
+  flex: 0 0 auto;
+  min-height: 42px;
 }
 
 .today-quick-create input {
-  min-width: 0;
-  height: 32px;
+  width: 100%;
+  height: 42px;
   box-sizing: border-box;
-  border: 1px solid rgba(203, 213, 225, 0.8);
+  border: 1px solid rgba(203, 213, 225, 0.72);
   border-radius: 999px;
   background: #ffffff;
-  padding: 0 11px;
+  padding: 0 16px;
   color: #111827;
   font: inherit;
   font-size: 12px;
   outline: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    padding 0.18s ease;
+}
+
+.today-quick-create input:focus {
+  border-color: rgba(96, 165, 250, 0.9);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.today-quick-create.has-value input {
+  padding-right: 82px;
 }
 
 .today-quick-create button {
+  position: absolute;
+  top: 5px;
+  right: 5px;
   height: 32px;
   border: 0;
   border-radius: 999px;
@@ -1251,12 +1622,15 @@ h2 {
   font-size: 12px;
   font-weight: 900;
   cursor: pointer;
+  box-shadow: 0 10px 20px -16px rgba(37, 99, 235, 0.86);
+  transition:
+    background 0.18s ease,
+    transform 0.18s ease;
 }
 
-.today-quick-create button:disabled {
-  background: #dbe4ef;
-  color: #94a3b8;
-  cursor: not-allowed;
+.today-quick-create button:hover {
+  background: #1d4ed8;
+  transform: translateY(-1px);
 }
 
 @media (max-width: 1180px) {
@@ -1273,6 +1647,12 @@ h2 {
   .calendar-head {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .calendar-quick-create {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
   }
 
   .calendar-controls {

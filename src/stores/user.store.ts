@@ -30,7 +30,7 @@ export const useUserStore = defineStore('user', {
       this.profile = {
         id: 'mock-user',
         name: '工作台用户',
-        department: 'AI平台部',
+        department: '信息技术部',
         role: 'employee',
       }
     },
