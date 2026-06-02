@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { useDialog } from 'naive-ui'
 import type { CalendarTodoForm, CalendarUser } from './types'
 import { formatFormDateTime } from './todoDisplay'
 import { parseTodoText as mockParseTodoText } from './todoMock'
@@ -21,7 +20,6 @@ const emit = defineEmits<{
   closed: []
 }>()
 
-const dialog = useDialog()
 const aiPrompt = ref('')
 const isParsing = ref(false)
 const todoForm = ref<CalendarTodoForm>(createFormCopy(props.form))
@@ -86,22 +84,9 @@ function requestClose() {
     return
   }
 
-  dialog.warning({
-    title: '放弃未保存的修改？',
-    content: '当前待办内容还没有保存，关闭后本次填写的内容不会保留。',
-    positiveText: '继续编辑',
-    negativeText: '放弃并关闭',
-    onNegativeClick: closeNow,
-  })
-}
-
-function handleShowUpdate(show: boolean) {
-  if (show) {
-    emit('update:show', true)
-    return
+  if (window.confirm('当前待办内容还没有保存，确定放弃并关闭吗？')) {
+    closeNow()
   }
-
-  requestClose()
 }
 
 async function parseTodoText() {
@@ -151,8 +136,8 @@ function submitTodo() {
 </script>
 
 <template>
-  <n-modal :show="show" :mask-closable="true" @update:show="handleShowUpdate">
-    <n-card class="todo-dialog" :bordered="false" role="dialog" aria-modal="true">
+  <div v-if="show" class="todo-dialog-backdrop" @click.self="requestClose">
+    <div class="todo-dialog" role="dialog" aria-modal="true">
       <header class="dialog-head">
         <div>
           <p>{{ mode === 'view' ? '查看安排' : '整理安排' }}</p>
@@ -187,24 +172,19 @@ function submitTodo() {
           <div class="form-grid">
             <label class="field">
               <span>日期</span>
-              <n-date-picker
-                v-model:formatted-value="todoForm.date"
+              <input
+                v-model="todoForm.date"
                 class="soft-picker"
                 type="date"
-                value-format="yyyy-MM-dd"
-                format="yyyy/MM/dd"
-                :clearable="false"
                 :disabled="!canEditDialog"
               />
             </label>
             <label class="field">
               <span>时间</span>
-              <n-time-picker
-                v-model:formatted-value="todoForm.time"
+              <input
+                v-model="todoForm.time"
                 class="soft-picker"
-                value-format="HH:mm"
-                format="HH:mm"
-                :clearable="true"
+                type="time"
                 :disabled="!canEditDialog"
               />
             </label>
@@ -249,19 +229,30 @@ function submitTodo() {
           <button v-if="canEditDialog" type="submit" :disabled="!canSubmit">保存</button>
         </div>
       </form>
-    </n-card>
-  </n-modal>
+    </div>
+  </div>
 </template>
 
 <style scoped>
 .todo-dialog {
   width: min(700px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);
+  overflow: auto;
   border-radius: 14px;
+  background: #fff;
+  padding: 28px 32px 24px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.18);
 }
 
-.todo-dialog :deep(.n-card__content) {
-  padding: 28px 32px 24px;
+.todo-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.36);
+  backdrop-filter: blur(8px);
 }
 
 .dialog-head {
@@ -401,34 +392,12 @@ function submitTodo() {
 
 .soft-picker {
   width: 100%;
-}
-
-.soft-picker :deep(.n-input) {
   height: 38px;
   border-radius: 10px;
   background: #ffffff;
-  --n-border: 1px solid #dfe8f3 !important;
-  --n-border-hover: 1px solid #c9d6e6 !important;
-  --n-border-focus: 1px solid #111827 !important;
-  --n-box-shadow-focus: 0 0 0 3px rgba(17, 24, 39, 0.07) !important;
-  --n-caret-color: #111827 !important;
-  --n-color-disabled: #f8fafc !important;
-  --n-text-color-disabled: #475569 !important;
-}
-
-.soft-picker :deep(.n-input__input-el) {
   color: #111827;
   font-size: 13px;
   font-weight: 500;
-}
-
-.soft-picker :deep(.n-input__suffix) {
-  color: #475569;
-}
-
-.soft-picker :deep(.n-input__border),
-.soft-picker :deep(.n-input__state-border) {
-  border-radius: 10px;
 }
 
 .field textarea {
@@ -508,9 +477,6 @@ function submitTodo() {
   .todo-dialog {
     width: calc(100vw - 24px);
     max-height: calc(100vh - 24px);
-  }
-
-  .todo-dialog :deep(.n-card__content) {
     padding: 22px 20px 20px;
   }
 

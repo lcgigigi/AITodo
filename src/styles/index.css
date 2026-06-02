@@ -2,3 +2,7 @@
 @import './variables.css';
 @import './theme.css';
 @import './transitions.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

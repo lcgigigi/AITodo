@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { levelDescriptions, mockAgents, mockSkills, mockViewerProfiles, permissionLabels } from './mock'
+import {
+  levelDescriptions,
+  mockAgents,
+  mockSkills,
+  mockViewerProfiles,
+  permissionLabels,
+} from './mock'
 import type { AgentEntry, AgentLevel, PermissionState, SkillEntry } from './types'
 
 type ViewerRole = keyof typeof mockViewerProfiles
@@ -36,7 +42,8 @@ const visibleAgents = computed(() => {
         .join(' ')
         .toLowerCase()
         .includes(keyword)
-    const matchesCategory = selectedCategory.value === '全部' || agent.category === selectedCategory.value
+    const matchesCategory =
+      selectedCategory.value === '全部' || agent.category === selectedCategory.value
     const matchesLevel = selectedLevel.value === '全部' || agent.level === selectedLevel.value
 
     return matchesKeyword && matchesCategory && matchesLevel
@@ -53,7 +60,14 @@ const visibleSkills = computed(() => {
 
     return (
       !keyword ||
-      [skill.name, skill.description, skill.capabilityType, skill.owner, skill.callType, relatedAgentNames]
+      [
+        skill.name,
+        skill.description,
+        skill.capabilityType,
+        skill.owner,
+        skill.callType,
+        relatedAgentNames,
+      ]
         .join(' ')
         .toLowerCase()
         .includes(keyword)
@@ -64,7 +78,9 @@ const visibleSkills = computed(() => {
 const overviewStats = computed(() => {
   const availableAgents = mockAgents.filter((agent) => canUse(agent.permissionState)).length
   const availableSkills = mockSkills.filter((skill) => canUse(skill.permissionState)).length
-  const lockedCount = [...mockAgents, ...mockSkills].filter((item) => !canUse(item.permissionState)).length
+  const lockedCount = [...mockAgents, ...mockSkills].filter(
+    (item) => !canUse(item.permissionState),
+  ).length
   const highlightedCount = [...mockAgents, ...mockSkills].filter((item) => item.recommended).length
 
   return [
@@ -133,10 +149,22 @@ function formatUsage(count: number) {
       </div>
 
       <div class="top-actions">
-        <n-radio-group v-model:value="viewerRole" size="small">
-          <n-radio-button value="user">员工</n-radio-button>
-          <n-radio-button value="admin">管理者</n-radio-button>
-        </n-radio-group>
+        <div class="role-tabs" role="group" aria-label="查看角色">
+          <button
+            type="button"
+            :class="{ active: viewerRole === 'user' }"
+            @click="viewerRole = 'user'"
+          >
+            员工
+          </button>
+          <button
+            type="button"
+            :class="{ active: viewerRole === 'admin' }"
+            @click="viewerRole = 'admin'"
+          >
+            管理者
+          </button>
+        </div>
         <span class="permission-note" :class="{ 'is-admin': isAdmin }">
           {{ viewer.label }} · {{ viewer.permissions.length }} 项权限
         </span>
@@ -144,7 +172,12 @@ function formatUsage(count: number) {
     </header>
 
     <section class="metric-strip" aria-label="智能体概览">
-      <article v-for="stat in overviewStats" :key="stat.label" class="metric-cell" :class="`tone-${stat.tone}`">
+      <article
+        v-for="stat in overviewStats"
+        :key="stat.label"
+        class="metric-cell"
+        :class="`tone-${stat.tone}`"
+      >
         <span>{{ stat.label }}</span>
         <strong>{{ stat.value }}</strong>
       </article>
@@ -152,7 +185,17 @@ function formatUsage(count: number) {
 
     <section class="workbench-grid">
       <aside class="filter-rail" aria-label="筛选">
-        <n-input v-model:value="searchKeyword" clearable placeholder="搜索名称、场景、负责人" />
+        <div class="search-field">
+          <input v-model="searchKeyword" type="search" placeholder="搜索名称、场景、负责人" />
+          <button
+            v-if="searchKeyword"
+            type="button"
+            aria-label="清空搜索"
+            @click="searchKeyword = ''"
+          >
+            清空
+          </button>
+        </div>
 
         <section class="rail-section">
           <header>
@@ -170,7 +213,11 @@ function formatUsage(count: number) {
             >
               <span>{{ category }}</span>
               <strong>
-                {{ category === '全部' ? mockAgents.length : mockAgents.filter((agent) => agent.category === category).length }}
+                {{
+                  category === '全部'
+                    ? mockAgents.length
+                    : mockAgents.filter((agent) => agent.category === category).length
+                }}
               </strong>
             </button>
           </div>
@@ -195,7 +242,10 @@ function formatUsage(count: number) {
               v-for="item in levelStats"
               :key="item.level"
               class="level-filter"
-              :class="[`level-${item.level.toLowerCase()}`, { active: selectedLevel === item.level }]"
+              :class="[
+                `level-${item.level.toLowerCase()}`,
+                { active: selectedLevel === item.level },
+              ]"
               type="button"
               @click="selectedLevel = item.level"
             >
@@ -210,7 +260,13 @@ function formatUsage(count: number) {
 
         <section class="access-panel" :class="{ 'is-admin': isAdmin }">
           <strong>{{ isAdmin ? '全部可见' : '锁定项可见' }}</strong>
-          <p>{{ isAdmin ? '管理者视角展示维护中和规划中能力。' : '无权限项保留在目录中，进入前需要申请。' }}</p>
+          <p>
+            {{
+              isAdmin
+                ? '管理者视角展示维护中和规划中能力。'
+                : '无权限项保留在目录中，进入前需要申请。'
+            }}
+          </p>
         </section>
       </aside>
 
@@ -228,14 +284,19 @@ function formatUsage(count: number) {
             v-for="agent in visibleAgents"
             :key="agent.id"
             class="agent-row"
-            :class="[`level-${agent.level.toLowerCase()}`, { locked: !canUse(agent.permissionState) }]"
+            :class="[
+              `level-${agent.level.toLowerCase()}`,
+              { locked: !canUse(agent.permissionState) },
+            ]"
             type="button"
             @click="preview = { type: 'agent', item: agent }"
           >
             <span class="level-token">{{ agent.level }}</span>
 
             <span class="row-main">
-              <span class="row-kicker">{{ agent.category }} · {{ agent.owner }} · {{ agent.updatedAt }}</span>
+              <span class="row-kicker"
+                >{{ agent.category }} · {{ agent.owner }} · {{ agent.updatedAt }}</span
+              >
               <span class="row-title">
                 <strong>{{ agent.name }}</strong>
                 <em>{{ statusText(agent.status) }}</em>
@@ -243,7 +304,9 @@ function formatUsage(count: number) {
               </span>
               <span class="row-description">{{ agent.description }}</span>
               <span class="skill-strip">
-                <span v-for="skillId in agent.skillIds" :key="skillId">{{ skillsById.get(skillId)?.name }}</span>
+                <span v-for="skillId in agent.skillIds" :key="skillId">{{
+                  skillsById.get(skillId)?.name
+                }}</span>
               </span>
             </span>
 
@@ -257,7 +320,7 @@ function formatUsage(count: number) {
             </span>
           </button>
 
-          <n-empty v-if="visibleAgents.length === 0" description="没有匹配的智能体" />
+          <p v-if="visibleAgents.length === 0" class="empty-state">没有匹配的智能体</p>
         </div>
       </main>
 
@@ -291,103 +354,123 @@ function formatUsage(count: number) {
             </span>
           </button>
 
-          <n-empty v-if="visibleSkills.length === 0" description="没有匹配的 Skills" />
+          <p v-if="visibleSkills.length === 0" class="empty-state">没有匹配的 Skills</p>
         </div>
       </aside>
     </section>
 
-    <n-modal v-model:show="previewOpen" preset="card" class="preview-modal" :bordered="false">
-      <template v-if="preview" #header>
+    <div
+      v-if="previewOpen"
+      class="preview-overlay"
+      role="presentation"
+      @click.self="preview = null"
+    >
+      <section v-if="preview" class="preview-modal" role="dialog" aria-modal="true">
         <div class="preview-head">
-          <span v-if="preview.type === 'agent'" class="level-token large">{{ preview.item.level }}</span>
-          <span v-else class="skill-preview-mark">{{ preview.item.capabilityType.slice(0, 2) }}</span>
+          <span v-if="preview.type === 'agent'" class="level-token large">{{
+            preview.item.level
+          }}</span>
+          <span v-else class="skill-preview-mark">{{
+            preview.item.capabilityType.slice(0, 2)
+          }}</span>
           <div>
             <p>{{ preview.type === 'agent' ? 'Agent Preview' : 'Skill Preview' }}</p>
             <h2>{{ preview.item.name }}</h2>
           </div>
-        </div>
-      </template>
-
-      <div v-if="preview" class="preview-body">
-        <p class="preview-description">{{ preview.item.description }}</p>
-
-        <div class="preview-meta-grid">
-          <span>
-            <strong>状态</strong>
-            {{ statusText(preview.item.status) }}
-          </span>
-          <span>
-            <strong>负责人</strong>
-            {{ preview.item.owner }}
-          </span>
-          <span>
-            <strong>最近更新</strong>
-            {{ preview.item.updatedAt }}
-          </span>
-          <span>
-            <strong>权限</strong>
-            {{ permissionText(preview.item.permissionState) }}
-          </span>
+          <button class="preview-close" type="button" aria-label="关闭" @click="preview = null">
+            ×
+          </button>
         </div>
 
-        <template v-if="preview.type === 'agent'">
-          <section class="preview-section">
-            <h3>等级说明</h3>
-            <p>{{ levelDescriptions[preview.item.level] }}</p>
-          </section>
+        <div class="preview-body">
+          <p class="preview-description">{{ preview.item.description }}</p>
 
-          <section class="preview-section">
-            <h3>适用场景</h3>
-            <div class="tag-row">
-              <span v-for="scenario in preview.item.scenarios" :key="scenario">{{ scenario }}</span>
-            </div>
-          </section>
+          <div class="preview-meta-grid">
+            <span>
+              <strong>状态</strong>
+              {{ statusText(preview.item.status) }}
+            </span>
+            <span>
+              <strong>负责人</strong>
+              {{ preview.item.owner }}
+            </span>
+            <span>
+              <strong>最近更新</strong>
+              {{ preview.item.updatedAt }}
+            </span>
+            <span>
+              <strong>权限</strong>
+              {{ permissionText(preview.item.permissionState) }}
+            </span>
+          </div>
 
-          <section class="example-grid">
-            <div>
-              <h3>输入示例</h3>
-              <p>{{ preview.item.inputExample }}</p>
-            </div>
-            <div>
-              <h3>输出示例</h3>
-              <p>{{ preview.item.outputExample }}</p>
-            </div>
-          </section>
+          <template v-if="preview.type === 'agent'">
+            <section class="preview-section">
+              <h3>等级说明</h3>
+              <p>{{ levelDescriptions[preview.item.level] }}</p>
+            </section>
 
-          <section class="preview-section">
-            <h3>关联 Skills</h3>
-            <div class="tag-row">
-              <span v-for="skill in previewAgentSkills" :key="skill.id">{{ skill.name }}</span>
-            </div>
-          </section>
-        </template>
+            <section class="preview-section">
+              <h3>适用场景</h3>
+              <div class="tag-row">
+                <span v-for="scenario in preview.item.scenarios" :key="scenario">{{
+                  scenario
+                }}</span>
+              </div>
+            </section>
 
-        <template v-else>
-          <section class="preview-section">
-            <h3>能力边界</h3>
-            <p>{{ preview.item.boundary }}</p>
-          </section>
+            <section class="example-grid">
+              <div>
+                <h3>输入示例</h3>
+                <p>{{ preview.item.inputExample }}</p>
+              </div>
+              <div>
+                <h3>输出示例</h3>
+                <p>{{ preview.item.outputExample }}</p>
+              </div>
+            </section>
 
-          <section class="preview-section">
-            <h3>调用说明</h3>
-            <p>{{ preview.item.callType }}，由授权 Agent 在任务流程中调用。</p>
-          </section>
+            <section class="preview-section">
+              <h3>关联 Skills</h3>
+              <div class="tag-row">
+                <span v-for="skill in previewAgentSkills" :key="skill.id">{{ skill.name }}</span>
+              </div>
+            </section>
+          </template>
 
-          <section class="preview-section">
-            <h3>关联 Agent</h3>
-            <div class="tag-row">
-              <span v-for="agent in previewSkillAgents" :key="agent.id">{{ agent.name }}</span>
-            </div>
-          </section>
-        </template>
+          <template v-else>
+            <section class="preview-section">
+              <h3>能力边界</h3>
+              <p>{{ preview.item.boundary }}</p>
+            </section>
 
-        <div class="preview-actions">
-          <n-button v-if="canUse(preview.item.permissionState)" type="primary">进入使用</n-button>
-          <n-button v-else type="warning" secondary>申请权限</n-button>
-          <n-button secondary @click="preview = null">关闭</n-button>
+            <section class="preview-section">
+              <h3>调用说明</h3>
+              <p>{{ preview.item.callType }}，由授权 Agent 在任务流程中调用。</p>
+            </section>
+
+            <section class="preview-section">
+              <h3>关联 Agent</h3>
+              <div class="tag-row">
+                <span v-for="agent in previewSkillAgents" :key="agent.id">{{ agent.name }}</span>
+              </div>
+            </section>
+          </template>
+
+          <div class="preview-actions">
+            <button
+              v-if="canUse(preview.item.permissionState)"
+              class="action-primary"
+              type="button"
+            >
+              进入使用
+            </button>
+            <button v-else class="action-warning" type="button">申请权限</button>
+            <button class="action-secondary" type="button" @click="preview = null">关闭</button>
+          </div>
         </div>
-      </div>
-    </n-modal>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -433,6 +516,34 @@ function formatUsage(count: number) {
   gap: 10px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.role-tabs {
+  display: inline-grid;
+  grid-template-columns: repeat(2, 1fr);
+  overflow: hidden;
+  padding: 2px;
+  border: 1px solid #dfe6f1;
+  border-radius: 10px;
+  background: #eef2f8;
+}
+
+.role-tabs button {
+  min-width: 54px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #667085;
+  font-size: 13px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.role-tabs button.active {
+  background: #ffffff;
+  color: #2563eb;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.1);
 }
 
 .permission-note,
@@ -501,10 +612,18 @@ function formatUsage(count: number) {
   line-height: 1;
 }
 
-.tone-blue { color: #2563eb; }
-.tone-green { color: #059669; }
-.tone-amber { color: #d97706; }
-.tone-violet { color: #7c3aed; }
+.tone-blue {
+  color: #2563eb;
+}
+.tone-green {
+  color: #059669;
+}
+.tone-amber {
+  color: #d97706;
+}
+.tone-violet {
+  color: #7c3aed;
+}
 
 .workbench-grid {
   display: grid;
@@ -526,6 +645,45 @@ function formatUsage(count: number) {
   padding: 14px;
   display: grid;
   gap: 16px;
+}
+
+.search-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-field input {
+  width: 100%;
+  height: 38px;
+  padding: 0 52px 0 12px;
+  border: 1px solid #dfe6f1;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 13px;
+  outline: none;
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.search-field input:focus {
+  border-color: rgba(79, 124, 255, 0.58);
+  box-shadow: 0 0 0 3px rgba(79, 124, 255, 0.12);
+}
+
+.search-field button {
+  position: absolute;
+  right: 7px;
+  height: 24px;
+  border: 0;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #3b5bdb;
+  font-size: 11px;
+  font-weight: 850;
+  cursor: pointer;
 }
 
 .rail-section {
@@ -575,7 +733,10 @@ function formatUsage(count: number) {
   color: inherit;
   cursor: pointer;
   text-align: left;
-  transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease,
+    box-shadow 0.16s ease;
 }
 
 .filter-button {
@@ -723,10 +884,19 @@ function formatUsage(count: number) {
   color: #2563eb;
 }
 
-.level-l1 .level-token { background: #2563eb; color: #ffffff; }
-.level-l2 .level-token { background: #059669; }
-.level-l3 .level-token { background: #d97706; }
-.level-l4 .level-token { background: #7c3aed; }
+.level-l1 .level-token {
+  background: #2563eb;
+  color: #ffffff;
+}
+.level-l2 .level-token {
+  background: #059669;
+}
+.level-l3 .level-token {
+  background: #d97706;
+}
+.level-l4 .level-token {
+  background: #7c3aed;
+}
 
 .row-main {
   min-width: 0;
@@ -847,6 +1017,18 @@ function formatUsage(count: number) {
   gap: 8px;
 }
 
+.empty-state {
+  margin: 0;
+  padding: 34px 12px;
+  border: 1px dashed #dce4ef;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #667085;
+  font-size: 13px;
+  font-weight: 750;
+  text-align: center;
+}
+
 .skill-type {
   width: fit-content;
   min-height: 22px;
@@ -860,8 +1042,26 @@ function formatUsage(count: number) {
   font-weight: 850;
 }
 
+.preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.38);
+  backdrop-filter: blur(6px);
+}
+
 .preview-modal {
   width: min(720px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid rgba(226, 232, 240, 0.92);
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 30px 70px rgba(15, 23, 42, 0.2);
 }
 
 .preview-head {
@@ -871,6 +1071,23 @@ function formatUsage(count: number) {
   gap: 12px;
 }
 
+.preview-head > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.preview-close {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  background: #f2f4f7;
+  color: #475467;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
 .skill-preview-mark {
   background: #0f766e;
 }
@@ -878,6 +1095,7 @@ function formatUsage(count: number) {
 .preview-body {
   display: grid;
   gap: 16px;
+  margin-top: 16px;
 }
 
 .preview-description,
@@ -931,6 +1149,35 @@ function formatUsage(count: number) {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.preview-actions button {
+  min-width: 82px;
+  height: 38px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.action-primary {
+  background: #2563eb;
+  color: #ffffff;
+  box-shadow: 0 10px 20px rgba(37, 99, 235, 0.2);
+}
+
+.action-warning {
+  background: #fffbeb;
+  color: #b45309;
+  border-color: #fde68a !important;
+}
+
+.action-secondary {
+  background: #ffffff;
+  color: #344054;
+  border-color: #dfe6f1 !important;
 }
 
 @media (max-width: 1180px) {

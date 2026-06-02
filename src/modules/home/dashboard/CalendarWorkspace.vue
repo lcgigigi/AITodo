@@ -16,9 +16,23 @@ import libaoImage from '@/assets/libao.png'
 import campusImage from '@/assets/modelone.png'
 import CalendarMonth from './CalendarMonth.vue'
 import DayPreviewPanel from './DayPreviewPanel.vue'
-import type { CalendarDay, CalendarEvent, CalendarEventStatus, CalendarSpecialDay, CalendarTodoDraft, CalendarTodoUpdate } from './types'
+import type {
+  CalendarDay,
+  CalendarEvent,
+  CalendarEventStatus,
+  CalendarSpecialDay,
+  CalendarTodoDraft,
+  CalendarTodoUpdate,
+} from './types'
 import { compareEvents, dateRange, formatEventTime } from './todoDisplay'
-import { createTodo as mockCreateTodo, listTodos, mockInitialTodos, mockUsers, updateTodo as mockUpdateTodo, updateTodoStatus as mockUpdateTodoStatus } from './todoMock'
+import {
+  createTodo as mockCreateTodo,
+  listTodos,
+  mockInitialTodos,
+  mockUsers,
+  updateTodo as mockUpdateTodo,
+  updateTodoStatus as mockUpdateTodoStatus,
+} from './todoMock'
 
 const now = ref(new Date())
 const selectedDate = ref(ymd(now.value))
@@ -183,7 +197,9 @@ function getDaysInMonth(year: number, month: number) {
 }
 
 function completedEventCountByDate(date: string) {
-  return events.value.filter((event) => event.status === 'done' && dateRange(event.date, event.endDate).includes(date)).length
+  return events.value.filter(
+    (event) => event.status === 'done' && dateRange(event.date, event.endDate).includes(date),
+  ).length
 }
 
 const eventMap = computed(() => {
@@ -213,7 +229,9 @@ const specialDayMap = computed(() => {
   return map
 })
 
-const currentUser = computed(() => mockUsers.find((user) => user.id === currentUserId.value) ?? mockUsers[0])
+const currentUser = computed(
+  () => mockUsers.find((user) => user.id === currentUserId.value) ?? mockUsers[0],
+)
 const assignableUsers = computed(() => {
   if (currentUser.value.role === 'leader') {
     const teamIds = currentUser.value.teamMemberIds ?? []
@@ -275,7 +293,9 @@ const weekDays = computed<CalendarDay[]>(() => {
   return result
 })
 
-const monthLabel = computed(() => `${currentMonth.value.getFullYear()} 年 ${currentMonth.value.getMonth() + 1} 月`)
+const monthLabel = computed(
+  () => `${currentMonth.value.getFullYear()} 年 ${currentMonth.value.getMonth() + 1} 月`,
+)
 const weekLabel = computed(() => {
   const activeDays = weekDays.value.filter((day) => day.inActiveWeek)
   const first = activeDays[0]
@@ -289,7 +309,9 @@ const weekLabel = computed(() => {
 
   return `${start.getFullYear()} 年 ${startLabel} - ${endLabel}`
 })
-const visibleCalendarDays = computed(() => (calendarViewMode.value === 'week' ? weekDays.value : days.value))
+const visibleCalendarDays = computed(() =>
+  calendarViewMode.value === 'week' ? weekDays.value : days.value,
+)
 const isTodoOperating = computed(() => isDayPreviewOpen.value)
 const shouldShowTodayBubble = computed(
   () =>
@@ -301,7 +323,9 @@ const shouldShowTodayBubble = computed(
 const selectedEvents = computed(() => eventMap.value.get(selectedDate.value) ?? [])
 const selectedSpecialDays = computed(() => specialDayMap.value.get(selectedDate.value) ?? [])
 const todayEvents = computed(() => eventMap.value.get(todayDate.value) ?? [])
-const todayPendingEvents = computed(() => todayEvents.value.filter((event) => event.status !== 'done'))
+const todayPendingEvents = computed(() =>
+  todayEvents.value.filter((event) => event.status !== 'done'),
+)
 const currentWeekDates = computed(() => {
   const start = new Date(`${todayDate.value}T12:00:00`)
   const offset = (start.getDay() + 6) % 7
@@ -321,9 +345,14 @@ const weekPendingEvents = computed(() =>
   ),
 )
 const nextTodayEvent = computed(() => todayPendingEvents.value[0])
-const completedCount = computed(() => events.value.filter((event) => event.status === 'done').length)
+const completedCount = computed(
+  () => events.value.filter((event) => event.status === 'done').length,
+)
 const userName = computed(() => currentUser.value.name)
-const userDepartment = computed(() => `${currentUser.value.department ?? 'AI平台'} · ${currentUser.value.role === 'leader' ? '领导' : '员工'}`)
+const userDepartment = computed(
+  () =>
+    `${currentUser.value.department ?? 'AI平台'} · ${currentUser.value.role === 'leader' ? '领导' : '员工'}`,
+)
 const avatarUrl = computed(() => libaoImage)
 const greeting = computed(() => {
   const hour = now.value.getHours()
@@ -347,9 +376,13 @@ const dateLabel = computed(() =>
   }).format(now.value),
 )
 const dataUpdateLabel = computed(() => `数据更新于 ${timeLabel.value}`)
-const todayCompletedCount = computed(() => todayEvents.value.length - todayPendingEvents.value.length)
+const todayCompletedCount = computed(
+  () => todayEvents.value.length - todayPendingEvents.value.length,
+)
 const todayTaskProgress = computed(() =>
-  todayEvents.value.length ? Math.round((todayCompletedCount.value / todayEvents.value.length) * 100) : 0,
+  todayEvents.value.length
+    ? Math.round((todayCompletedCount.value / todayEvents.value.length) * 100)
+    : 0,
 )
 const profileTaskInsight = computed(() => {
   const todayCount = todayPendingEvents.value.length
@@ -363,8 +396,12 @@ const profileTaskInsight = computed(() => {
       : '可以补充新的重点安排',
   }
 })
-const weekTaskCompleted = computed(() => Math.min(Math.max(completedCount.value, 5), Math.max(events.value.length, 1)))
-const weekTaskProgress = computed(() => Math.round((weekTaskCompleted.value / Math.max(events.value.length, 1)) * 100))
+const weekTaskCompleted = computed(() =>
+  Math.min(Math.max(completedCount.value, 5), Math.max(events.value.length, 1)),
+)
+const weekTaskProgress = computed(() =>
+  Math.round((weekTaskCompleted.value / Math.max(events.value.length, 1)) * 100),
+)
 const dashboardMetrics = computed(() => [
   {
     label: '今日待办',
@@ -386,7 +423,9 @@ const dashboardMetrics = computed(() => [
     tone: 'green',
   },
 ])
-const trendSeries = computed(() => trendStatMode.value === 'week' ? weekTrendSeries.value : monthTrendSeries.value)
+const trendSeries = computed(() =>
+  trendStatMode.value === 'week' ? weekTrendSeries.value : monthTrendSeries.value,
+)
 const weekTrendSeries = computed(() =>
   weekDays.value.map((day) => ({
     label: ['日', '一', '二', '三', '四', '五', '六'][new Date(`${day.date}T12:00:00`).getDay()],
@@ -423,7 +462,9 @@ const trendChartPoints = computed(() => {
     return { ...item, x, y }
   })
 })
-const trendLinePoints = computed(() => trendChartPoints.value.map((point) => `${point.x},${point.y}`).join(' '))
+const trendLinePoints = computed(() =>
+  trendChartPoints.value.map((point) => `${point.x},${point.y}`).join(' '),
+)
 const trendAreaPoints = computed(() => `0,74 ${trendLinePoints.value} 210,74`)
 const welcomeSummary = computed(() => {
   if (!todayPendingEvents.value.length) {
@@ -445,10 +486,11 @@ const selectedDateLabel = computed(() => {
 function selectDate(date: string, syncMonth = true) {
   selectedDate.value = date
   const nextDate = new Date(`${date}T12:00:00`)
-  if (syncMonth && (
-    nextDate.getFullYear() !== currentMonth.value.getFullYear() ||
-    nextDate.getMonth() !== currentMonth.value.getMonth()
-  )) {
+  if (
+    syncMonth &&
+    (nextDate.getFullYear() !== currentMonth.value.getFullYear() ||
+      nextDate.getMonth() !== currentMonth.value.getMonth())
+  ) {
     currentMonth.value = new Date(nextDate.getFullYear(), nextDate.getMonth(), 1)
   }
 }
@@ -502,7 +544,12 @@ function clearPanelCloseRestoreTimer() {
 }
 
 function tryShowTodayBubble() {
-  if (isTodayBubbleManualClosed.value || isTodoOperating.value || calendarViewMode.value !== 'month') return
+  if (
+    isTodayBubbleManualClosed.value ||
+    isTodoOperating.value ||
+    calendarViewMode.value !== 'month'
+  )
+    return
 
   isTodayBubbleVisible.value = true
   isTodayBubbleAutoHidden.value = false
@@ -514,7 +561,12 @@ function resetTodayBubbleTimer() {
 }
 
 function hideTodayBubbleTemporarily() {
-  if (isTodayBubbleManualClosed.value || isTodoOperating.value || calendarViewMode.value !== 'month') return
+  if (
+    isTodayBubbleManualClosed.value ||
+    isTodoOperating.value ||
+    calendarViewMode.value !== 'month'
+  )
+    return
 
   isTodayBubbleVisible.value = false
   isTodayBubbleAutoHidden.value = true
@@ -527,7 +579,11 @@ function scheduleTodayBubbleAfterPanelClose() {
   if (isTodayBubbleManualClosed.value || calendarViewMode.value !== 'month') return
 
   panelCloseRestoreTimer = setTimeout(() => {
-    if (!isDayPreviewOpen.value && !isTodayBubbleManualClosed.value && calendarViewMode.value === 'month') {
+    if (
+      !isDayPreviewOpen.value &&
+      !isTodayBubbleManualClosed.value &&
+      calendarViewMode.value === 'month'
+    ) {
       isTodayBubbleVisible.value = true
       isTodayBubbleAutoHidden.value = false
     }
@@ -568,8 +624,15 @@ function changePeriod(delta: number) {
   }
 
   const selected = new Date(`${selectedDate.value}T12:00:00`)
-  const nextMonth = new Date(currentMonth.value.getFullYear(), currentMonth.value.getMonth() + delta, 1)
-  const nextDay = Math.min(selected.getDate(), getDaysInMonth(nextMonth.getFullYear(), nextMonth.getMonth()))
+  const nextMonth = new Date(
+    currentMonth.value.getFullYear(),
+    currentMonth.value.getMonth() + delta,
+    1,
+  )
+  const nextDay = Math.min(
+    selected.getDate(),
+    getDaysInMonth(nextMonth.getFullYear(), nextMonth.getMonth()),
+  )
 
   currentMonth.value = nextMonth
   selectedDate.value = ymd(new Date(nextMonth.getFullYear(), nextMonth.getMonth(), nextDay))
@@ -596,7 +659,11 @@ function openAgentList() {
     >
       <section class="profile-panel">
         <div class="profile-menu-anchor">
-          <button class="profile-trigger" type="button" @click="isProfileDialogOpen = !isProfileDialogOpen">
+          <button
+            class="profile-trigger"
+            type="button"
+            @click="isProfileDialogOpen = !isProfileDialogOpen"
+          >
             <img class="avatar" :src="avatarUrl" alt="用户头像" />
             <span class="profile-copy">
               <strong>{{ greeting }}，{{ userName }}</strong>
@@ -627,7 +694,14 @@ function openAgentList() {
                   <p>{{ userDepartment }}</p>
                 </div>
               </div>
-              <button class="dialog-close" type="button" aria-label="关闭" @click="isProfileDialogOpen = false">×</button>
+              <button
+                class="dialog-close"
+                type="button"
+                aria-label="关闭"
+                @click="isProfileDialogOpen = false"
+              >
+                ×
+              </button>
             </header>
 
             <div class="dialog-section">
@@ -691,7 +765,10 @@ function openAgentList() {
             </span>
             <div class="metric-copy">
               <span>{{ metric.label }}</span>
-              <strong><em>{{ metric.value }}</em>{{ metric.unit }}</strong>
+              <strong
+                ><em>{{ metric.value }}</em
+                >{{ metric.unit }}</strong
+              >
               <p>
                 {{ metric.detail }}
                 <i v-if="metric.trend">{{ metric.trend }}</i>
@@ -729,7 +806,12 @@ function openAgentList() {
               </div>
             </header>
 
-            <svg class="trend-chart" viewBox="0 0 210 82" preserveAspectRatio="none" aria-hidden="true">
+            <svg
+              class="trend-chart"
+              viewBox="0 0 210 82"
+              preserveAspectRatio="none"
+              aria-hidden="true"
+            >
               <line v-for="y in [18, 42, 66]" :key="y" x1="0" :y1="y" x2="210" :y2="y" />
               <polygon :points="trendAreaPoints" />
               <polyline :points="trendLinePoints" />
@@ -899,36 +981,9 @@ function openAgentList() {
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 28px 72px -36px rgba(15, 23, 42, 0.58);
   padding: 24px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   backdrop-filter: blur(18px);
-  transform: translateY(-50%);
-}
-
-.day-preview-popover::before,
-.day-preview-popover::after {
-  content: '';
-  position: absolute;
-  pointer-events: none;
-}
-
-.day-preview-popover::before {
-  top: 50%;
-  right: -13px;
-  width: 24px;
-  height: 24px;
-  border-top: 1px solid rgba(226, 232, 240, 0.92);
-  border-right: 1px solid rgba(226, 232, 240, 0.92);
-  background: rgba(255, 255, 255, 0.96);
-  transform: translateY(-50%) rotate(45deg);
-  box-shadow: 12px -8px 28px -24px rgba(15, 23, 42, 0.5);
-}
-
-.day-preview-popover::after {
-  top: 50%;
-  right: -42px;
-  width: 32px;
-  height: 1px;
-  background: linear-gradient(90deg, rgba(148, 163, 184, 0.48), rgba(148, 163, 184, 0));
   transform: translateY(-50%);
 }
 
@@ -959,8 +1014,7 @@ function openAgentList() {
   overflow-y: visible;
   border: 1px solid rgba(226, 232, 240, 0.58);
   border-radius: 24px;
-  background:
-    radial-gradient(circle at 18% 14%, rgba(219, 234, 254, 0.52), transparent 34%),
+  background: radial-gradient(circle at 18% 14%, rgba(219, 234, 254, 0.52), transparent 34%),
     radial-gradient(circle at 80% 18%, rgba(237, 233, 254, 0.46), transparent 32%),
     linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(248, 251, 255, 0.74));
   box-shadow:
@@ -976,9 +1030,18 @@ function openAgentList() {
   border-radius: inherit;
   pointer-events: none;
   content: '';
-  background:
-    radial-gradient(ellipse 58% 42% at 0% 0%, rgba(255, 255, 255, 0.96) 0%, rgba(255, 255, 255, 0.72) 34%, rgba(255, 255, 255, 0) 76%),
-    linear-gradient(135deg, rgba(235, 244, 255, 0.74) 0%, rgba(235, 244, 255, 0.32) 24%, rgba(235, 244, 255, 0) 52%);
+  background: radial-gradient(
+      ellipse 58% 42% at 0% 0%,
+      rgba(255, 255, 255, 0.96) 0%,
+      rgba(255, 255, 255, 0.72) 34%,
+      rgba(255, 255, 255, 0) 76%
+    ),
+    linear-gradient(
+      135deg,
+      rgba(235, 244, 255, 0.74) 0%,
+      rgba(235, 244, 255, 0.32) 24%,
+      rgba(235, 244, 255, 0) 52%
+    );
 }
 
 .profile-welcome-panel.has-profile-dialog {
@@ -1054,7 +1117,12 @@ p {
   right: -90px;
   left: -90px;
   height: 170px;
-  background: linear-gradient(180deg, rgba(249, 251, 255, 1) 0%, rgba(249, 251, 255, 0.9) 42%, rgba(249, 251, 255, 0) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(249, 251, 255, 1) 0%,
+    rgba(249, 251, 255, 0.9) 42%,
+    rgba(249, 251, 255, 0) 100%
+  );
   filter: blur(1px);
 }
 
@@ -1062,8 +1130,7 @@ p {
   z-index: 3;
   inset: auto -10% -46px;
   height: 40%;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0), rgba(249, 251, 255, 0.98) 58%),
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0), rgba(249, 251, 255, 0.98) 58%),
     radial-gradient(ellipse at center, rgba(255, 255, 255, 0.94), transparent 74%);
 }
 
@@ -1078,14 +1145,11 @@ p {
   max-height: 114%;
   object-fit: contain;
   transform: translateX(-50%);
-  filter:
-    drop-shadow(0 28px 30px rgba(15, 23, 42, 0.08))
+  filter: drop-shadow(0 28px 30px rgba(15, 23, 42, 0.08))
     drop-shadow(0 0 24px rgba(37, 99, 235, 0.06));
-  -webkit-mask-image:
-    linear-gradient(180deg, transparent 0%, #000 12%, #000 78%, transparent 98%),
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 12%, #000 78%, transparent 98%),
     radial-gradient(ellipse 86% 74% at 50% 54%, #000 56%, rgba(0, 0, 0, 0.74) 72%, transparent 96%);
-  mask-image:
-    linear-gradient(180deg, transparent 0%, #000 12%, #000 78%, transparent 98%),
+  mask-image: linear-gradient(180deg, transparent 0%, #000 12%, #000 78%, transparent 98%),
     radial-gradient(ellipse 86% 74% at 50% 54%, #000 56%, rgba(0, 0, 0, 0.74) 72%, transparent 96%);
   -webkit-mask-composite: source-in;
   mask-composite: intersect;
@@ -1299,8 +1363,7 @@ p {
   box-sizing: border-box;
   border: 1px solid rgba(226, 232, 240, 0.62);
   border-radius: 16px;
-  background:
-    linear-gradient(140deg, rgba(255, 255, 255, 0.9), rgba(249, 251, 255, 0.72)),
+  background: linear-gradient(140deg, rgba(255, 255, 255, 0.9), rgba(249, 251, 255, 0.72)),
     rgba(255, 255, 255, 0.7);
   padding: 16px 54px 14px 56px;
   color: #64748b;
@@ -1541,8 +1604,7 @@ p {
   grid-column: 1 / 3;
   grid-row: 2;
   border-radius: 22px;
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(241, 245, 249, 0.56)),
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(241, 245, 249, 0.56)),
     rgba(255, 255, 255, 0.68);
 }
 
@@ -1624,8 +1686,7 @@ p {
   box-sizing: border-box;
   border: 1px solid rgba(226, 232, 240, 0.82);
   border-radius: 16px;
-  background:
-    linear-gradient(140deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.64)),
+  background: linear-gradient(140deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.64)),
     rgba(255, 255, 255, 0.72);
   padding: 15px 14px 14px;
   display: grid;
@@ -1727,7 +1788,9 @@ p {
   font-size: 22px;
   line-height: 1;
   cursor: pointer;
-  transition: background 0.18s ease, color 0.18s ease;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease;
 }
 
 .agent-menu:hover {
@@ -1781,7 +1844,7 @@ p {
 .profile-task-summary {
   max-width: min(100%, 520px);
   color: #64748b;
-  transform: translate(10px,20px);
+  transform: translate(10px, 20px);
 }
 
 .profile-task-summary p {

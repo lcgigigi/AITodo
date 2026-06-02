@@ -1,10 +1,7 @@
 <template>
-  <NaiveProvider>
-    <RouterView />
-  </NaiveProvider>
+  <RouterView />
 </template>
 
 <script setup lang="ts">
 import { RouterView } from 'vue-router'
-import NaiveProvider from './providers/naive-provider.vue'
 </script>

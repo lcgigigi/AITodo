@@ -1,6 +1,6 @@
 <template>
   <div class="app-loading" role="status" aria-live="polite">
-    <n-spin size="small" />
+    <span class="loading loading-spinner loading-sm" aria-hidden="true"></span>
     <span>{{ text }}</span>
   </div>
 </template>

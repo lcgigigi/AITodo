@@ -11,19 +11,20 @@
       </div>
 
       <div class="top-actions">
-        <n-badge :value="6" :offset="[-2, 4]">
-          <n-button circle quaternary class="top-icon" aria-label="通知">
-            <template #icon><IconBell /></template>
-          </n-button>
-        </n-badge>
-        <n-button circle quaternary class="top-icon" aria-label="客服">
-          <template #icon><IconHeadphones /></template>
-        </n-button>
-        <n-button circle quaternary class="top-icon" aria-label="设置">
-          <template #icon><IconSettings /></template>
-        </n-button>
+        <div class="notification-wrap">
+          <button class="top-icon" type="button" aria-label="通知">
+            <IconBell />
+          </button>
+          <span class="notification-badge">6</span>
+        </div>
+        <button class="top-icon" type="button" aria-label="客服">
+          <IconHeadphones />
+        </button>
+        <button class="top-icon" type="button" aria-label="设置">
+          <IconSettings />
+        </button>
         <div class="user">
-          <n-avatar round color="#e8efff" text-color="#2458ff">刘</n-avatar>
+          <div class="user-avatar">刘</div>
           <div>
             <b>刘美华</b>
           </div>
@@ -36,7 +37,9 @@
         <div class="summary-icon">{{ item.icon }}</div>
         <div class="summary-copy">
           <span>{{ item.label }}</span>
-          <b>{{ item.value }}<em>{{ item.unit }}</em></b>
+          <b
+            >{{ item.value }}<em>{{ item.unit }}</em></b
+          >
           <p>较上月 ↑ {{ item.rate }}%</p>
         </div>
         <div :ref="(el) => setSummaryChartRef(el, index)" class="mini-chart"></div>
@@ -52,12 +55,11 @@
           </div>
 
           <div class="panel-actions">
-            <n-select
-              v-model:value="sortType"
-              :options="sortOptions"
-              size="small"
-              class="sort-select"
-            />
+            <select v-model="sortType" class="soft-select sort-select" aria-label="智能体排序">
+              <option v-for="option in sortOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
           </div>
         </div>
 
@@ -72,26 +74,28 @@
             </div>
 
             <div class="tag-line">
-              <n-tag size="small" :bordered="false" type="info">{{ agent.categoryName }}</n-tag>
-              <n-tag size="small" :bordered="false" type="success">{{ agent.status }}</n-tag>
+              <span class="agent-tag info">{{ agent.categoryName }}</span>
+              <span class="agent-tag success">{{ agent.status }}</span>
             </div>
 
             <div class="agent-metrics">
-              <div><span>本月 Token</span><b>{{ formatNumber(agent.monthlyToken) }}</b></div>
-              <div><span>调用次数</span><b>{{ formatNumber(agent.calls) }}</b></div>
-              <div><span>积分贡献</span><b>{{ formatNumber(agent.points) }}</b></div>
-              <div><span>使用进度</span><b>{{ agent.progress }}%</b></div>
+              <div>
+                <span>本月 Token</span><b>{{ formatNumber(agent.monthlyToken) }}</b>
+              </div>
+              <div>
+                <span>调用次数</span><b>{{ formatNumber(agent.calls) }}</b>
+              </div>
+              <div>
+                <span>积分贡献</span><b>{{ formatNumber(agent.points) }}</b>
+              </div>
+              <div>
+                <span>使用进度</span><b>{{ agent.progress }}%</b>
+              </div>
             </div>
 
-            <n-progress
-              type="line"
-              :percentage="agent.progress"
-              :height="7"
-              :border-radius="7"
-              :fill-border-radius="7"
-              :show-indicator="false"
-              class="agent-progress"
-            />
+            <div class="agent-progress" aria-hidden="true">
+              <span :style="{ width: `${agent.progress}%` }"></span>
+            </div>
           </article>
         </div>
       </section>
@@ -100,12 +104,15 @@
         <section class="card overview-card">
           <div class="panel-head small">
             <h2>Token 使用概览</h2>
-            <n-select
-              v-model:value="overviewPeriod"
-              :options="periodOptions"
-              size="small"
-              class="period-select"
-            />
+            <select
+              v-model="overviewPeriod"
+              class="soft-select period-select"
+              aria-label="Token 统计周期"
+            >
+              <option v-for="option in periodOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
           </div>
 
           <div class="overview-grid">
@@ -133,14 +140,9 @@
               <div class="quota-row">
                 <span>配额使用率</span>
                 <strong>{{ tokenOverview.quotaUsed }}%</strong>
-                <n-progress
-                  type="line"
-                  :percentage="tokenOverview.quotaUsed"
-                  :height="8"
-                  :border-radius="8"
-                  :fill-border-radius="8"
-                  :show-indicator="false"
-                />
+                <div class="quota-progress" aria-hidden="true">
+                  <span :style="{ width: `${tokenOverview.quotaUsed}%` }"></span>
+                </div>
               </div>
             </div>
 
@@ -161,10 +163,10 @@
           <div class="card rank-card">
             <div class="panel-head small">
               <h2>Token 排名</h2>
-              <n-button text type="primary" size="small">
+              <button class="link-action" type="button">
                 更多
-                <template #icon><IconChevronRight /></template>
-              </n-button>
+                <IconChevronRight />
+              </button>
             </div>
             <div ref="tokenRankChartRef" class="rank-chart"></div>
           </div>
@@ -172,10 +174,10 @@
           <div class="card rank-card">
             <div class="panel-head small">
               <h2>积分排行</h2>
-              <n-button text type="primary" size="small">
+              <button class="link-action" type="button">
                 更多
-                <template #icon><IconChevronRight /></template>
-              </n-button>
+                <IconChevronRight />
+              </button>
             </div>
             <div ref="pointsRankChartRef" class="rank-chart"></div>
           </div>
@@ -184,20 +186,22 @@
         <section class="card trend-card">
           <div class="panel-head small">
             <h2>Token 趋势 <span>近 7 天</span></h2>
-            <n-button-group size="small">
-              <n-button
-                :type="trendMode === 'day' ? 'primary' : 'default'"
+            <div class="mode-tabs" role="group" aria-label="趋势维度">
+              <button
+                type="button"
+                :class="{ active: trendMode === 'day' }"
                 @click="trendMode = 'day'"
               >
                 按日
-              </n-button>
-              <n-button
-                :type="trendMode === 'week' ? 'primary' : 'default'"
+              </button>
+              <button
+                type="button"
+                :class="{ active: trendMode === 'week' }"
                 @click="trendMode = 'week'"
               >
                 按周
-              </n-button>
-            </n-button-group>
+              </button>
+            </div>
           </div>
 
           <div ref="trendChartRef" class="trend-chart"></div>
@@ -211,15 +215,6 @@
 import type { ComponentPublicInstance } from 'vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import * as echarts from 'echarts'
-import {
-  NAvatar,
-  NBadge,
-  NButton,
-  NButtonGroup,
-  NProgress,
-  NSelect,
-  NTag,
-} from 'naive-ui'
 import IconBell from '~icons/lucide/bell'
 import IconChevronRight from '~icons/lucide/chevron-right'
 import IconHeadphones from '~icons/lucide/headphones'
@@ -235,6 +230,10 @@ import {
   type AgentItem,
   type RankItem,
 } from './mock'
+
+defineOptions({
+  name: 'AgentCenterPage',
+})
 
 type SortType = 'default' | 'tokenDesc' | 'pointsDesc' | 'callsDesc'
 type TrendMode = 'day' | 'week'
@@ -265,7 +264,8 @@ const periodOptions = [
 const filteredAgents = computed<AgentItem[]>(() => {
   const list = agents
 
-  if (sortType.value === 'tokenDesc') return [...list].sort((a, b) => b.monthlyToken - a.monthlyToken)
+  if (sortType.value === 'tokenDesc')
+    return [...list].sort((a, b) => b.monthlyToken - a.monthlyToken)
   if (sortType.value === 'pointsDesc') return [...list].sort((a, b) => b.points - a.points)
   if (sortType.value === 'callsDesc') return [...list].sort((a, b) => b.calls - a.calls)
   return list
@@ -360,7 +360,6 @@ const createDonutOption = (): echarts.EChartsOption => ({
 const createRankOption = (
   data: RankItem[],
   colorStops: [string, string],
-  unit: string,
 ): echarts.EChartsOption => {
   const orderedData = [...data].reverse()
 
@@ -468,8 +467,8 @@ const renderAllCharts = () => {
     renderChart(summaryChartRefs.value[index] ?? null, createMiniLineOption(item.sparkline))
   })
   renderChart(donutChartRef.value, createDonutOption())
-  renderChart(tokenRankChartRef.value, createRankOption(tokenRanking, ['#2f68ff', '#765cff'], 'Tokens'))
-  renderChart(pointsRankChartRef.value, createRankOption(pointsRanking, ['#12b981', '#2f68ff'], '积分'))
+  renderChart(tokenRankChartRef.value, createRankOption(tokenRanking, ['#2f68ff', '#765cff']))
+  renderChart(pointsRankChartRef.value, createRankOption(pointsRanking, ['#12b981', '#2f68ff']))
   renderChart(trendChartRef.value, createTrendOption())
 }
 
@@ -509,9 +508,8 @@ onBeforeUnmount(() => {
   padding: 14px 18px;
   color: #182044;
   box-sizing: border-box;
-  font-family: Inter, "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
-  background:
-    radial-gradient(circle at 18% 6%, rgba(77, 116, 255, 0.13), transparent 28%),
+  font-family: Inter, 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
+  background: radial-gradient(circle at 18% 6%, rgba(77, 116, 255, 0.13), transparent 28%),
     radial-gradient(circle at 75% 12%, rgba(21, 185, 130, 0.09), transparent 28%),
     linear-gradient(180deg, #f8fbff 0%, #f4f7fc 100%);
 }
@@ -570,9 +568,55 @@ onBeforeUnmount(() => {
   gap: 10px;
 }
 
+.notification-wrap {
+  position: relative;
+}
+
 .top-icon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 50%;
   background: rgba(255, 255, 255, 0.74);
+  color: #263158;
   box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.2);
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+.top-icon:hover {
+  border-color: rgba(79, 124, 255, 0.28);
+  background: #ffffff;
+  box-shadow: 0 10px 22px rgba(31, 45, 86, 0.08);
+  transform: translateY(-1px);
+}
+
+.top-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.notification-badge {
+  position: absolute;
+  top: -7px;
+  right: -6px;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  background: #e3345f;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 15px;
+  text-align: center;
 }
 
 .user {
@@ -580,11 +624,16 @@ onBeforeUnmount(() => {
   padding-left: 8px;
 }
 
-.user span {
-  display: block;
-  margin-top: 1px;
-  color: #67708f;
-  font-size: 11px;
+.user-avatar {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #e8efff;
+  color: #2458ff;
+  font-size: 15px;
+  font-weight: 800;
 }
 
 .card {
@@ -703,29 +752,36 @@ onBeforeUnmount(() => {
   width: 96px;
 }
 
-.sort-select :deep(.n-base-selection),
-.period-select :deep(.n-base-selection) {
-  --n-height: 38px !important;
-  --n-border-radius: 14px !important;
-  --n-border: 1px solid rgba(151, 164, 198, 0.28) !important;
-  --n-border-hover: 1px solid rgba(79, 124, 255, 0.48) !important;
-  --n-border-active: 1px solid rgba(79, 124, 255, 0.72) !important;
-  --n-box-shadow-active: 0 0 0 3px rgba(79, 124, 255, 0.12) !important;
-  background: rgba(255, 255, 255, 0.86);
-  box-shadow: 0 8px 20px rgba(31, 45, 86, 0.04);
-}
-
-.sort-select :deep(.n-base-selection-label),
-.period-select :deep(.n-base-selection-label) {
-  padding: 0 14px;
+.soft-select {
+  height: 38px;
+  padding: 0 36px 0 14px;
+  border: 1px solid rgba(151, 164, 198, 0.28);
+  border-radius: 14px;
+  appearance: none;
+  background:
+    linear-gradient(45deg, transparent 50%, #8b94ad 50%) right 18px center / 6px 6px no-repeat,
+    linear-gradient(135deg, #8b94ad 50%, transparent 50%) right 13px center / 6px 6px no-repeat,
+    rgba(255, 255, 255, 0.88);
   color: #263158;
   font-size: 13px;
   font-weight: 700;
+  box-shadow: 0 8px 20px rgba(31, 45, 86, 0.04);
+  cursor: pointer;
+  outline: none;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background-color 0.18s ease;
 }
 
-.sort-select :deep(.n-base-suffix),
-.period-select :deep(.n-base-suffix) {
-  color: #8b94ad;
+.soft-select:hover {
+  border-color: rgba(79, 124, 255, 0.48);
+  background-color: #ffffff;
+}
+
+.soft-select:focus {
+  border-color: rgba(79, 124, 255, 0.72);
+  box-shadow: 0 0 0 3px rgba(79, 124, 255, 0.12);
 }
 
 .agent-panel,
@@ -811,6 +867,30 @@ onBeforeUnmount(() => {
   margin: 7px 0 7px;
 }
 
+.agent-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.agent-tag.info {
+  background: rgba(79, 124, 255, 0.1);
+  color: #315fe7;
+}
+
+.agent-tag.success {
+  background: rgba(18, 185, 129, 0.12);
+  color: #0f996b;
+}
+
 .agent-metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -829,7 +909,18 @@ onBeforeUnmount(() => {
 }
 
 .agent-progress {
+  height: 7px;
+  overflow: hidden;
   margin-top: 8px;
+  border-radius: 999px;
+  background: #eef2fa;
+}
+
+.agent-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2f68ff, #765cff);
 }
 
 .right-panel {
@@ -901,8 +992,19 @@ onBeforeUnmount(() => {
   margin-top: 2px;
 }
 
-.quota-row :deep(.n-progress) {
+.quota-progress {
   grid-column: 1 / -1;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #eef2fa;
+}
+
+.quota-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2f68ff, #765cff);
 }
 
 .quota-row strong {
@@ -976,6 +1078,23 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
+.link-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 0;
+  background: transparent;
+  color: #2f68ff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.link-action svg {
+  width: 15px;
+  height: 15px;
+}
+
 .trend-card {
   display: flex;
   flex-direction: column;
@@ -988,13 +1107,59 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
-.theme-blue { background: linear-gradient(135deg, #1a84ff, #3f5dff); }
-.theme-green { background: linear-gradient(135deg, #12b981, #11a36b); }
-.theme-purple { background: linear-gradient(135deg, #7a5cff, #9b62ff); }
-.theme-orange { background: linear-gradient(135deg, #ff7a1a, #ffb21f); }
-.theme-indigo { background: linear-gradient(135deg, #24345d, #465782); }
-.theme-pink { background: linear-gradient(135deg, #f4458d, #ff6cb2); }
-.theme-yellow { background: linear-gradient(135deg, #f6a800, #ffca42); }
+.mode-tabs {
+  display: inline-grid;
+  grid-template-columns: repeat(2, 1fr);
+  overflow: hidden;
+  padding: 2px;
+  border: 1px solid rgba(151, 164, 198, 0.26);
+  border-radius: 15px;
+  background: #eef2fa;
+}
+
+.mode-tabs button {
+  min-width: 48px;
+  height: 30px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #6b7390;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.mode-tabs button.active {
+  background: #2f68ff;
+  color: #ffffff;
+  box-shadow: 0 8px 18px rgba(47, 104, 255, 0.24);
+}
+
+.theme-blue {
+  background: linear-gradient(135deg, #1a84ff, #3f5dff);
+}
+.theme-green {
+  background: linear-gradient(135deg, #12b981, #11a36b);
+}
+.theme-purple {
+  background: linear-gradient(135deg, #7a5cff, #9b62ff);
+}
+.theme-orange {
+  background: linear-gradient(135deg, #ff7a1a, #ffb21f);
+}
+.theme-indigo {
+  background: linear-gradient(135deg, #24345d, #465782);
+}
+.theme-pink {
+  background: linear-gradient(135deg, #f4458d, #ff6cb2);
+}
+.theme-yellow {
+  background: linear-gradient(135deg, #f6a800, #ffca42);
+}
 
 @media (max-width: 1600px) {
   .main-grid {
