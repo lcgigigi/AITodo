@@ -45,7 +45,6 @@
 
 ```ts
 type TodoStatus = 'todo' | 'done'
-type TodoPriority = 'normal' | 'urgent'
 type TodoScope = 'self' | 'assigned_by_me' | 'assigned_to_me'
 
 interface Todo {
@@ -56,9 +55,7 @@ interface Todo {
   type: 'task' | 'meeting' | 'approval' | 'ai'
   owner: string
   status: TodoStatus
-  priority?: TodoPriority
   source?: string
-  completionIdeas?: string
   creatorId: string
   creatorName: string
   assigneeId: string
@@ -105,9 +102,7 @@ interface Todo {
       "type": "task",
       "owner": "刘畅",
       "status": "todo",
-      "priority": "normal",
       "source": "AI预填",
-      "completionIdeas": "先确认官网栏目结构，再拆首页组件和素材需求。",
       "creatorId": "leader-zhang",
       "creatorName": "刘美华",
       "assigneeId": "employee-liu",
@@ -135,9 +130,7 @@ interface Todo {
   "title": "开发公司官方网站",
   "assigneeId": "employee-liu",
   "assigneeName": "刘畅",
-  "source": "AI预填",
-  "completionIdeas": "先确认官网栏目结构，再拆首页组件和素材需求。",
-  "priority": "normal"
+  "source": "AI预填"
 }
 ```
 
@@ -164,8 +157,7 @@ interface Todo {
   "title": "开发公司官方网站首页",
   "assigneeId": "employee-liu",
   "assigneeName": "刘畅",
-  "source": "需求调整",
-  "completionIdeas": "首页先完成首屏和导航，再补充案例模块。"
+  "source": "需求调整"
 }
 ```
 

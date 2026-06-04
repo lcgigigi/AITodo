@@ -17,7 +17,7 @@ import {
   parseDate,
   ymd,
 } from './todoDisplay'
-import { parseTodoText as mockParseTodoText } from './todoMock'
+import { parseTodoText as serviceParseTodoText } from './todo.service'
 
 const props = defineProps<{
   date: string
@@ -29,12 +29,18 @@ const props = defineProps<{
   showClose?: boolean
   quickCreatePrompt?: string
   quickCreateKey?: number
+  externalDraft?: CalendarTodoDraft | null
+  externalDraftKey?: number
+  presetCreateTime?: string
+  presetCreateKey?: number
 }>()
 
 const emit = defineEmits<{
   createTodo: [payload: CalendarTodoDraft]
   updateTodo: [payload: CalendarTodoUpdate]
   updateStatus: [id: string, status: CalendarEventStatus]
+  deleteTodo: [id: string]
+  dirtyChange: [dirty: boolean]
   close: []
 }>()
 
@@ -45,6 +51,7 @@ const editingId = ref('')
 const aiPrompt = ref('')
 const isParsing = ref(false)
 const todoForm = ref<CalendarTodoForm>(createEmptyForm(props.date))
+const initialFormSnapshot = ref(formSnapshot(todoForm.value))
 
 const specialText: Record<CalendarSpecialDay['type'], string> = {
   holiday: '节假日',
@@ -62,14 +69,22 @@ const isDeadlineMode = computed(() => todoForm.value.mode === 'deadline')
 const canChooseAssignee = computed(
   () => props.currentUser.role === 'leader' && props.assignableUsers.length > 1,
 )
+const hasUnsavedChanges = computed(
+  () => isFormMode.value && formSnapshot(todoForm.value) !== initialFormSnapshot.value,
+)
+
+watch(
+  hasUnsavedChanges,
+  (dirty) => {
+    emit('dirtyChange', dirty)
+  },
+  { immediate: true },
+)
+
 watch(
   () => props.date,
   () => {
-    panelMode.value = 'list'
-    editingId.value = ''
-    aiPrompt.value = ''
-    isParsing.value = false
-    todoForm.value = createEmptyForm(props.date)
+    resetFormState()
   },
 )
 
@@ -78,26 +93,71 @@ watch(
   async () => {
     if (!props.quickCreatePrompt?.trim()) return
 
-    openCreateForm()
+    beginCreateForm()
     aiPrompt.value = props.quickCreatePrompt
     await parseTodoText()
   },
   { immediate: true },
 )
 
+watch(
+  () => props.externalDraftKey,
+  () => {
+    const draft = props.externalDraft
+    if (!draft) return
+
+    beginCreateForm({
+      mode: draft.endDate && draft.endDate !== draft.date ? 'deadline' : 'scheduled',
+      date: draft.date,
+      endDate: draft.endDate ?? draft.date,
+      time: draft.time ?? '',
+      title: draft.title,
+      owner: draft.owner ?? draft.assigneeName ?? props.currentUser.name,
+      assigneeId: draft.assigneeId ?? props.currentUser.id,
+      assigneeName: draft.assigneeName ?? draft.owner ?? props.currentUser.name,
+      source: draft.source ?? '',
+    })
+  },
+  { immediate: true },
+)
+
+watch(
+  () => props.presetCreateKey,
+  () => {
+    const time = props.presetCreateTime?.trim()
+    if (!time) return
+
+    beginCreateForm({
+      mode: 'scheduled',
+      time,
+      endDate: props.date,
+    })
+  },
+  { immediate: true },
+)
+
 function createEmptyForm(date = props.date): CalendarTodoForm {
+  const assignee = getDefaultAssignee()
+
   return {
     mode: 'scheduled',
     date,
     endDate: date,
     time: '',
     title: '',
-    owner: props.currentUser.name,
-    assigneeId: props.currentUser.id,
-    assigneeName: props.currentUser.name,
+    owner: assignee.name,
+    assigneeId: assignee.id,
+    assigneeName: assignee.name,
     source: '',
-    completionIdeas: '',
   }
+}
+
+function getDefaultAssignee() {
+  return (
+    props.assignableUsers.find((user) => user.id === props.currentUser.id) ??
+    props.assignableUsers[0] ??
+    props.currentUser
+  )
 }
 
 function createFormFromEvent(event: CalendarEvent): CalendarTodoForm {
@@ -111,7 +171,6 @@ function createFormFromEvent(event: CalendarEvent): CalendarTodoForm {
     assigneeId: event.assigneeId ?? props.currentUser.id,
     assigneeName: event.assigneeName ?? event.owner,
     source: event.source ?? '',
-    completionIdeas: event.completionIdeas ?? '',
   }
 }
 
@@ -126,52 +185,102 @@ function createFormCopy(form: CalendarTodoForm): CalendarTodoForm {
     assigneeId: form.assigneeId,
     assigneeName: form.assigneeName,
     source: form.source,
-    completionIdeas: form.completionIdeas,
   }
 }
 
-function openCreateForm() {
-  panelMode.value = 'create'
+function formSnapshot(form: CalendarTodoForm, prompt = aiPrompt.value) {
+  return JSON.stringify({
+    form: createFormCopy(form),
+    aiPrompt: prompt,
+  })
+}
+
+function syncFormSnapshot(form = todoForm.value, prompt = aiPrompt.value) {
+  initialFormSnapshot.value = formSnapshot(form, prompt)
+}
+
+function confirmDiscardChanges() {
+  if (!hasUnsavedChanges.value) return true
+  return window.confirm('当前待办内容还没有保存，确定放弃修改吗？')
+}
+
+function resetFormState() {
+  const nextForm = createEmptyForm(props.date)
   editingId.value = ''
   aiPrompt.value = ''
-  todoForm.value = createEmptyForm(props.date)
+  isParsing.value = false
+  todoForm.value = nextForm
+  syncFormSnapshot(nextForm)
+  panelMode.value = 'list'
+  emit('dirtyChange', false)
+}
+
+function beginCreateForm(overrides: Partial<CalendarTodoForm> = {}) {
+  const nextForm = {
+    ...createEmptyForm(props.date),
+    ...overrides,
+  }
+  editingId.value = ''
+  aiPrompt.value = ''
+  isParsing.value = false
+  todoForm.value = nextForm
+  syncFormSnapshot(nextForm)
+  panelMode.value = 'create'
+  emit('dirtyChange', false)
+}
+
+function openCreateForm() {
+  if (!confirmDiscardChanges()) return
+  beginCreateForm()
 }
 
 function openEditForm(event: CalendarEvent) {
   if (!event.editable) return
-  panelMode.value = 'edit'
+
+  if (!confirmDiscardChanges()) return
+
+  const nextForm = createFormFromEvent(event)
   editingId.value = event.id
   aiPrompt.value = ''
-  todoForm.value = createFormFromEvent(event)
+  isParsing.value = false
+  todoForm.value = nextForm
+  syncFormSnapshot(nextForm)
+  panelMode.value = 'edit'
+  emit('dirtyChange', false)
 }
 
-function cancelForm() {
-  panelMode.value = 'list'
-  editingId.value = ''
-  aiPrompt.value = ''
-  isParsing.value = false
-  todoForm.value = createEmptyForm(props.date)
+function requestCancelForm() {
+  if (!confirmDiscardChanges()) return
+  resetFormState()
+}
+
+function requestClosePanel() {
+  if (!confirmDiscardChanges()) return
+  resetFormState()
+  emit('close')
 }
 
 async function parseTodoText() {
   if (!aiPrompt.value.trim()) return
 
   isParsing.value = true
-  const parsed = await mockParseTodoText(
-    aiPrompt.value,
-    props.currentUser,
-    props.assignableUsers,
-    todoForm.value,
-  )
-  todoForm.value = {
-    ...todoForm.value,
-    ...parsed,
-    mode: parsed.endDate && parsed.endDate !== parsed.date ? 'deadline' : todoForm.value.mode,
-    endDate: parsed.endDate ?? parsed.date ?? todoForm.value.endDate,
-    time: parsed.time ?? todoForm.value.time,
-    completionIdeas: todoForm.value.completionIdeas,
+  try {
+    const parsed = await serviceParseTodoText(
+      aiPrompt.value,
+      props.currentUser,
+      props.assignableUsers,
+      todoForm.value,
+    )
+    todoForm.value = {
+      ...todoForm.value,
+      ...parsed,
+      mode: parsed.endDate && parsed.endDate !== parsed.date ? 'deadline' : todoForm.value.mode,
+      endDate: parsed.endDate ?? parsed.date ?? todoForm.value.endDate,
+      time: parsed.time ?? todoForm.value.time,
+    }
+  } finally {
+    isParsing.value = false
   }
-  isParsing.value = false
 }
 
 function setMode(mode: CalendarTodoForm['mode']) {
@@ -245,7 +354,6 @@ function submitTodo() {
       title: payload.title,
       owner: payload.owner || '未指定',
       source: payload.source,
-      completionIdeas: payload.completionIdeas,
       assigneeId: payload.assigneeId,
       assigneeName: payload.assigneeName,
     })
@@ -257,13 +365,20 @@ function submitTodo() {
       title: payload.title,
       owner: payload.owner,
       source: payload.source,
-      completionIdeas: payload.completionIdeas,
       assigneeId: payload.assigneeId,
       assigneeName: payload.assigneeName,
     })
   }
 
-  cancelForm()
+  resetFormState()
+}
+
+function deleteCurrentTodo() {
+  if (panelMode.value !== 'edit' || !editingId.value) return
+  if (!window.confirm('确定删除这个待办吗？')) return
+
+  emit('deleteTodo', editingId.value)
+  resetFormState()
 }
 
 function toggleStatus(event: CalendarEvent) {
@@ -294,7 +409,7 @@ function statusText(event: CalendarEvent) {
         class="close-btn"
         type="button"
         aria-label="关闭当天待办"
-        @click="emit('close')"
+        @click="requestClosePanel"
       >
         ×
       </button>
@@ -354,7 +469,6 @@ function statusText(event: CalendarEvent) {
               <span v-if="event.scope === 'assigned_by_me'" class="dispatch-target">
                 派发：{{ event.assigneeName ?? event.owner }}
               </span>
-              <span v-if="event.completionIdeas" class="event-ideas-chip">已有完成思路</span>
             </div>
             <div class="event-title-row">
               <div class="event-title-block">
@@ -484,7 +598,7 @@ function statusText(event: CalendarEvent) {
               </option>
             </select>
           </label>
-          <label class="field" :class="{ 'field-full': !canChooseAssignee }">
+          <label class="field field-full">
             <span>备注</span>
             <input v-model="todoForm.source" type="text" placeholder="备注或来源" />
           </label>
@@ -492,7 +606,15 @@ function statusText(event: CalendarEvent) {
       </section>
 
       <div class="form-actions">
-        <button type="button" @click="cancelForm">取消</button>
+        <button
+          v-if="panelMode === 'edit'"
+          class="delete-btn"
+          type="button"
+          @click="deleteCurrentTodo"
+        >
+          删除
+        </button>
+        <button type="button" @click="requestCancelForm">取消</button>
         <button type="submit" :disabled="!canSubmit">保存</button>
       </div>
     </form>
@@ -763,8 +885,7 @@ time {
   flex-wrap: wrap;
 }
 
-.dispatch-target,
-.event-ideas-chip {
+.dispatch-target {
   min-height: 19px;
   padding: 0 7px;
   border-radius: 999px;
@@ -777,11 +898,6 @@ time {
 .dispatch-target {
   background: #ecfeff;
   color: #0e7490;
-}
-
-.event-ideas-chip {
-  background: #eef6ff;
-  color: #2456a6;
 }
 
 .timeline-item.scope-assigned_by_me {
@@ -1123,6 +1239,19 @@ p {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.form-actions .delete-btn {
+  margin-right: auto;
+  border-color: rgba(220, 38, 38, 0.18);
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.form-actions .delete-btn:hover {
+  border-color: rgba(220, 38, 38, 0.28);
+  background: #fee2e2;
+  color: #991b1b;
 }
 
 @media (max-width: 760px) {

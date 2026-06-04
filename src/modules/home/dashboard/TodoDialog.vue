@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import type { CalendarTodoForm, CalendarUser } from './types'
 import { formatFormDateTime } from './todoDisplay'
-import { parseTodoText as mockParseTodoText } from './todoMock'
+import { parseTodoText as serviceParseTodoText } from './todo.service'
 
 export type TodoDialogMode = 'create' | 'edit' | 'view'
 
@@ -57,7 +57,6 @@ function createFormCopy(form: CalendarTodoForm): CalendarTodoForm {
     assigneeId: form.assigneeId,
     assigneeName: form.assigneeName,
     source: form.source,
-    completionIdeas: form.completionIdeas,
   }
 }
 
@@ -93,7 +92,7 @@ async function parseTodoText() {
   if (!aiPrompt.value.trim()) return
 
   isParsing.value = true
-  const parsed = await mockParseTodoText(
+  const parsed = await serviceParseTodoText(
     aiPrompt.value,
     props.currentUser,
     props.assignableUsers,
@@ -104,7 +103,6 @@ async function parseTodoText() {
     ...parsed,
     endDate: parsed.endDate ?? parsed.date ?? todoForm.value.endDate,
     time: parsed.time ?? todoForm.value.time,
-    completionIdeas: todoForm.value.completionIdeas,
   }
   isParsing.value = false
 }

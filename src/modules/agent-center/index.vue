@@ -1,5 +1,11 @@
 <template>
   <main class="agent-center-page">
+    <Transition name="center-toast-fade">
+      <div v-if="actionToast" class="center-toast" role="status">
+        {{ actionToast }}
+      </div>
+    </Transition>
+
     <header class="topbar">
       <div class="brand">
         <div class="brand-logo">
@@ -51,10 +57,31 @@
         <div class="panel-head">
           <div>
             <h2>全部智能体</h2>
-            <p>共 {{ filteredAgents.length }} 个智能体，本月持续统计中</p>
+            <p>共 {{ filteredAgents.length }} / {{ agents.length }} 个智能体，本月持续统计中</p>
           </div>
 
           <div class="panel-actions">
+            <input
+              v-model="searchKeyword"
+              class="soft-search"
+              type="search"
+              placeholder="搜索智能体..."
+              aria-label="搜索智能体"
+            />
+            <select v-model="categoryFilter" class="soft-select category-select" aria-label="智能体分类">
+              <option v-for="option in categoryOptions" :key="option.key" :value="option.key">
+                {{ option.label }}
+              </option>
+            </select>
+            <select
+              v-model="permissionFilter"
+              class="soft-select permission-select"
+              aria-label="智能体状态筛选"
+            >
+              <option v-for="option in permissionOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
             <select v-model="sortType" class="soft-select sort-select" aria-label="智能体排序">
               <option v-for="option in sortOptions" :key="option.value" :value="option.value">
                 {{ option.label }}
@@ -63,8 +90,13 @@
           </div>
         </div>
 
-        <div class="agent-grid">
-          <article v-for="agent in filteredAgents" :key="agent.id" class="agent-card">
+        <div v-if="filteredAgents.length" class="agent-grid">
+          <article
+            v-for="agent in filteredAgents"
+            :key="agent.id"
+            class="agent-card"
+            :class="{ 'is-active': selectedAgent?.key === agent.key }"
+          >
             <div class="agent-top">
               <div class="agent-icon" :class="`theme-${agent.theme}`">{{ agent.icon }}</div>
               <div>
@@ -76,6 +108,7 @@
             <div class="tag-line">
               <span class="agent-tag info">{{ agent.categoryName }}</span>
               <span class="agent-tag success">{{ agent.status }}</span>
+              <span class="agent-tag muted">{{ permissionText(agent.permissionState) }}</span>
             </div>
 
             <div class="agent-metrics">
@@ -96,7 +129,27 @@
             <div class="agent-progress" aria-hidden="true">
               <span :style="{ width: `${agent.progress}%` }"></span>
             </div>
+
+            <div class="agent-actions">
+              <button class="agent-use-btn" type="button" @click="openAgentAction(agent, 'use')">
+                <IconPlay />
+                使用
+              </button>
+              <button
+                class="agent-detail-btn"
+                type="button"
+                @click="openAgentAction(agent, 'detail')"
+              >
+                <IconInfo />
+                详情
+              </button>
+            </div>
           </article>
+        </div>
+        <div v-else class="agent-empty">
+          <h3>没有匹配的智能体</h3>
+          <p>调整搜索词、分类或状态筛选后再试。</p>
+          <button type="button" @click="resetAgentFilters">清空筛选</button>
         </div>
       </section>
 
@@ -208,25 +261,86 @@
         </section>
       </aside>
     </section>
+
+    <Transition name="agent-drawer-fade">
+      <section
+        v-if="selectedAgent"
+        class="agent-drawer"
+        role="dialog"
+        aria-modal="false"
+        :aria-label="`${selectedAgent.name}智能体详情`"
+      >
+        <header class="drawer-head">
+          <div>
+            <span>{{ selectedAgent.categoryName }} · {{ permissionText(selectedAgent.permissionState) }}</span>
+            <h2>{{ selectedAgent.name }}</h2>
+            <p>{{ selectedAgent.desc }}</p>
+          </div>
+          <button type="button" aria-label="关闭智能体详情" @click="closeAgentDrawer">×</button>
+        </header>
+
+        <div class="drawer-metrics">
+          <span>
+            <b>{{ formatNumber(selectedAgent.monthlyToken) }}</b>
+            本月 Token
+          </span>
+          <span>
+            <b>{{ formatNumber(selectedAgent.calls) }}</b>
+            调用次数
+          </span>
+          <span>
+            <b>{{ selectedAgent.owner }}</b>
+            负责人
+          </span>
+        </div>
+
+        <section v-if="agentActionMode === 'use'" class="mock-use-panel">
+          <h3>模拟使用入口</h3>
+          <p>
+            当前前端使用 mock 数据模拟能力入口。真实接口接入后，这里会跳转到对应智能体工作流。
+          </p>
+          <button type="button" @click="agentActionMode = 'detail'">查看能力详情</button>
+        </section>
+
+        <section class="drawer-section">
+          <h3>核心能力</h3>
+          <div class="chip-list">
+            <span v-for="item in selectedAgent.capabilities" :key="item">{{ item }}</span>
+          </div>
+        </section>
+
+        <section class="drawer-section">
+          <h3>适用场景</h3>
+          <ul>
+            <li v-for="item in selectedAgent.scenarios" :key="item">{{ item }}</li>
+          </ul>
+        </section>
+      </section>
+    </Transition>
   </main>
 </template>
 
 <script setup lang="ts">
 import type { ComponentPublicInstance } from 'vue'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import IconBell from '~icons/lucide/bell'
 import IconChevronRight from '~icons/lucide/chevron-right'
 import IconHeadphones from '~icons/lucide/headphones'
+import IconInfo from '~icons/lucide/info'
+import IconPlay from '~icons/lucide/play'
 import IconSettings from '~icons/lucide/settings'
 import logoDarkImage from '@/assets/logoDark1.png'
 import {
   agents,
+  categories,
   pointsRanking,
   summaryStats,
   tokenOverview,
   tokenRanking,
   trendData,
+  type AgentPermissionState,
   type AgentItem,
   type RankItem,
 } from './mock'
@@ -237,10 +351,20 @@ defineOptions({
 
 type SortType = 'default' | 'tokenDesc' | 'pointsDesc' | 'callsDesc'
 type TrendMode = 'day' | 'week'
+type PermissionFilter = 'all' | AgentPermissionState
+type AgentActionMode = 'use' | 'detail'
 
+const route = useRoute()
+const router = useRouter()
 const sortType = ref<SortType>('default')
+const searchKeyword = ref('')
+const categoryFilter = ref('all')
+const permissionFilter = ref<PermissionFilter>('all')
 const overviewPeriod = ref('month')
 const trendMode = ref<TrendMode>('day')
+const actionToast = ref('')
+const selectedAgent = ref<AgentItem | null>(null)
+const agentActionMode = ref<AgentActionMode>('detail')
 
 const donutChartRef = ref<HTMLElement | null>(null)
 const tokenRankChartRef = ref<HTMLElement | null>(null)
@@ -255,6 +379,14 @@ const sortOptions = [
   { label: '调用次数从高到低', value: 'callsDesc' },
 ]
 
+const categoryOptions = categories.map((item) => ({ key: item.key, label: item.label }))
+const permissionOptions: Array<{ label: string; value: PermissionFilter }> = [
+  { label: '全部状态', value: 'all' },
+  { label: '可使用', value: 'available' },
+  { label: '需授权', value: 'locked' },
+  { label: '管理员', value: 'admin-only' },
+]
+
 const periodOptions = [
   { label: '本月', value: 'month' },
   { label: '本周', value: 'week' },
@@ -262,7 +394,21 @@ const periodOptions = [
 ]
 
 const filteredAgents = computed<AgentItem[]>(() => {
-  const list = agents
+  const keyword = searchKeyword.value.trim().toLowerCase()
+  const list = agents.filter((agent) => {
+    const matchesKeyword =
+      !keyword ||
+      [agent.name, agent.desc, agent.categoryName, agent.owner, ...agent.capabilities]
+        .join(' ')
+        .toLowerCase()
+        .includes(keyword)
+    const matchesCategory =
+      categoryFilter.value === 'all' || agent.categoryKey === categoryFilter.value
+    const matchesPermission =
+      permissionFilter.value === 'all' || agent.permissionState === permissionFilter.value
+
+    return matchesKeyword && matchesCategory && matchesPermission
+  })
 
   if (sortType.value === 'tokenDesc')
     return [...list].sort((a, b) => b.monthlyToken - a.monthlyToken)
@@ -273,8 +419,68 @@ const filteredAgents = computed<AgentItem[]>(() => {
 
 const chartInstances = new Set<echarts.ECharts>()
 let resizeObserver: ResizeObserver | null = null
+let actionToastTimer: ReturnType<typeof setTimeout> | undefined
 
 const formatNumber = (value: number) => value.toLocaleString('en-US')
+const permissionText = (state: AgentPermissionState) => {
+  if (state === 'available') return '可使用'
+  if (state === 'locked') return '需授权'
+  return '管理员'
+}
+
+const clearActionToastTimer = () => {
+  if (!actionToastTimer) return
+  clearTimeout(actionToastTimer)
+  actionToastTimer = undefined
+}
+
+const showActionToast = (message: string) => {
+  clearActionToastTimer()
+  actionToast.value = message
+  actionToastTimer = setTimeout(() => {
+    actionToast.value = ''
+    actionToastTimer = undefined
+  }, 2200)
+}
+
+const openAgentAction = (agent: AgentItem, action: AgentActionMode) => {
+  const url = action === 'use' ? agent.useUrl : agent.detailUrl
+
+  if (url) {
+    window.open(url, '_blank', 'noopener,noreferrer')
+    return
+  }
+
+  selectedAgent.value = agent
+  agentActionMode.value = action
+  void router.replace({ query: { ...route.query, agent: agent.routeQuery } })
+  showActionToast(action === 'use' ? '已打开模拟使用入口' : '已打开智能体详情')
+}
+
+function closeAgentDrawer() {
+  selectedAgent.value = null
+  const nextQuery = { ...route.query }
+  delete nextQuery.agent
+  void router.replace({ query: nextQuery })
+}
+
+function resetAgentFilters() {
+  searchKeyword.value = ''
+  categoryFilter.value = 'all'
+  permissionFilter.value = 'all'
+}
+
+function locateAgentFromQuery(agentKey?: string) {
+  const normalizedKey = agentKey?.trim()
+  if (!normalizedKey) return
+
+  const agent = agents.find((item) => item.key === normalizedKey || item.routeQuery === normalizedKey)
+  if (!agent) return
+
+  selectedAgent.value = agent
+  agentActionMode.value = 'detail'
+  categoryFilter.value = agent.categoryKey
+}
 
 const setSummaryChartRef = (el: Element | ComponentPublicInstance | null, index: number) => {
   if (el instanceof HTMLElement) {
@@ -476,6 +682,14 @@ const resizeCharts = () => {
   chartInstances.forEach((chart) => chart.resize())
 }
 
+watch(
+  () => route.query.agent,
+  (agentKey) => {
+    locateAgentFromQuery((Array.isArray(agentKey) ? agentKey[0] : agentKey) ?? undefined)
+  },
+  { immediate: true },
+)
+
 onMounted(async () => {
   await nextTick()
   renderAllCharts()
@@ -493,6 +707,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  clearActionToastTimer()
   resizeObserver?.disconnect()
   chartInstances.forEach((chart) => chart.dispose())
   chartInstances.clear()
@@ -501,6 +716,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .agent-center-page {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -512,6 +728,41 @@ onBeforeUnmount(() => {
   background: radial-gradient(circle at 18% 6%, rgba(77, 116, 255, 0.13), transparent 28%),
     radial-gradient(circle at 75% 12%, rgba(21, 185, 130, 0.09), transparent 28%),
     linear-gradient(180deg, #f8fbff 0%, #f4f7fc 100%);
+}
+
+.center-toast {
+  position: fixed;
+  z-index: 30;
+  top: 18px;
+  left: 50%;
+  min-height: 38px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: rgba(24, 32, 68, 0.94);
+  color: #ffffff;
+  padding: 0 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.2;
+  box-shadow: 0 18px 34px rgba(31, 45, 86, 0.18);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.center-toast-fade-enter-active,
+.center-toast-fade-leave-active {
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.center-toast-fade-enter-from,
+.center-toast-fade-leave-to {
+  opacity: 0;
+  transform: translate(-50%, -8px);
 }
 
 .topbar,
@@ -741,15 +992,52 @@ onBeforeUnmount(() => {
 
 .panel-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
+  justify-content: flex-end;
 }
 
 .sort-select {
   width: 176px;
 }
 
+.category-select,
+.permission-select {
+  width: 126px;
+}
+
 .period-select {
   width: 96px;
+}
+
+.soft-search {
+  width: 180px;
+  height: 38px;
+  box-sizing: border-box;
+  border: 1px solid rgba(151, 164, 198, 0.28);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #263158;
+  padding: 0 14px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  outline: none;
+  box-shadow: 0 8px 20px rgba(31, 45, 86, 0.04);
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease;
+}
+
+.soft-search::placeholder {
+  color: #8b94ad;
+}
+
+.soft-search:focus {
+  border-color: rgba(79, 124, 255, 0.72);
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(79, 124, 255, 0.12);
 }
 
 .soft-select {
@@ -819,12 +1107,21 @@ onBeforeUnmount(() => {
   border-radius: 18px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(250, 252, 255, 0.86));
   box-shadow: 0 12px 26px rgba(39, 52, 97, 0.06);
+  display: flex;
+  flex-direction: column;
   transition: 0.18s ease;
 }
 
 .agent-card:hover {
   transform: translateY(-3px);
   box-shadow: 0 18px 36px rgba(39, 52, 97, 0.1);
+}
+
+.agent-card.is-active {
+  border-color: rgba(47, 104, 255, 0.42);
+  box-shadow:
+    0 18px 36px rgba(39, 52, 97, 0.1),
+    0 0 0 3px rgba(47, 104, 255, 0.08);
 }
 
 .agent-top {
@@ -891,6 +1188,56 @@ onBeforeUnmount(() => {
   color: #0f996b;
 }
 
+.agent-tag.muted {
+  background: rgba(100, 116, 139, 0.1);
+  color: #64748b;
+}
+
+.agent-empty {
+  flex: 1 1 auto;
+  min-height: 240px;
+  border: 1px dashed rgba(151, 164, 198, 0.34);
+  border-radius: 18px;
+  background: rgba(248, 251, 255, 0.76);
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.agent-empty h3,
+.agent-empty p {
+  margin: 0;
+}
+
+.agent-empty h3 {
+  color: #263158;
+  font-size: 16px;
+}
+
+.agent-empty p {
+  color: #6c7390;
+  font-size: 13px;
+}
+
+.agent-empty button {
+  justify-self: center;
+  min-height: 32px;
+  border: 1px solid rgba(79, 124, 255, 0.24);
+  border-radius: 999px;
+  background: #eff4ff;
+  color: #2458ff;
+  padding: 0 14px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.agent-empty button:hover {
+  background: #dfe8ff;
+}
+
 .agent-metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -923,11 +1270,238 @@ onBeforeUnmount(() => {
   background: linear-gradient(90deg, #2f68ff, #765cff);
 }
 
+.agent-actions {
+  margin-top: auto;
+  padding-top: 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.agent-actions button {
+  height: 34px;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+.agent-actions svg {
+  width: 15px;
+  height: 15px;
+}
+
+.agent-use-btn {
+  background: #2458ff;
+  color: #ffffff;
+  box-shadow: 0 12px 22px rgba(47, 104, 255, 0.2);
+}
+
+.agent-use-btn:hover {
+  background: #1f49dd;
+  box-shadow: 0 14px 26px rgba(47, 104, 255, 0.26);
+  transform: translateY(-1px);
+}
+
+.agent-detail-btn {
+  min-width: 72px;
+  border-color: rgba(151, 164, 198, 0.28) !important;
+  background: rgba(255, 255, 255, 0.86);
+  color: #4f5879;
+}
+
+.agent-detail-btn:hover {
+  border-color: rgba(79, 124, 255, 0.38) !important;
+  background: #ffffff;
+  color: #2458ff;
+  transform: translateY(-1px);
+}
+
 .right-panel {
   display: grid;
   grid-template-rows: 250px minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
   min-height: 0;
+}
+
+.agent-drawer {
+  position: fixed;
+  z-index: 40;
+  top: 76px;
+  right: 18px;
+  width: min(420px, calc(100vw - 36px));
+  max-height: calc(100vh - 96px);
+  overflow: auto;
+  box-sizing: border-box;
+  border: 1px solid rgba(151, 164, 198, 0.26);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.96);
+  padding: 18px;
+  box-shadow: 0 28px 70px rgba(31, 45, 86, 0.18);
+  backdrop-filter: blur(18px);
+}
+
+.agent-drawer-fade-enter-active,
+.agent-drawer-fade-leave-active {
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.agent-drawer-fade-enter-from,
+.agent-drawer-fade-leave-to {
+  opacity: 0;
+  transform: translateX(16px);
+}
+
+.drawer-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #eef2f8;
+}
+
+.drawer-head span {
+  color: #6c7390;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.drawer-head h2 {
+  margin: 5px 0 6px;
+  color: #182044;
+  font-size: 22px;
+}
+
+.drawer-head p {
+  margin: 0;
+  color: #4f5879;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.drawer-head button {
+  width: 32px;
+  height: 32px;
+  border: 1px solid #e5ebf5;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #64748b;
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.drawer-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.drawer-metrics span {
+  min-width: 0;
+  border: 1px solid #eef2f8;
+  border-radius: 14px;
+  background: #f8fbff;
+  color: #6c7390;
+  padding: 10px;
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.drawer-metrics b {
+  overflow: hidden;
+  color: #182044;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mock-use-panel,
+.drawer-section {
+  margin-top: 12px;
+  border-top: 1px solid #eef2f8;
+  padding-top: 12px;
+}
+
+.mock-use-panel {
+  border: 1px solid rgba(47, 104, 255, 0.12);
+  border-radius: 16px;
+  background: #f4f7ff;
+  padding: 12px;
+}
+
+.mock-use-panel h3,
+.drawer-section h3 {
+  margin: 0 0 8px;
+  color: #182044;
+  font-size: 14px;
+}
+
+.mock-use-panel p {
+  margin: 0 0 10px;
+  color: #4f5879;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.mock-use-panel button {
+  min-height: 32px;
+  border: 0;
+  border-radius: 999px;
+  background: #2458ff;
+  color: #ffffff;
+  padding: 0 13px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip-list span {
+  min-height: 26px;
+  border-radius: 999px;
+  background: #eef4ff;
+  color: #315fe7;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.drawer-section ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #4f5879;
+  font-size: 13px;
+  line-height: 1.7;
 }
 
 .overview-grid {

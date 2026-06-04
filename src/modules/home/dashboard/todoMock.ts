@@ -173,7 +173,6 @@ export const mockInitialTodos: CalendarEvent[] = [
     owner: '刘畅',
     status: 'todo',
     priority: 'urgent',
-    completionIdeas: '同步会议结论后，先整理需求差异，再补充首页日历交互说明。',
     creatorId: 'employee-liu',
     creatorName: '刘畅',
     assigneeId: 'employee-liu',
@@ -338,7 +337,6 @@ export const mockInitialTodos: CalendarEvent[] = [
     type: 'task',
     owner: '刘畅',
     status: 'todo',
-    completionIdeas: '先覆盖核心路径，再补充异常输入和权限边界。',
     creatorId: 'leader-zhang',
     creatorName: '刘美华',
     assigneeId: 'employee-liu',
@@ -655,7 +653,6 @@ export function createTodo(
       owner: assigneeName,
       status: 'todo',
       source: payload.source?.trim() || '自建待办',
-      completionIdeas: payload.completionIdeas?.trim() || undefined,
       creatorId: currentUser.id,
       creatorName: currentUser.name,
       assigneeId,
@@ -682,7 +679,6 @@ export function updateTodo(
       title: payload.title.trim(),
       owner: assigneeName,
       source: payload.source?.trim() || undefined,
-      completionIdeas: payload.completionIdeas?.trim() || undefined,
       assigneeId: payload.assigneeId ?? event.assigneeId,
       assigneeName,
     }
@@ -701,6 +697,14 @@ export function updateTodoStatus(
   })
 }
 
+export function deleteTodo(
+  events: CalendarEvent[],
+  currentUser: CalendarUser,
+  id: string,
+): CalendarEvent[] {
+  return events.filter((event) => event.id !== id || event.creatorId !== currentUser.id)
+}
+
 function normalizeTime(hour: number, minute = 0) {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
 }
@@ -711,11 +715,13 @@ export async function parseTodoText(
   assignableUsers: CalendarUser[],
   fallback: ParsedTodoDraft,
 ) {
-  await new Promise((resolve) => window.setTimeout(resolve, 360))
+  await new Promise((resolve) => setTimeout(resolve, 360))
 
+  const normalizedText = text.trim()
   const baseDate = new Date(`${fallback.date}T12:00:00+08:00`)
   let date = fallback.date
-  let endDate = fallback.endDate && fallback.endDate !== fallback.date ? fallback.endDate : undefined
+  let endDate =
+    fallback.endDate && fallback.endDate !== fallback.date ? fallback.endDate : undefined
 
   if (text.includes('后天')) {
     date = ymd(addDays(baseDate, 2))
@@ -762,7 +768,8 @@ export async function parseTodoText(
   const assignee =
     assignableUsers.find((user) => ownerText && ownerText.includes(user.name)) ?? currentUser
   const titleMatch = text.match(/任务内容(?:为|是)[“"']?([^”"'，。,.]+)/)
-
+  const parsedTitle = titleMatch?.[1]?.trim()
+  const fallbackTitle = fallback.title?.trim()
   return {
     date,
     endDate,
@@ -770,7 +777,7 @@ export async function parseTodoText(
     owner: assignee.name,
     assigneeId: assignee.id,
     assigneeName: assignee.name,
-    title: titleMatch?.[1]?.trim() ?? fallback.title,
+    title: parsedTitle || fallbackTitle || normalizedText,
     source: fallback.source || 'AI预填',
   }
 }

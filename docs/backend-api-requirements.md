@@ -187,9 +187,7 @@
     "type": "task",
     "owner": "刘畅",
     "status": "todo",
-    "priority": "normal",
     "source": "产品验收",
-    "completionIdeas": "先覆盖核心路径，再补充异常输入和权限边界。",
     "creatorId": "leader-zhang",
     "creatorName": "刘美华",
     "assigneeId": "employee-liu",
@@ -213,9 +211,7 @@
 | type | `task` \| `meeting` \| `approval` \| `ai` | 待办类型 |
 | owner | string | 展示负责人，建议等于 `assigneeName` |
 | status | `todo` \| `done` | 完成状态 |
-| priority | `normal` \| `urgent` | 优先级 |
 | source | string \| null | 来源，如会议纪要、智能 PPT、自建待办 |
-| completionIdeas | string \| null | 完成思路 |
 | creatorId / creatorName | string | 创建人 |
 | assigneeId / assigneeName | string | 负责人 |
 | scope | `self` \| `assigned_by_me` \| `assigned_to_me` | 后端按当前用户计算 |
@@ -242,8 +238,7 @@
   "time": "15:00",
   "title": "补齐验收用例",
   "assigneeId": "employee-liu",
-  "source": "自建待办",
-  "completionIdeas": "先覆盖核心路径，再补充异常输入和权限边界。"
+  "source": "自建待办"
 }
 ```
 
@@ -261,7 +256,7 @@
 
 仅创建人可编辑。
 
-请求字段同创建接口，可变更日期、时间、标题、负责人、来源、完成思路。
+请求字段同创建接口，可变更日期、时间、标题、负责人、来源。
 
 ### 5.5 更新待办状态
 
@@ -304,8 +299,7 @@
   "assigneeId": "employee-liu",
   "assigneeName": "刘畅",
   "owner": "刘畅",
-  "source": "AI预填",
-  "completionIdeas": null
+  "source": "AI预填"
 }
 ```
 

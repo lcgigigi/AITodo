@@ -35,12 +35,13 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  select: [date: string]
+  select: [date: string, time?: string]
   previousPeriod: []
   nextPeriod: []
   calendarInteraction: []
   closeTodayBubble: []
-  quickCreateToday: [prompt: string]
+  quickCreateTodo: [prompt: string, date: string]
+  openAgentCenter: []
   'update:viewMode': [mode: CalendarViewMode]
 }>()
 
@@ -222,11 +223,20 @@ function selectDay(day: CalendarDay) {
   emit('select', day.date)
 }
 
+function timelineSlotTime(slot: TimelineSlot) {
+  if (slot.hour === undefined || slot.isGap) return undefined
+  return `${String(slot.hour).padStart(2, '0')}:00`
+}
+
+function selectTimelineCell(day: CalendarDay, slot: TimelineSlot) {
+  emit('select', day.date, timelineSlotTime(slot))
+}
+
 function quickCreateToday() {
   const prompt = todayQuickInput.value.trim()
   if (!prompt) return
 
-  emit('quickCreateToday', prompt)
+  emit('quickCreateTodo', prompt, props.todayDate)
   todayQuickInput.value = ''
 }
 
@@ -234,7 +244,7 @@ function quickCreateFromHeader() {
   const prompt = headerQuickInput.value.trim()
   if (!prompt) return
 
-  emit('quickCreateToday', prompt)
+  emit('quickCreateTodo', prompt, props.selectedDate)
   headerQuickInput.value = ''
 }
 </script>
@@ -338,7 +348,7 @@ function quickCreateFromHeader() {
             class="timeline-cell"
             :class="{ 'is-selected': day.date === selectedDate, 'is-gap': slot.isGap }"
             type="button"
-            @click="emit('select', day.date)"
+            @click="selectTimelineCell(day, slot)"
           >
             <span
               v-for="event in visibleTimelineEvents(day, slot)"
@@ -409,8 +419,13 @@ function quickCreateFromHeader() {
               <time v-if="!isRangeEvent(event)">{{ formatMonthEventTime(event) }}</time>
               <b>{{ event.title }}</b>
             </span>
-            <span v-if="hiddenMonthEventCount(day)" class="more-count">
-              ...
+            <span
+              v-if="hiddenMonthEventCount(day)"
+              class="more-count"
+              :aria-label="`还有 ${hiddenMonthEventCount(day)} 项待办，点击查看当天详情`"
+              :title="`还有 ${hiddenMonthEventCount(day)} 项待办`"
+            >
+              +{{ hiddenMonthEventCount(day) }}
             </span>
           </span>
         </button>
@@ -439,7 +454,10 @@ function quickCreateFromHeader() {
               <time>{{ formatEventTime(event) }}</time>
               <span>{{ event.title }}</span>
             </button>
-            <p v-if="!todayEvents.length" class="today-bubble-empty">今日暂无待办，轻松一下～</p>
+            <div v-if="!todayEvents.length" class="today-bubble-empty">
+              <p>今日暂无待办，可以新建安排或查看 Agent 能力。</p>
+              <button type="button" @click="emit('openAgentCenter')">查看 Agent 能力</button>
+            </div>
           </div>
           <form
             class="today-quick-create"
@@ -1319,17 +1337,18 @@ h2 {
 }
 
 .more-count {
-  width: 28px;
-  height: 12px;
-  min-height: 0;
+  width: fit-content;
+  min-width: 30px;
+  height: 20px;
+  min-height: 20px;
   border-radius: 999px;
   background: rgba(238, 242, 255, 0.82);
   color: #6366f1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0 0 3px;
-  font-size: 12px;
+  padding: 0 8px;
+  font-size: 11px;
   font-weight: 950;
   line-height: 1;
   white-space: nowrap;
@@ -1568,10 +1587,36 @@ h2 {
     #ffffff;
   color: #64748b;
   padding: 0 14px;
-  display: flex;
-  align-items: center;
+  display: grid;
+  place-items: center;
+  gap: 8px;
   font-size: 13px;
   font-weight: 850;
+  text-align: center;
+}
+
+.today-bubble-empty p {
+  margin: 0;
+  max-width: 210px;
+  line-height: 1.45;
+}
+
+.today-bubble-empty button {
+  min-height: 28px;
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.today-bubble-empty button:hover {
+  border-color: #bfdbfe;
+  background: #dbeafe;
 }
 
 .today-quick-create {

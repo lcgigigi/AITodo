@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { Component } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import IconBox from '~icons/lucide/box'
 import IconCalendarDays from '~icons/lucide/calendar-days'
+import IconCalendarRange from '~icons/lucide/calendar-range'
 import IconClipboardList from '~icons/lucide/clipboard-list'
 import IconCode from '~icons/lucide/code'
 import IconCompass from '~icons/lucide/compass'
@@ -23,22 +25,38 @@ import type {
   CalendarSpecialDay,
   CalendarTodoDraft,
   CalendarTodoUpdate,
+  CalendarUser,
 } from './types'
+import { createTodoFromDesktopDraft, getDesktopTodoDraft } from './desktopDraft.service'
 import { compareEvents, dateRange, formatEventTime } from './todoDisplay'
 import {
-  createTodo as mockCreateTodo,
+  createTodo as serviceCreateTodo,
+  deleteTodo as serviceDeleteTodo,
   listTodos,
-  mockInitialTodos,
-  mockUsers,
-  updateTodo as mockUpdateTodo,
-  updateTodoStatus as mockUpdateTodoStatus,
-} from './todoMock'
+  loadAssignableUsers as serviceLoadAssignableUsers,
+  loadTodos,
+  saveTodos,
+  updateTodo as serviceUpdateTodo,
+  updateTodoStatus as serviceUpdateTodoStatus,
+} from './todo.service'
+import { mockUsers } from './todoMock'
+
+type CampusTool = {
+  name: string
+  icon: Component
+  tone: string
+  position: string
+  agentKey?: string
+  isMore?: boolean
+  simulated?: boolean
+}
 
 const now = ref(new Date())
 const selectedDate = ref(ymd(now.value))
 const currentMonth = ref(new Date(now.value.getFullYear(), now.value.getMonth(), 1))
 const currentUserId = ref('leader-zhang')
-const allEvents = ref<CalendarEvent[]>(mockInitialTodos)
+const allEvents = ref<CalendarEvent[]>(loadTodos(now.value))
+const backendAssignableUsers = ref<CalendarUser[]>([])
 const isProfileDialogOpen = ref(false)
 const isDayPreviewOpen = ref(false)
 const isTodayBubbleVisible = ref(true)
@@ -46,73 +64,107 @@ const isTodayBubbleManualClosed = ref(false)
 const isTodayBubbleAutoHidden = ref(false)
 const quickCreatePrompt = ref('')
 const quickCreateKey = ref(0)
+const presetCreateTime = ref('')
+const presetCreateKey = ref(0)
+const externalDraft = ref<CalendarTodoDraft | null>(null)
+const externalDraftKey = ref(0)
+const activeDesktopDraftId = ref('')
+const isDayPreviewFormDirty = ref(false)
+const toastMessage = ref('')
 const calendarViewMode = ref<'month' | 'week'>('month')
 const trendStatMode = ref<'week' | 'month'>('week')
+const route = useRoute()
 const router = useRouter()
 let clockTimer: ReturnType<typeof setInterval> | undefined
 let todayBubbleTimer: ReturnType<typeof setTimeout> | undefined
 let panelCloseRestoreTimer: ReturnType<typeof setTimeout> | undefined
+let toastTimer: ReturnType<typeof setTimeout> | undefined
 
 onMounted(() => {
   clockTimer = setInterval(() => {
     now.value = new Date()
   }, 60_000)
+  void refreshAssignableUsers()
+})
+
+watch(
+  () => route.query.todoDraftId,
+  (draftId) => {
+    const normalizedDraftId = Array.isArray(draftId)
+      ? (draftId[0] ?? undefined)
+      : (draftId ?? undefined)
+    void loadDesktopDraft(normalizedDraftId)
+  },
+  { immediate: true },
+)
+
+watch(currentUserId, () => {
+  void refreshAssignableUsers()
 })
 
 onBeforeUnmount(() => {
   if (clockTimer) clearInterval(clockTimer)
   clearTodayBubbleTimer()
   clearPanelCloseRestoreTimer()
+  clearToastTimer()
 })
 
-const campusTools = [
+const campusTools: CampusTool[] = [
   {
     name: '力宝百问',
     icon: IconMessageCircle,
     tone: 'blue',
     position: 'qa',
+    agentKey: 'policy-qa',
   },
   {
     name: '会议纪要',
     icon: IconFileText,
     tone: 'green',
     position: 'meeting',
+    agentKey: 'meeting-notes',
   },
   {
     name: 'PPT创作',
     icon: IconPresentation,
     tone: 'violet',
     position: 'ppt',
+    agentKey: 'ppt-creator',
   },
   {
     name: '图文分析',
     icon: IconImage,
     tone: 'orange',
     position: 'image',
+    agentKey: 'image-analysis',
   },
   {
     name: '面试中心',
     icon: IconUsers,
     tone: 'sky',
     position: 'interview',
+    agentKey: 'interview-center',
   },
   {
     name: '代码辅助',
     icon: IconCode,
     tone: 'cyan',
     position: 'code',
+    agentKey: 'code-assistant',
   },
   {
     name: '智体工坊',
     icon: IconBox,
     tone: 'violet',
     position: 'workshop',
+    simulated: true,
   },
   {
-    name: '发现更多',
+    name: '查看更多',
     icon: IconCompass,
     tone: 'slate',
     position: 'more',
+    isMore: true,
   },
 ]
 
@@ -233,6 +285,8 @@ const currentUser = computed(
   () => mockUsers.find((user) => user.id === currentUserId.value) ?? mockUsers[0],
 )
 const assignableUsers = computed(() => {
+  if (backendAssignableUsers.value.length) return backendAssignableUsers.value
+
   if (currentUser.value.role === 'leader') {
     const teamIds = currentUser.value.teamMemberIds ?? []
     return mockUsers.filter((user) => user.id === currentUser.value.id || teamIds.includes(user.id))
@@ -326,6 +380,9 @@ const todayEvents = computed(() => eventMap.value.get(todayDate.value) ?? [])
 const todayPendingEvents = computed(() =>
   todayEvents.value.filter((event) => event.status !== 'done'),
 )
+const todayCompletedCount = computed(
+  () => todayEvents.value.length - todayPendingEvents.value.length,
+)
 const currentWeekDates = computed(() => {
   const start = new Date(`${todayDate.value}T12:00:00`)
   const offset = (start.getDay() + 6) % 7
@@ -337,17 +394,31 @@ const currentWeekDates = computed(() => {
     return ymd(date)
   })
 })
+const currentMonthDates = computed(() => {
+  const today = new Date(`${todayDate.value}T12:00:00`)
+  const year = today.getFullYear()
+  const month = today.getMonth()
+  const dayCount = getDaysInMonth(year, month)
+
+  return Array.from({ length: dayCount }, (_, index) => ymd(new Date(year, month, index + 1)))
+})
+const weekEvents = computed(() =>
+  events.value.filter((event) => eventIntersectsDates(event, currentWeekDates.value)),
+)
 const weekPendingEvents = computed(() =>
-  events.value.filter(
-    (event) =>
-      event.status !== 'done' &&
-      dateRange(event.date, event.endDate).some((date) => currentWeekDates.value.includes(date)),
-  ),
+  weekEvents.value.filter((event) => event.status !== 'done'),
+)
+const weekCompletedCount = computed(() => weekEvents.value.length - weekPendingEvents.value.length)
+const monthEvents = computed(() =>
+  events.value.filter((event) => eventIntersectsDates(event, currentMonthDates.value)),
+)
+const monthPendingEvents = computed(() =>
+  monthEvents.value.filter((event) => event.status !== 'done'),
+)
+const monthCompletedCount = computed(
+  () => monthEvents.value.length - monthPendingEvents.value.length,
 )
 const nextTodayEvent = computed(() => todayPendingEvents.value[0])
-const completedCount = computed(
-  () => events.value.filter((event) => event.status === 'done').length,
-)
 const userName = computed(() => currentUser.value.name)
 const userDepartment = computed(
   () =>
@@ -361,24 +432,6 @@ const greeting = computed(() => {
   if (hour < 18) return '下午好'
   return '晚上好'
 })
-const timeLabel = computed(() =>
-  new Intl.DateTimeFormat('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(now.value),
-)
-const dateLabel = computed(() =>
-  new Intl.DateTimeFormat('zh-CN', {
-    month: 'long',
-    day: 'numeric',
-    weekday: 'long',
-  }).format(now.value),
-)
-const dataUpdateLabel = computed(() => `数据更新于 ${timeLabel.value}`)
-const todayCompletedCount = computed(
-  () => todayEvents.value.length - todayPendingEvents.value.length,
-)
 const todayTaskProgress = computed(() =>
   todayEvents.value.length
     ? Math.round((todayCompletedCount.value / todayEvents.value.length) * 100)
@@ -396,31 +449,43 @@ const profileTaskInsight = computed(() => {
       : '可以补充新的重点安排',
   }
 })
-const weekTaskCompleted = computed(() =>
-  Math.min(Math.max(completedCount.value, 5), Math.max(events.value.length, 1)),
-)
 const weekTaskProgress = computed(() =>
-  Math.round((weekTaskCompleted.value / Math.max(events.value.length, 1)) * 100),
+  weekEvents.value.length
+    ? Math.round((weekCompletedCount.value / weekEvents.value.length) * 100)
+    : 0,
+)
+const monthTaskProgress = computed(() =>
+  monthEvents.value.length
+    ? Math.round((monthCompletedCount.value / monthEvents.value.length) * 100)
+    : 0,
 )
 const dashboardMetrics = computed(() => [
   {
     label: '今日待办',
-    value: todayPendingEvents.value.length,
+    value: todayEvents.value.length,
     unit: '项',
-    detail: `已完成 ${todayCompletedCount.value} 项`,
+    detail: `待处理 ${todayPendingEvents.value.length} 项 · 已完成 ${todayCompletedCount.value} 项`,
     progress: todayTaskProgress.value,
     icon: IconCalendarDays,
     tone: 'blue',
   },
   {
     label: '本周任务',
-    value: events.value.length,
+    value: weekEvents.value.length,
     unit: '项',
-    detail: `已完成 ${weekTaskCompleted.value} 项`,
-    trend: '较上周 +14% ↑',
+    detail: `待处理 ${weekPendingEvents.value.length} 项 · 已完成 ${weekCompletedCount.value} 项`,
     progress: weekTaskProgress.value,
     icon: IconClipboardList,
     tone: 'green',
+  },
+  {
+    label: '本月任务',
+    value: monthEvents.value.length,
+    unit: '项',
+    detail: `待处理 ${monthPendingEvents.value.length} 项 · 已完成 ${monthCompletedCount.value} 项`,
+    progress: monthTaskProgress.value,
+    icon: IconCalendarRange,
+    tone: 'violet',
   },
 ])
 const trendSeries = computed(() =>
@@ -466,22 +531,16 @@ const trendLinePoints = computed(() =>
   trendChartPoints.value.map((point) => `${point.x},${point.y}`).join(' '),
 )
 const trendAreaPoints = computed(() => `0,74 ${trendLinePoints.value} 210,74`)
-const welcomeSummary = computed(() => {
-  if (!todayPendingEvents.value.length) {
-    return ['今日暂无待办安排。', '可以查看本月日程，或新增一个待办。']
-  }
-
-  return [
-    `今日 ${todayPendingEvents.value.length} 项待办，本周完成率 ${weekTaskProgress.value}%。`,
-    `${nextTodayEvent.value ? formatEventTime(nextTodayEvent.value) : '稍后'} 处理 ${nextTodayEvent.value?.title ?? '下一项任务'}。`,
-  ]
-})
-
 const selectedDateLabel = computed(() => {
   const date = new Date(`${selectedDate.value}T12:00:00`)
   const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()]
   return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${weekday}`
 })
+
+function eventIntersectsDates(event: CalendarEvent, targetDates: string[]) {
+  const targetDateSet = new Set(targetDates)
+  return dateRange(event.date, event.endDate).some((date) => targetDateSet.has(date))
+}
 
 function selectDate(date: string, syncMonth = true) {
   selectedDate.value = date
@@ -495,24 +554,39 @@ function selectDate(date: string, syncMonth = true) {
   }
 }
 
-function toggleDayPreview(date: string) {
-  if (isDayPreviewOpen.value && selectedDate.value === date) {
-    closeDayPreview()
+function toggleDayPreview(date: string, time?: string) {
+  if (time) {
+    if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges()) return
+
+    isDayPreviewFormDirty.value = false
+    quickCreatePrompt.value = ''
+    presetCreateTime.value = time
+    presetCreateKey.value += 1
+    selectDate(date, calendarViewMode.value === 'week')
+    openTodoPanel()
     return
   }
 
+  if (isDayPreviewOpen.value && selectedDate.value === date) {
+    return
+  }
+
+  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges()) return
+
+  isDayPreviewFormDirty.value = false
+  quickCreatePrompt.value = ''
+  presetCreateTime.value = ''
   selectDate(date, calendarViewMode.value === 'week')
   openTodoPanel()
 }
 
 function closeDayPreview() {
-  isDayPreviewOpen.value = false
-  scheduleTodayBubbleAfterPanelClose()
-}
+  if (!confirmDiscardPreviewChanges()) return
 
-function openTodayPreview() {
-  selectDate(todayDate.value)
-  openTodoPanel()
+  isDayPreviewOpen.value = false
+  isDayPreviewFormDirty.value = false
+  resetDesktopDraftState()
+  scheduleTodayBubbleAfterPanelClose()
 }
 
 function closeTodayBubble() {
@@ -541,6 +615,66 @@ function clearPanelCloseRestoreTimer() {
   if (!panelCloseRestoreTimer) return
   clearTimeout(panelCloseRestoreTimer)
   panelCloseRestoreTimer = undefined
+}
+
+function clearToastTimer() {
+  if (!toastTimer) return
+  clearTimeout(toastTimer)
+  toastTimer = undefined
+}
+
+function clearDesktopDraftQuery() {
+  if (!route.query.todoDraftId) return
+
+  const nextQuery = { ...route.query }
+  delete nextQuery.todoDraftId
+  void router.replace({ query: nextQuery })
+}
+
+function resetDesktopDraftState(clearQuery = true) {
+  activeDesktopDraftId.value = ''
+  externalDraft.value = null
+  if (clearQuery) clearDesktopDraftQuery()
+}
+
+async function loadDesktopDraft(draftId?: string) {
+  const normalizedDraftId = draftId?.trim()
+  if (!normalizedDraftId || normalizedDraftId === activeDesktopDraftId.value) return
+  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges()) return
+
+  try {
+    const draft = await getDesktopTodoDraft(normalizedDraftId)
+    activeDesktopDraftId.value = draft.draftId
+    externalDraft.value = draft.result
+    externalDraftKey.value += 1
+    quickCreatePrompt.value = ''
+    presetCreateTime.value = ''
+    isDayPreviewFormDirty.value = false
+    selectDate(draft.result.date)
+    openTodoPanel()
+    showToast('已载入桌面待办草稿')
+  } catch {
+    showToast('待办草稿不存在或已过期')
+    resetDesktopDraftState()
+  }
+}
+
+function showToast(message: string) {
+  clearToastTimer()
+  toastMessage.value = message
+  toastTimer = setTimeout(() => {
+    toastMessage.value = ''
+    toastTimer = undefined
+  }, 2200)
+}
+
+async function refreshAssignableUsers() {
+  backendAssignableUsers.value = await serviceLoadAssignableUsers(currentUser.value)
+}
+
+function confirmDiscardPreviewChanges() {
+  if (!isDayPreviewFormDirty.value) return true
+  return window.confirm('当前待办内容还没有保存，确定放弃修改吗？')
 }
 
 function tryShowTodayBubble() {
@@ -590,31 +724,69 @@ function scheduleTodayBubbleAfterPanelClose() {
   }, 1000)
 }
 
-function quickCreateToday(prompt: string) {
+function quickCreateTodo(prompt: string, date: string) {
+  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges()) return
+
+  resetDesktopDraftState()
+  isDayPreviewFormDirty.value = false
   quickCreatePrompt.value = prompt
+  presetCreateTime.value = ''
   quickCreateKey.value += 1
-  selectDate(todayDate.value)
-  isTodayBubbleManualClosed.value = false
+  selectDate(date)
+  if (date === todayDate.value) {
+    isTodayBubbleManualClosed.value = false
+  }
   openTodoPanel()
 }
 
-function createTodo(payload: CalendarTodoDraft) {
-  allEvents.value = mockCreateTodo(allEvents.value, currentUser.value, payload)
-  selectDate(payload.date)
-  openTodoPanel()
+async function createTodo(payload: CalendarTodoDraft) {
+  if (activeDesktopDraftId.value) {
+    try {
+      const response = await createTodoFromDesktopDraft(activeDesktopDraftId.value, payload)
+      allEvents.value = saveTodos([...allEvents.value, response.event])
+      selectDate(response.event.date)
+      openTodoPanel()
+      showToast('桌面待办已创建')
+      resetDesktopDraftState()
+    } catch {
+      showToast('桌面待办创建失败，请重试')
+    }
+    return
+  }
+
+  try {
+    allEvents.value = await serviceCreateTodo(allEvents.value, currentUser.value, payload)
+    selectDate(payload.date)
+    openTodoPanel()
+    showToast('待办已创建')
+  } catch {
+    showToast('待办创建失败，请重试')
+  }
 }
 
 function updateTodo(payload: CalendarTodoUpdate) {
-  allEvents.value = mockUpdateTodo(allEvents.value, currentUser.value, payload)
+  allEvents.value = serviceUpdateTodo(allEvents.value, currentUser.value, payload)
   selectDate(payload.date)
   openTodoPanel()
+  showToast('待办已保存')
 }
 
 function updateTodoStatus(id: string, status: CalendarEventStatus) {
-  allEvents.value = mockUpdateTodoStatus(allEvents.value, currentUser.value, id, status)
+  allEvents.value = serviceUpdateTodoStatus(allEvents.value, currentUser.value, id, status)
+  showToast(status === 'done' ? '已标记完成' : '已撤回完成')
+}
+
+function deleteTodo(id: string) {
+  isDayPreviewFormDirty.value = false
+  allEvents.value = serviceDeleteTodo(allEvents.value, currentUser.value, id)
+  closeDayPreview()
+  showToast('待办已删除')
 }
 
 function changePeriod(delta: number) {
+  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges()) return
+
+  isDayPreviewFormDirty.value = false
   if (calendarViewMode.value === 'week') {
     const selected = new Date(`${selectedDate.value}T12:00:00`)
     selected.setDate(selected.getDate() + delta * 7)
@@ -638,13 +810,37 @@ function changePeriod(delta: number) {
   selectedDate.value = ymd(new Date(nextMonth.getFullYear(), nextMonth.getMonth(), nextDay))
 }
 
-function openAgentList() {
-  router.push({ name: 'AgentList' })
+function openCampusTool(tool: CampusTool) {
+  if (tool.agentKey) {
+    openAgentList(tool.agentKey)
+    return
+  }
+
+  if (tool.isMore) {
+    openAgentList()
+    return
+  }
+
+  showToast(`${tool.name}模拟能力建设中，已打开智能体中心`)
+  openAgentList()
+}
+
+function openAgentList(agentKey?: string) {
+  router.push({
+    name: 'AgentList',
+    query: agentKey ? { agent: agentKey } : undefined,
+  })
 }
 </script>
 
 <template>
   <div class="calendar-workspace" @click="closeDayPreview">
+    <Transition name="toast-fade">
+      <div v-if="toastMessage" class="workspace-toast" role="status">
+        {{ toastMessage }}
+      </div>
+    </Transition>
+
     <div
       v-if="isDayPreviewOpen"
       class="left-preview-scrim"
@@ -742,7 +938,7 @@ function openAgentList() {
             class="campus-tool"
             :class="[`tone-${tool.tone}`, `position-${tool.position}`]"
             type="button"
-            @click="openAgentList"
+            @click="openCampusTool(tool)"
           >
             <span class="campus-tool-content">
               <span class="campus-tool-icon">
@@ -771,7 +967,6 @@ function openAgentList() {
               >
               <p>
                 {{ metric.detail }}
-                <i v-if="metric.trend">{{ metric.trend }}</i>
               </p>
             </div>
             <div class="metric-ring" :style="{ '--progress': `${metric.progress * 3.6}deg` }">
@@ -856,10 +1051,16 @@ function openAgentList() {
             :assignable-users="assignableUsers"
             :quick-create-prompt="quickCreatePrompt"
             :quick-create-key="quickCreateKey"
+            :external-draft="externalDraft"
+            :external-draft-key="externalDraftKey"
+            :preset-create-time="presetCreateTime"
+            :preset-create-key="presetCreateKey"
             show-close
             @create-todo="createTodo"
             @update-todo="updateTodo"
             @update-status="updateTodoStatus"
+            @delete-todo="deleteTodo"
+            @dirty-change="isDayPreviewFormDirty = $event"
             @close="closeDayPreview"
           />
         </aside>
@@ -878,7 +1079,8 @@ function openAgentList() {
           @select="toggleDayPreview"
           @calendar-interaction="hideTodayBubbleTemporarily"
           @close-today-bubble="closeTodayBubble"
-          @quick-create-today="quickCreateToday"
+          @quick-create-todo="quickCreateTodo"
+          @open-agent-center="openAgentList"
           @previous-period="changePeriod(-1)"
           @next-period="changePeriod(1)"
         />
@@ -900,6 +1102,42 @@ function openAgentList() {
   grid-template-rows: minmax(370px, 1.5fr) minmax(240px, 1fr);
   gap: 8px 18px;
   overflow: hidden;
+}
+
+.workspace-toast {
+  position: fixed;
+  z-index: 1400;
+  top: 22px;
+  left: 50%;
+  min-height: 38px;
+  box-sizing: border-box;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.94);
+  color: #ffffff;
+  padding: 0 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.2;
+  box-shadow: 0 18px 36px -24px rgba(15, 23, 42, 0.82);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.toast-fade-enter-active,
+.toast-fade-leave-active {
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.toast-fade-enter-from,
+.toast-fade-leave-to {
+  opacity: 0;
+  transform: translate(-50%, -8px);
 }
 
 .left-preview-scrim {
@@ -1353,7 +1591,7 @@ p {
   grid-column: 1 / -1;
   grid-row: 2;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -1365,7 +1603,7 @@ p {
   border-radius: 16px;
   background: linear-gradient(140deg, rgba(255, 255, 255, 0.9), rgba(249, 251, 255, 0.72)),
     rgba(255, 255, 255, 0.7);
-  padding: 16px 54px 14px 56px;
+  padding: 15px 50px 13px 54px;
   color: #64748b;
   font-size: 12px;
   font-weight: 800;
@@ -1413,7 +1651,7 @@ p {
   margin-right: 4px;
   color: #0f172a;
   font-style: normal;
-  font-size: 25px;
+  font-size: 24px;
   font-weight: 950;
 }
 
@@ -1447,14 +1685,6 @@ p {
   font-size: 11px;
   font-weight: 850;
   line-height: 1.25;
-}
-
-.metric-card p i {
-  display: block;
-  margin-top: 2px;
-  color: #10b981;
-  font-style: normal;
-  font-weight: 950;
 }
 
 .metric-ring {

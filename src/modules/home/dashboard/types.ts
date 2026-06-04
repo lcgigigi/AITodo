@@ -18,7 +18,6 @@ export interface CalendarEvent {
   status: CalendarEventStatus
   priority?: CalendarEventPriority
   source?: string
-  completionIdeas?: string
   creatorId?: string
   creatorName?: string
   assigneeId?: string
@@ -35,7 +34,6 @@ export interface CalendarTodoDraft {
   title: string
   owner?: string
   source?: string
-  completionIdeas?: string
   assigneeId?: string
   assigneeName?: string
 }
@@ -48,7 +46,6 @@ export interface CalendarTodoUpdate {
   title: string
   owner: string
   source?: string
-  completionIdeas?: string
   assigneeId?: string
   assigneeName?: string
 }
@@ -63,7 +60,6 @@ export interface CalendarTodoForm {
   assigneeId: string
   assigneeName: string
   source: string
-  completionIdeas: string
 }
 
 export interface CalendarUser {
@@ -85,7 +81,6 @@ export interface ParsedTodoDraft {
   assigneeId?: string
   assigneeName?: string
   source?: string
-  completionIdeas?: string
 }
 
 export interface CalendarDay {
