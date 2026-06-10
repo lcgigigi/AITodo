@@ -1,5 +1,20 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import IconArrowLeft from '~icons/lucide/arrow-left'
+import IconCalendarPlus from '~icons/lucide/calendar-plus'
+import IconX from '~icons/lucide/x'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import AppRive from '@/shared/components/animation/AppRive.vue'
+import TodoDatePicker from './components/TodoDatePicker.vue'
+import TodoTimePicker from './components/TodoTimePicker.vue'
 import type {
   CalendarEvent,
   CalendarEventStatus,
@@ -45,13 +60,26 @@ const emit = defineEmits<{
 }>()
 
 type PanelMode = 'list' | 'create' | 'edit'
+type ParsedHighlightField = 'date' | 'time' | 'endDate' | 'title' | 'source' | 'assignee'
+
+const scheduledTimePresets = [
+  { label: '中午12点', value: '12:00' },
+  { label: '下午3点', value: '15:00' },
+  { label: '晚上5点', value: '17:00' },
+]
+const aiParsingRiveSrc = '/animations/ai-parsing.riv'
+const aiParsingSteps = ['识别日期', '整理时间', '提取事项']
 
 const panelMode = ref<PanelMode>('list')
 const editingId = ref('')
 const aiPrompt = ref('')
 const isParsing = ref(false)
+const highlightedFields = ref<Set<ParsedHighlightField>>(new Set())
 const todoForm = ref<CalendarTodoForm>(createEmptyForm(props.date))
 const initialFormSnapshot = ref(formSnapshot(todoForm.value))
+const discardWarningVisible = ref(false)
+let pendingDiscardAction: (() => void) | undefined
+let highlightTimer: ReturnType<typeof setTimeout> | undefined
 
 const specialText: Record<CalendarSpecialDay['type'], string> = {
   holiday: '节假日',
@@ -77,8 +105,16 @@ watch(
   hasUnsavedChanges,
   (dirty) => {
     emit('dirtyChange', dirty)
+    if (!dirty) hideDiscardWarning()
   },
   { immediate: true },
+)
+
+watch(
+  () => formSnapshot(todoForm.value, aiPrompt.value),
+  () => {
+    if (discardWarningVisible.value) hideDiscardWarning()
+  },
 )
 
 watch(
@@ -199,12 +235,35 @@ function syncFormSnapshot(form = todoForm.value, prompt = aiPrompt.value) {
   initialFormSnapshot.value = formSnapshot(form, prompt)
 }
 
-function confirmDiscardChanges() {
+function hideDiscardWarning() {
+  discardWarningVisible.value = false
+  pendingDiscardAction = undefined
+}
+
+function showDiscardWarning(onConfirm?: () => void) {
+  pendingDiscardAction = onConfirm
+  discardWarningVisible.value = true
+}
+
+function confirmDiscardWarning() {
+  const discardAction = pendingDiscardAction
+  hideDiscardWarning()
+  resetFormState()
+
+  if (discardAction) {
+    discardAction()
+  }
+}
+
+function confirmDiscardChanges(onConfirm?: () => void) {
   if (!hasUnsavedChanges.value) return true
-  return window.confirm('当前待办内容还没有保存，确定放弃修改吗？')
+  showDiscardWarning(onConfirm)
+  return false
 }
 
 function resetFormState() {
+  hideDiscardWarning()
+  clearParsedHighlights()
   const nextForm = createEmptyForm(props.date)
   editingId.value = ''
   aiPrompt.value = ''
@@ -216,6 +275,8 @@ function resetFormState() {
 }
 
 function beginCreateForm(overrides: Partial<CalendarTodoForm> = {}) {
+  hideDiscardWarning()
+  clearParsedHighlights()
   const nextForm = {
     ...createEmptyForm(props.date),
     ...overrides,
@@ -230,15 +291,20 @@ function beginCreateForm(overrides: Partial<CalendarTodoForm> = {}) {
 }
 
 function openCreateForm() {
-  if (!confirmDiscardChanges()) return
+  if (!confirmDiscardChanges(beginCreateForm)) return
   beginCreateForm()
 }
 
 function openEditForm(event: CalendarEvent) {
   if (!event.editable) return
 
-  if (!confirmDiscardChanges()) return
+  if (!confirmDiscardChanges(() => beginEditForm(event))) return
 
+  beginEditForm(event)
+}
+
+function beginEditForm(event: CalendarEvent) {
+  clearParsedHighlights()
   const nextForm = createFormFromEvent(event)
   editingId.value = event.id
   aiPrompt.value = ''
@@ -250,12 +316,19 @@ function openEditForm(event: CalendarEvent) {
 }
 
 function requestCancelForm() {
-  if (!confirmDiscardChanges()) return
+  if (!confirmDiscardChanges(resetFormState)) return
   resetFormState()
 }
 
 function requestClosePanel() {
-  if (!confirmDiscardChanges()) return
+  if (
+    !confirmDiscardChanges(() => {
+      resetFormState()
+      emit('close')
+    })
+  )
+    return
+
   resetFormState()
   emit('close')
 }
@@ -265,22 +338,68 @@ async function parseTodoText() {
 
   isParsing.value = true
   try {
+    const previousForm = createFormCopy(todoForm.value)
     const parsed = await serviceParseTodoText(
       aiPrompt.value,
       props.currentUser,
       props.assignableUsers,
       todoForm.value,
     )
-    todoForm.value = {
+    const nextForm = {
       ...todoForm.value,
       ...parsed,
-      mode: parsed.endDate && parsed.endDate !== parsed.date ? 'deadline' : todoForm.value.mode,
+      mode:
+        parsed.mode ??
+        (parsed.endDate && parsed.endDate !== parsed.date ? 'deadline' : 'scheduled'),
       endDate: parsed.endDate ?? parsed.date ?? todoForm.value.endDate,
       time: parsed.time ?? todoForm.value.time,
     }
+    todoForm.value = nextForm
+    triggerParsedHighlights(previousForm, nextForm)
   } finally {
     isParsing.value = false
   }
+}
+
+function isAiHighlighted(field: ParsedHighlightField) {
+  return highlightedFields.value.has(field)
+}
+
+function clearParsedHighlights() {
+  if (highlightTimer) {
+    clearTimeout(highlightTimer)
+    highlightTimer = undefined
+  }
+  highlightedFields.value = new Set()
+}
+
+function triggerParsedHighlights(previousForm: CalendarTodoForm, nextForm: CalendarTodoForm) {
+  const fields: ParsedHighlightField[] = []
+
+  if (nextForm.date !== previousForm.date) fields.push('date')
+
+  if (nextForm.mode === 'deadline') {
+    if (nextForm.endDate !== previousForm.endDate) fields.push('endDate')
+  } else if (nextForm.time !== previousForm.time) {
+    fields.push('time')
+  }
+
+  if (nextForm.title !== previousForm.title) fields.push('title')
+  if (nextForm.source !== previousForm.source) fields.push('source')
+
+  if (
+    canChooseAssignee.value &&
+    (nextForm.assigneeId !== previousForm.assigneeId ||
+      nextForm.assigneeName !== previousForm.assigneeName)
+  ) {
+    fields.push('assignee')
+  }
+
+  if (!fields.length) return
+
+  clearParsedHighlights()
+  highlightedFields.value = new Set(fields)
+  highlightTimer = setTimeout(clearParsedHighlights, 1300)
 }
 
 function setMode(mode: CalendarTodoForm['mode']) {
@@ -293,14 +412,12 @@ function setMode(mode: CalendarTodoForm['mode']) {
   if (!todoForm.value.endDate || todoForm.value.endDate < todoForm.value.date) {
     todoForm.value.endDate = todoForm.value.date
   }
-  todoForm.value.time = ''
 }
 
 function applyQuickRange(type: 'today' | 'week' | 'nextWeek' | 'month') {
   const start = parseDate(props.date)
   todoForm.value.date = ymd(start)
   todoForm.value.mode = 'deadline'
-  todoForm.value.time = ''
 
   if (type === 'today') {
     todoForm.value.endDate = todoForm.value.date
@@ -316,6 +433,12 @@ function applyQuickRange(type: 'today' | 'week' | 'nextWeek' | 'month') {
   } else {
     todoForm.value.endDate = ymd(new Date(start.getFullYear(), start.getMonth() + 1, 0))
   }
+}
+
+function applyScheduledTime(time: string) {
+  todoForm.value.mode = 'scheduled'
+  todoForm.value.endDate = todoForm.value.date
+  todoForm.value.time = time
 }
 
 function syncDateRange() {
@@ -334,10 +457,6 @@ function selectAssignee(id: string) {
   todoForm.value.assigneeId = assignee.id
   todoForm.value.assigneeName = assignee.name
   todoForm.value.owner = assignee.name
-}
-
-function onAssigneeChange(event: Event) {
-  selectAssignee((event.target as HTMLSelectElement).value)
 }
 
 function submitTodo() {
@@ -394,24 +513,29 @@ function statusText(event: CalendarEvent) {
   if (event.status === 'done') return '已完成'
   return '待处理'
 }
+
+defineExpose({
+  showDiscardWarning,
+})
 </script>
 
 <template>
   <section class="preview-panel" :class="{ 'is-form-mode': isFormMode }">
     <header class="preview-head">
       <div>
-        <p>{{ isFormMode ? '整理待办' : '待办详情' }}</p>
+        <p v-if="!isFormMode">待办详情</p>
         <h2>{{ isFormMode ? formTitle : props.dateLabel }}</h2>
-        <span v-if="isFormMode" class="form-date">{{ props.dateLabel }}</span>
       </div>
       <button
         v-if="showClose"
         class="close-btn"
+        :class="{ 'is-back': isFormMode }"
         type="button"
-        aria-label="关闭当天待办"
-        @click="requestClosePanel"
+        :aria-label="isFormMode ? '返回待办列表' : '关闭当天待办'"
+        @click="isFormMode ? requestCancelForm() : requestClosePanel()"
       >
-        ×
+        <IconArrowLeft v-if="isFormMode" aria-hidden="true" />
+        <IconX v-else aria-hidden="true" />
       </button>
     </header>
 
@@ -514,29 +638,109 @@ function statusText(event: CalendarEvent) {
       </div>
 
       <div v-else class="empty">
-        <h3>当天暂无待办</h3>
-        <p>可以安排一个待办，或者先浏览本月日程。</p>
+        <span class="empty-icon" aria-hidden="true">
+          <IconCalendarPlus />
+        </span>
+        <div class="empty-copy">
+          <h3>当天暂无待办</h3>
+          <p>安排一个待办，或选择其他日期查看日程。</p>
+        </div>
       </div>
     </template>
 
-    <form v-else class="inline-todo-form" @submit.prevent="submitTodo">
-      <section class="inline-section ai-inline-section">
+    <form v-else class="inline-todo-form" :aria-busy="isParsing" @submit.prevent="submitTodo">
+      <Transition name="discard-warning">
+        <div v-if="discardWarningVisible" class="inline-discard-warning" role="alert">
+          <div>
+            <strong>当前待办内容还没有保存</strong>
+            <p>放弃后，本次填写的内容不会保存。</p>
+          </div>
+          <div class="discard-warning-actions">
+            <button type="button" @click="hideDiscardWarning">继续编辑</button>
+            <button class="discard-confirm" type="button" @click="confirmDiscardWarning">
+              放弃修改
+            </button>
+          </div>
+        </div>
+      </Transition>
+
+      <section
+        class="inline-section ai-inline-section"
+        :class="{ 'is-parsing': isParsing }"
+        :aria-busy="isParsing"
+      >
         <label class="field field-full">
           <span>一句话创建待办</span>
           <div class="ai-inline-row">
-            <input
+            <Input
               v-model="aiPrompt"
               type="text"
+              :disabled="isParsing"
+              :aria-describedby="isParsing ? 'ai-parse-status-title' : undefined"
               placeholder="例如：明天下午给刘畅布置一项开发公司官方网站的任务"
             />
-            <button type="button" :disabled="isParsing || !aiPrompt.trim()" @click="parseTodoText">
+            <Button
+              type="button"
+              :class="{ 'is-parsing': isParsing }"
+              :disabled="isParsing || !aiPrompt.trim()"
+              @click="parseTodoText"
+            >
+              <span v-if="isParsing" class="ai-button-dots" aria-hidden="true">
+                <span></span>
+                <span></span>
+                <span></span>
+              </span>
               {{ isParsing ? '解析中' : 'AI 解析' }}
-            </button>
+            </Button>
           </div>
         </label>
+        <Transition name="ai-parse-status">
+          <div
+            v-if="isParsing"
+            class="ai-parse-status"
+            role="status"
+            aria-live="polite"
+            aria-labelledby="ai-parse-status-title"
+          >
+            <div class="ai-rive-stage" aria-hidden="true">
+              <AppRive class="ai-rive-player" :src="aiParsingRiveSrc">
+                <template #fallback>
+                  <div class="ai-rive-fallback">
+                    <span class="ai-orbit-ring"></span>
+                    <span class="ai-orbit-dot is-one"></span>
+                    <span class="ai-orbit-dot is-two"></span>
+                    <span class="ai-orbit-dot is-three"></span>
+                    <span class="ai-note-card is-front"></span>
+                    <span class="ai-note-card is-back"></span>
+                  </div>
+                </template>
+              </AppRive>
+            </div>
+            <div class="ai-status-copy">
+              <div class="ai-status-heading">
+                <strong id="ai-parse-status-title">正在解析待办内容</strong>
+                <span>智能整理中</span>
+              </div>
+              <p>正在识别时间、地点和事项，稍后自动填入表单。</p>
+              <div class="ai-status-steps" aria-hidden="true">
+                <span
+                  v-for="(step, index) in aiParsingSteps"
+                  :key="step"
+                  :style="{ '--step-index': index }"
+                >
+                  <i></i>
+                  {{ step }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </Transition>
       </section>
 
-      <section class="inline-section">
+      <section
+        class="inline-section todo-details-section"
+        :class="{ 'has-parse-scrim': isParsing }"
+      >
         <div class="section-title">
           <h3>基础信息</h3>
           <span>{{ formDateTimeLabel }}</span>
@@ -560,23 +764,41 @@ function statusText(event: CalendarEvent) {
         <div class="form-grid">
           <label class="field" :class="{ 'field-date-range': isDeadlineMode }">
             <span>日期</span>
-            <input
+            <TodoDatePicker
               v-model="todoForm.date"
               class="soft-picker"
-              type="date"
+              :highlighted="isAiHighlighted('date')"
+              aria-label="选择待办日期"
               @change="syncDateRange"
             />
           </label>
           <label v-if="!isDeadlineMode" class="field">
             <span>时间</span>
-            <input v-model="todoForm.time" class="soft-picker" type="time" />
+            <TodoTimePicker
+              v-model="todoForm.time"
+              class="soft-picker"
+              :highlighted="isAiHighlighted('time')"
+              aria-label="选择待办时间"
+            />
           </label>
+          <div v-if="!isDeadlineMode" class="quick-time-row field-full" aria-label="指定时间">
+            <button
+              v-for="preset in scheduledTimePresets"
+              :key="preset.value"
+              type="button"
+              :class="{ active: todoForm.time === preset.value }"
+              @click="applyScheduledTime(preset.value)"
+            >
+              {{ preset.label }}
+            </button>
+          </div>
           <label v-else class="field">
             <span>截止</span>
-            <input
+            <TodoDatePicker
               v-model="todoForm.endDate"
               class="soft-picker"
-              type="date"
+              :highlighted="isAiHighlighted('endDate')"
+              aria-label="选择截止日期"
               @change="syncDateRange"
             />
           </label>
@@ -588,34 +810,59 @@ function statusText(event: CalendarEvent) {
           </div>
           <label class="field field-full">
             <span>待办内容</span>
-            <input v-model="todoForm.title" type="text" required placeholder="输入待办内容" />
+            <Input
+              v-model="todoForm.title"
+              :class="{ 'is-ai-highlighted': isAiHighlighted('title') }"
+              type="text"
+              required
+              placeholder="输入待办内容"
+            />
           </label>
           <label v-if="canChooseAssignee" class="field">
             <span>负责人</span>
-            <select v-model="todoForm.assigneeId" @change="onAssigneeChange">
-              <option v-for="user in assignableUsers" :key="user.id" :value="user.id">
-                {{ user.name }}
-              </option>
-            </select>
+            <Select
+              :model-value="todoForm.assigneeId"
+              @update:model-value="selectAssignee(String($event))"
+            >
+              <SelectTrigger
+                :class="[
+                  'soft-select-trigger',
+                  { 'is-ai-highlighted': isAiHighlighted('assignee') },
+                ]"
+                aria-label="选择负责人"
+              >
+                <SelectValue placeholder="选择负责人" />
+              </SelectTrigger>
+              <SelectContent position="popper" class="todo-select-content">
+                <SelectItem v-for="user in assignableUsers" :key="user.id" :value="user.id">
+                  {{ user.name }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </label>
           <label class="field field-full">
             <span>备注</span>
-            <input v-model="todoForm.source" type="text" placeholder="备注或来源" />
+            <Input
+              v-model="todoForm.source"
+              :class="{ 'is-ai-highlighted': isAiHighlighted('source') }"
+              type="text"
+              placeholder="备注或来源"
+            />
           </label>
         </div>
       </section>
 
       <div class="form-actions">
-        <button
+        <Button
           v-if="panelMode === 'edit'"
           class="delete-btn"
           type="button"
           @click="deleteCurrentTodo"
         >
           删除
-        </button>
-        <button type="button" @click="requestCancelForm">取消</button>
-        <button type="submit" :disabled="!canSubmit">保存</button>
+        </Button>
+        <Button type="button" @click="requestCancelForm">取消</Button>
+        <Button type="submit" :disabled="!canSubmit">保存</Button>
       </div>
     </form>
   </section>
@@ -623,8 +870,13 @@ function statusText(event: CalendarEvent) {
 
 <style scoped>
 .preview-panel {
+  --todo-primary: #3b82f6;
+  --todo-primary-hover: #2563eb;
+  --todo-primary-rgb: 59, 130, 246;
+  height: 100%;
   width: 100%;
   min-width: 0;
+  min-height: 0;
   box-sizing: border-box;
   padding: 2px 2px 0;
   display: flex;
@@ -721,6 +973,7 @@ function statusText(event: CalendarEvent) {
 .close-btn,
 .item-actions button,
 .form-actions button,
+.discard-warning-actions button,
 .ai-inline-row button {
   min-height: 30px;
   border: 1px solid #e5edf6;
@@ -741,30 +994,50 @@ function statusText(event: CalendarEvent) {
 
 .add-btn,
 .form-actions button[type='submit'],
+.discard-warning-actions .discard-confirm,
 .ai-inline-row button {
-  border-color: #111827;
-  background: #111827;
+  border-color: var(--todo-primary);
+  background: var(--todo-primary);
   color: #ffffff;
 }
 
 .close-btn {
   width: 32px;
+  height: 32px;
   padding: 0;
   border-radius: 999px;
   color: #64748b;
-  font-size: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
   flex: 0 0 auto;
+}
+
+.close-btn svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 3;
 }
 
 .add-btn:hover,
 .close-btn:hover,
 .item-actions button:hover,
 .form-actions button:hover,
+.discard-warning-actions button:hover,
 .ai-inline-row button:hover {
   border-color: #cbd5e1;
   background: #f8fafc;
   color: #111827;
+}
+
+.add-btn:hover,
+.form-actions button[type='submit']:not(:disabled):hover,
+.discard-warning-actions .discard-confirm:hover,
+.ai-inline-row button:not(:disabled):hover {
+  border-color: var(--todo-primary-hover);
+  background: var(--todo-primary-hover);
+  color: #ffffff;
 }
 
 .form-actions button:disabled,
@@ -814,9 +1087,29 @@ function statusText(event: CalendarEvent) {
 .timeline {
   position: relative;
   min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  padding-right: 4px;
+}
+
+.timeline::-webkit-scrollbar,
+.inline-todo-form::-webkit-scrollbar {
+  width: 6px;
+}
+
+.timeline::-webkit-scrollbar-thumb,
+.inline-todo-form::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.42);
+}
+
+.timeline::-webkit-scrollbar-track,
+.inline-todo-form::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .timeline-item {
@@ -980,7 +1273,7 @@ p {
   min-height: 22px;
   border-radius: 999px;
   background: #eff6ff;
-  color: #1d4ed8;
+  color: var(--todo-primary-hover);
   padding: 0 8px;
   display: inline-flex;
   align-items: center;
@@ -1045,23 +1338,58 @@ p {
 }
 
 .empty {
-  min-height: 140px;
-  border-left: 2px solid rgba(148, 163, 184, 0.42);
-  background: linear-gradient(90deg, rgba(248, 250, 252, 0.72), rgba(248, 250, 252, 0));
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 18px 0 18px 18px;
+  min-height: 104px;
+  box-sizing: border-box;
+  border: 1px dashed rgba(96, 165, 250, 0.36);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(239, 246, 255, 0.88), rgba(255, 251, 235, 0.48)), #ffffff;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
 .empty h3 {
-  font-size: 15px;
+  color: #1f2937;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.3;
+}
+
+.empty p {
+  margin-top: 4px;
+  color: #64748b;
+}
+
+.empty-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  background: #ffffff;
+  color: var(--todo-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 12px 24px -20px rgba(var(--todo-primary-rgb), 0.65);
+}
+
+.empty-icon svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 2.5;
 }
 
 .inline-todo-form {
+  position: relative;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: visible;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  padding-right: 0;
 }
 
 .inline-section {
@@ -1074,25 +1402,334 @@ p {
   border-top: 1px solid rgba(226, 232, 240, 0.72);
 }
 
+.todo-details-section {
+  position: relative;
+}
+
+.todo-details-section.has-parse-scrim {
+  z-index: 1;
+}
+
+.todo-details-section.has-parse-scrim::before {
+  content: '';
+  position: absolute;
+  z-index: 2;
+  inset: -10px -2px -6px;
+  border-radius: 16px;
+  background: rgba(248, 250, 252, 0.58);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.58);
+  pointer-events: none;
+}
+
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .todo-details-section.has-parse-scrim::before {
+    background: rgba(248, 250, 252, 0.46);
+    -webkit-backdrop-filter: blur(1px);
+    backdrop-filter: blur(1px);
+  }
+}
+
 .ai-inline-section {
+  position: relative;
+  z-index: 4;
+  overflow: visible;
   padding: 10px;
+  border: 1px solid transparent;
   border-radius: 14px;
   background: rgba(248, 250, 252, 0.72);
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.ai-inline-section.is-parsing {
+  border-color: transparent;
+  background: rgba(248, 250, 252, 0.72);
+  box-shadow: none;
+}
+
+.ai-inline-section.is-parsing::before {
+  content: none;
 }
 
 .ai-inline-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
 }
 
+.ai-inline-row button {
+  min-width: 96px;
+  min-height: 38px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.ai-inline-row button.is-parsing:disabled {
+  border-color: var(--todo-primary);
+  background: var(--todo-primary);
+  color: #ffffff;
+  cursor: progress;
+  box-shadow: 0 10px 22px -16px rgba(var(--todo-primary-rgb), 0.72);
+}
+
+.ai-button-dots {
+  min-width: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+
+.ai-button-dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  animation: ai-dot-bounce 0.82s ease-in-out infinite;
+}
+
+.ai-button-dots span {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.ai-button-dots span:nth-child(2) {
+  animation-delay: 0.12s;
+}
+
+.ai-button-dots span:nth-child(3) {
+  animation-delay: 0.24s;
+}
+
+.ai-inline-row input:disabled {
+  background: #ffffff;
+  color: #475569;
+  cursor: progress;
+}
+
+.ai-parse-status {
+  position: absolute;
+  z-index: 7;
+  top: calc(100% + 10px);
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+  min-height: 104px;
+  border: 1px solid rgba(147, 197, 253, 0.6);
+  border-radius: 18px;
+  background: radial-gradient(circle at 82% 20%, rgba(219, 234, 254, 0.76), transparent 34%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(239, 246, 255, 0.92)), #ffffff;
+  color: #334155;
+  box-shadow:
+    0 22px 42px -34px rgba(var(--todo-primary-rgb), 0.55),
+    0 13px 26px -24px rgba(15, 23, 42, 0.18);
+  padding: 14px 18px;
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  pointer-events: none;
+  backdrop-filter: blur(3px);
+}
+
+.ai-rive-stage {
+  width: 68px;
+  height: 68px;
+  border-radius: 22px;
+  background: radial-gradient(circle at 66% 24%, rgba(255, 255, 255, 0.98), transparent 28%),
+    linear-gradient(135deg, rgba(239, 246, 255, 0.96), rgba(219, 234, 254, 0.78));
+  box-shadow:
+    inset 0 0 0 1px rgba(191, 219, 254, 0.88),
+    0 14px 22px -20px rgba(var(--todo-primary-rgb), 0.58);
+  overflow: hidden;
+}
+
+.ai-rive-player {
+  width: 100%;
+  height: 100%;
+}
+
+.ai-rive-fallback {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.ai-orbit-ring {
+  position: absolute;
+  inset: 13px;
+  border: 1px dashed rgba(96, 165, 250, 0.55);
+  border-radius: 18px;
+  animation: ai-rive-orbit 2.8s linear infinite;
+}
+
+.ai-orbit-dot {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #60a5fa;
+  box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.13);
+  animation: ai-orbit-dot 1.18s ease-in-out infinite;
+}
+
+.ai-orbit-dot.is-one {
+  top: 17px;
+  left: 17px;
+}
+
+.ai-orbit-dot.is-two {
+  top: 17px;
+  right: 17px;
+  animation-delay: 0.16s;
+}
+
+.ai-orbit-dot.is-three {
+  right: 20px;
+  bottom: 17px;
+  animation-delay: 0.32s;
+}
+
+.ai-note-card {
+  position: absolute;
+  left: 24px;
+  top: 28px;
+  width: 24px;
+  height: 18px;
+  border-radius: 7px;
+  background: #ffffff;
+  box-shadow:
+    inset 0 0 0 1px rgba(147, 197, 253, 0.58),
+    0 8px 14px -12px rgba(37, 99, 235, 0.48);
+}
+
+.ai-note-card::before,
+.ai-note-card::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  height: 2px;
+  border-radius: 999px;
+  background: rgba(96, 165, 250, 0.52);
+}
+
+.ai-note-card::before {
+  top: 6px;
+}
+
+.ai-note-card::after {
+  top: 11px;
+}
+
+.ai-note-card.is-front {
+  animation: ai-note-sort 1.8s ease-in-out infinite;
+}
+
+.ai-note-card.is-back {
+  top: 22px;
+  left: 20px;
+  opacity: 0.72;
+  transform: rotate(-8deg);
+  animation: ai-note-back 1.8s ease-in-out infinite;
+}
+
+.ai-status-copy {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.ai-status-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.ai-status-heading strong {
+  display: block;
+  color: #1e293b;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.ai-status-heading span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  border-radius: 999px;
+  background: rgba(219, 234, 254, 0.88);
+  color: #2563eb;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.ai-parse-status p {
+  margin: 0;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ai-status-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.ai-status-steps span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 23px;
+  border: 1px solid rgba(191, 219, 254, 0.9);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #64748b;
+  padding: 0 9px;
+  font-size: 11px;
+  font-weight: 850;
+  animation: ai-step-pulse 1.72s ease-in-out infinite;
+  animation-delay: calc(var(--step-index) * 0.16s);
+}
+
+.ai-status-steps i {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: #60a5fa;
+}
+
+.ai-parse-status-enter-active,
+.ai-parse-status-leave-active {
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease;
+}
+
+.ai-parse-status-enter-from,
+.ai-parse-status-leave-to {
+  opacity: 0;
+  transform: translateY(-5px);
+}
+
 .mode-switch,
-.quick-range-row {
+.quick-range-row,
+.quick-time-row {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .mode-switch {
@@ -1104,32 +1741,48 @@ p {
 }
 
 .mode-switch button,
-.quick-range-row button {
-  min-height: 28px;
+.quick-range-row button,
+.quick-time-row button {
+  min-height: 30px;
   border: 0;
   border-radius: 999px;
   background: transparent;
   color: #64748b;
-  padding: 0 10px;
+  padding: 0 12px;
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 850;
   cursor: pointer;
 }
 
 .mode-switch button.active {
-  background: #111827;
+  background: var(--todo-primary);
   color: #ffffff;
 }
 
-.quick-range-row button {
+.quick-range-row button,
+.quick-time-row button {
   border: 1px solid #e5edf6;
   background: #ffffff;
 }
 
-.quick-range-row button:hover {
+.quick-range-row button:hover,
+.quick-time-row button:hover {
   border-color: #cbd5e1;
   color: #111827;
+}
+
+.quick-time-row button.active {
+  border-color: var(--todo-primary);
+  background: var(--todo-primary);
+  color: #ffffff;
+}
+
+.mode-switch button.active:hover,
+.quick-time-row button.active:hover {
+  border-color: var(--todo-primary-hover);
+  background: var(--todo-primary-hover);
+  color: #ffffff;
 }
 
 .section-title {
@@ -1141,14 +1794,14 @@ p {
 
 .section-title h3 {
   color: #1f2937;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 900;
   line-height: 1.3;
 }
 
 .section-title span {
   color: #64748b;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 750;
   white-space: nowrap;
 }
@@ -1156,14 +1809,14 @@ p {
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px 12px;
+  gap: 12px 14px;
 }
 
 .field {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
 }
 
 .field-full {
@@ -1172,7 +1825,7 @@ p {
 
 .field span {
   color: #475569;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 820;
 }
 
@@ -1185,9 +1838,9 @@ p {
   border-radius: 10px;
   background: #ffffff;
   color: #111827;
-  padding: 0 10px;
+  padding: 0 12px;
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
   outline: none;
   transition:
     border-color 0.18s ease,
@@ -1197,22 +1850,50 @@ p {
 
 .field input,
 .field select {
-  height: 36px;
+  height: 40px;
 }
 
 .soft-picker {
-  height: 36px;
+  height: 40px;
   width: 100%;
   border: 1px solid #dfe8f3;
   border-radius: 10px;
   background: #ffffff;
   color: #111827;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   outline: none;
   transition:
     border-color 0.18s ease,
     box-shadow 0.18s ease;
+}
+
+.soft-select-trigger {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  border-color: #dfe8f3;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111827;
+  padding: 0 12px;
+  justify-content: space-between;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: none;
+}
+
+.soft-select-trigger:hover,
+.soft-select-trigger[aria-expanded='true'] {
+  border-color: #111827;
+  background: #ffffff;
+  color: #111827;
+  box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.07);
+}
+
+.soft-select-trigger.is-ai-highlighted :deep([data-slot='select-value']) {
+  animation: ai-value-highlight 0.55s ease-in-out 2;
 }
 
 .soft-picker:focus {
@@ -1221,8 +1902,8 @@ p {
 }
 
 .field textarea {
-  min-height: 76px;
-  padding: 10px;
+  min-height: 72px;
+  padding: 10px 12px;
   resize: none;
   line-height: 1.45;
 }
@@ -1234,11 +1915,179 @@ p {
   box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.07);
 }
 
+.field input.is-ai-highlighted,
+.field select.is-ai-highlighted {
+  animation: ai-value-highlight 0.55s ease-in-out 2;
+}
+
+.inline-discard-warning {
+  position: absolute;
+  z-index: 8;
+  top: 0;
+  left: 0;
+  right: 4px;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  border-radius: 14px;
+  background: #fffbeb;
+  color: #78350f;
+  box-shadow: 0 18px 36px -24px rgba(120, 53, 15, 0.45);
+  padding: 15px 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+}
+
+.inline-discard-warning strong {
+  display: block;
+  color: #78350f;
+  font-size: 15px;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.inline-discard-warning p {
+  margin-top: 5px;
+  color: #92400e;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.discard-warning-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.discard-warning-actions button {
+  min-height: 36px;
+  padding: 0 16px;
+  font-size: 13px;
+}
+
+.discard-warning-actions .discard-confirm {
+  border-color: #f59e0b;
+  background: #f59e0b;
+}
+
+.discard-warning-enter-active,
+.discard-warning-leave-active {
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease;
+}
+
+.discard-warning-enter-from,
+.discard-warning-leave-to {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+@keyframes ai-dot-bounce {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.48;
+  }
+  40% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+@keyframes ai-rive-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ai-orbit-dot {
+  0%,
+  100% {
+    transform: translateY(0) scale(0.88);
+    opacity: 0.58;
+  }
+  42% {
+    transform: translateY(-3px) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes ai-note-sort {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(2deg);
+  }
+  48% {
+    transform: translate(6px, -5px) rotate(9deg);
+  }
+}
+
+@keyframes ai-note-back {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(-8deg);
+  }
+  48% {
+    transform: translate(-4px, 4px) rotate(-13deg);
+  }
+}
+
+@keyframes ai-step-pulse {
+  0%,
+  100% {
+    border-color: rgba(191, 219, 254, 0.9);
+    color: #64748b;
+    transform: translateY(0);
+  }
+  46% {
+    border-color: rgba(96, 165, 250, 0.58);
+    color: #2563eb;
+    transform: translateY(-1px);
+  }
+}
+
+@keyframes ai-value-highlight {
+  0% {
+    color: #111827;
+    text-shadow: none;
+  }
+  38% {
+    color: var(--todo-primary-hover);
+    text-shadow:
+      0 0 1px rgba(var(--todo-primary-rgb), 0.62),
+      0 0 10px rgba(var(--todo-primary-rgb), 0.24);
+  }
+  100% {
+    color: #111827;
+    text-shadow: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-button-dots span,
+  .ai-rive-fallback *,
+  .ai-status-steps span,
+  .field input.is-ai-highlighted,
+  .field select.is-ai-highlighted,
+  .soft-select-trigger.is-ai-highlighted :deep([data-slot='select-value']) {
+    animation: none;
+  }
+}
+
 .form-actions {
-  padding-top: 2px;
+  padding-top: 0;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.form-actions button {
+  min-height: 32px;
+  padding: 0 14px;
+  font-size: 13px;
 }
 
 .form-actions .delete-btn {
@@ -1273,9 +2122,27 @@ p {
   }
 
   .summary-grid,
+  .empty,
   .form-grid,
-  .ai-inline-row {
+  .ai-inline-row,
+  .inline-discard-warning {
     grid-template-columns: 1fr;
+  }
+
+  .ai-parse-status {
+    grid-template-columns: 58px minmax(0, 1fr);
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .ai-rive-stage {
+    width: 58px;
+    height: 58px;
+    border-radius: 19px;
+  }
+
+  .discard-warning-actions {
+    justify-content: flex-start;
   }
 }
 </style>

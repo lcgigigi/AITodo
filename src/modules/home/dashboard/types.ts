@@ -25,6 +25,12 @@ export interface CalendarEvent {
   scope?: CalendarTodoScope
   editable?: boolean
   completable?: boolean
+  backendStatus?: 0 | 3 | 6 | 9 | 99
+  receiveStatus?: number
+  currentHandlerId?: string
+  handlerIds?: string
+  content?: string
+  remark?: string
 }
 
 export interface CalendarTodoDraft {
@@ -73,6 +79,7 @@ export interface CalendarUser {
 }
 
 export interface ParsedTodoDraft {
+  mode?: CalendarTodoFormMode
   date: string
   endDate?: string
   time?: string

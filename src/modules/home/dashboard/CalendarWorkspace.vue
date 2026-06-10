@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Component } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRouter } from 'vue-router'
 import IconBox from '~icons/lucide/box'
 import IconCalendarDays from '~icons/lucide/calendar-days'
 import IconCalendarRange from '~icons/lucide/calendar-range'
@@ -16,6 +16,8 @@ import IconTrendingUp from '~icons/lucide/trending-up'
 import IconUsers from '~icons/lucide/users'
 import libaoImage from '@/assets/libao.png'
 import campusImage from '@/assets/modelone.png'
+import { routeConfig } from '@/config/route.config'
+import { useUserStore } from '@/stores/user.store'
 import CalendarMonth from './CalendarMonth.vue'
 import DayPreviewPanel from './DayPreviewPanel.vue'
 import type {
@@ -27,19 +29,17 @@ import type {
   CalendarTodoUpdate,
   CalendarUser,
 } from './types'
-import { createTodoFromDesktopDraft, getDesktopTodoDraft } from './desktopDraft.service'
 import { compareEvents, dateRange, formatEventTime } from './todoDisplay'
 import {
   createTodo as serviceCreateTodo,
   deleteTodo as serviceDeleteTodo,
   listTodos,
+  loadCurrentUser,
   loadAssignableUsers as serviceLoadAssignableUsers,
   loadTodos,
-  saveTodos,
   updateTodo as serviceUpdateTodo,
   updateTodoStatus as serviceUpdateTodoStatus,
 } from './todo.service'
-import { mockUsers } from './todoMock'
 
 type CampusTool = {
   name: string
@@ -51,12 +51,34 @@ type CampusTool = {
   simulated?: boolean
 }
 
+type MetricTone = 'blue' | 'green' | 'violet'
+
+type DashboardMetric = {
+  label: string
+  value: number
+  unit: string
+  detail: string
+  progress: number
+  icon: Component
+  tone: MetricTone
+  variant: 'today' | 'week' | 'month'
+  pending: number
+  completed: number
+  nextText?: string
+  statusItems?: Array<{ label: string; value: number }>
+  heatCells?: Array<{ key: string; label: string; intensity: number; isToday: boolean }>
+}
+
+type DayPreviewPanelExpose = {
+  showDiscardWarning: (onConfirm?: () => void) => void
+}
+
 const now = ref(new Date())
 const selectedDate = ref(ymd(now.value))
 const currentMonth = ref(new Date(now.value.getFullYear(), now.value.getMonth(), 1))
-const currentUserId = ref('leader-zhang')
-const allEvents = ref<CalendarEvent[]>(loadTodos(now.value))
+const allEvents = ref<CalendarEvent[]>([])
 const backendAssignableUsers = ref<CalendarUser[]>([])
+const isDashboardLoading = ref(false)
 const isProfileDialogOpen = ref(false)
 const isDayPreviewOpen = ref(false)
 const isTodayBubbleVisible = ref(true)
@@ -66,15 +88,14 @@ const quickCreatePrompt = ref('')
 const quickCreateKey = ref(0)
 const presetCreateTime = ref('')
 const presetCreateKey = ref(0)
-const externalDraft = ref<CalendarTodoDraft | null>(null)
-const externalDraftKey = ref(0)
-const activeDesktopDraftId = ref('')
 const isDayPreviewFormDirty = ref(false)
+const dayPreviewPanelRef = ref<DayPreviewPanelExpose | null>(null)
 const toastMessage = ref('')
 const calendarViewMode = ref<'month' | 'week'>('month')
+const taskMetricMode = ref<'week' | 'month'>('week')
 const trendStatMode = ref<'week' | 'month'>('week')
-const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
 let clockTimer: ReturnType<typeof setInterval> | undefined
 let todayBubbleTimer: ReturnType<typeof setTimeout> | undefined
 let panelCloseRestoreTimer: ReturnType<typeof setTimeout> | undefined
@@ -84,22 +105,7 @@ onMounted(() => {
   clockTimer = setInterval(() => {
     now.value = new Date()
   }, 60_000)
-  void refreshAssignableUsers()
-})
-
-watch(
-  () => route.query.todoDraftId,
-  (draftId) => {
-    const normalizedDraftId = Array.isArray(draftId)
-      ? (draftId[0] ?? undefined)
-      : (draftId ?? undefined)
-    void loadDesktopDraft(normalizedDraftId)
-  },
-  { immediate: true },
-)
-
-watch(currentUserId, () => {
-  void refreshAssignableUsers()
+  void initializeDashboardData()
 })
 
 onBeforeUnmount(() => {
@@ -281,18 +287,19 @@ const specialDayMap = computed(() => {
   return map
 })
 
-const currentUser = computed(
-  () => mockUsers.find((user) => user.id === currentUserId.value) ?? mockUsers[0],
-)
+const currentUser = computed<CalendarUser>(() => ({
+  id: userStore.profile?.id ?? '',
+  name: userStore.profile?.name ?? '未登录',
+  role: userStore.profile?.role ?? 'employee',
+  department: userStore.profile?.department,
+  avatar: userStore.profile?.avatar,
+  leaderId: userStore.profile?.leaderId,
+  teamMemberIds: userStore.profile?.teamMemberIds,
+}))
 const assignableUsers = computed(() => {
   if (backendAssignableUsers.value.length) return backendAssignableUsers.value
 
-  if (currentUser.value.role === 'leader') {
-    const teamIds = currentUser.value.teamMemberIds ?? []
-    return mockUsers.filter((user) => user.id === currentUser.value.id || teamIds.includes(user.id))
-  }
-
-  return [currentUser.value]
+  return currentUser.value.id ? [currentUser.value] : []
 })
 const events = computed(() => listTodos(allEvents.value, currentUser.value))
 const todayDate = computed(() => ymd(now.value))
@@ -459,7 +466,24 @@ const monthTaskProgress = computed(() =>
     ? Math.round((monthCompletedCount.value / monthEvents.value.length) * 100)
     : 0,
 )
-const dashboardMetrics = computed(() => [
+const weekSpanningEventCount = computed(
+  () => weekEvents.value.filter((event) => event.endDate && event.endDate !== event.date).length,
+)
+const monthHeatCells = computed(() =>
+  currentMonthDates.value.map((date) => {
+    const dayEvents = eventMap.value.get(date) ?? []
+    const intensity = Math.min(dayEvents.length, 4)
+    const day = new Date(`${date}T12:00:00`).getDate()
+
+    return {
+      key: date,
+      label: String(day),
+      intensity,
+      isToday: date === todayDate.value,
+    }
+  }),
+)
+const dashboardMetrics = computed<DashboardMetric[]>(() => [
   {
     label: '今日待办',
     value: todayEvents.value.length,
@@ -468,6 +492,12 @@ const dashboardMetrics = computed(() => [
     progress: todayTaskProgress.value,
     icon: IconCalendarDays,
     tone: 'blue',
+    variant: 'today',
+    pending: todayPendingEvents.value.length,
+    completed: todayCompletedCount.value,
+    nextText: nextTodayEvent.value
+      ? `${formatEventTime(nextTodayEvent.value)} · ${nextTodayEvent.value.title}`
+      : '今天暂无待处理事项',
   },
   {
     label: '本周任务',
@@ -477,6 +507,14 @@ const dashboardMetrics = computed(() => [
     progress: weekTaskProgress.value,
     icon: IconClipboardList,
     tone: 'green',
+    variant: 'week',
+    pending: weekPendingEvents.value.length,
+    completed: weekCompletedCount.value,
+    statusItems: [
+      { label: '待办', value: weekPendingEvents.value.length },
+      { label: '完成', value: weekCompletedCount.value },
+      { label: '跨天', value: weekSpanningEventCount.value },
+    ],
   },
   {
     label: '本月任务',
@@ -486,8 +524,18 @@ const dashboardMetrics = computed(() => [
     progress: monthTaskProgress.value,
     icon: IconCalendarRange,
     tone: 'violet',
+    variant: 'month',
+    pending: monthPendingEvents.value.length,
+    completed: monthCompletedCount.value,
+    heatCells: monthHeatCells.value,
   },
 ])
+const todayMetric = computed(() => dashboardMetrics.value.find((metric) => metric.variant === 'today'))
+const weekMetric = computed(() => dashboardMetrics.value.find((metric) => metric.variant === 'week'))
+const monthMetric = computed(() => dashboardMetrics.value.find((metric) => metric.variant === 'month'))
+const periodMetric = computed(() =>
+  taskMetricMode.value === 'week' ? weekMetric.value : monthMetric.value,
+)
 const trendSeries = computed(() =>
   trendStatMode.value === 'week' ? weekTrendSeries.value : monthTrendSeries.value,
 )
@@ -531,6 +579,17 @@ const trendLinePoints = computed(() =>
   trendChartPoints.value.map((point) => `${point.x},${point.y}`).join(' '),
 )
 const trendAreaPoints = computed(() => `0,74 ${trendLinePoints.value} 210,74`)
+const trendInsight = computed(() => {
+  if (!trendTotal.value) return trendStatMode.value === 'week' ? '本周暂无完成记录' : '本月暂无完成记录'
+
+  const peak = trendSeries.value.reduce(
+    (currentPeak, item) => (item.value > currentPeak.value ? item : currentPeak),
+    trendSeries.value[0],
+  )
+  const average = (trendTotal.value / Math.max(trendSeries.value.length, 1)).toFixed(1)
+
+  return `峰值 ${peak.label} ${peak.value} 项 · 平均 ${average} 项`
+})
 const selectedDateLabel = computed(() => {
   const date = new Date(`${selectedDate.value}T12:00:00`)
   const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()]
@@ -556,14 +615,18 @@ function selectDate(date: string, syncMonth = true) {
 
 function toggleDayPreview(date: string, time?: string) {
   if (time) {
-    if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges()) return
+    const openTimedCreate = () => {
+      isDayPreviewFormDirty.value = false
+      quickCreatePrompt.value = ''
+      presetCreateTime.value = time
+      presetCreateKey.value += 1
+      selectDate(date, calendarViewMode.value === 'week')
+      openTodoPanel()
+    }
 
-    isDayPreviewFormDirty.value = false
-    quickCreatePrompt.value = ''
-    presetCreateTime.value = time
-    presetCreateKey.value += 1
-    selectDate(date, calendarViewMode.value === 'week')
-    openTodoPanel()
+    if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges(openTimedCreate)) return
+
+    openTimedCreate()
     return
   }
 
@@ -571,22 +634,29 @@ function toggleDayPreview(date: string, time?: string) {
     return
   }
 
-  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges()) return
+  const openSelectedDay = () => {
+    isDayPreviewFormDirty.value = false
+    quickCreatePrompt.value = ''
+    presetCreateTime.value = ''
+    selectDate(date, calendarViewMode.value === 'week')
+    openTodoPanel()
+  }
 
-  isDayPreviewFormDirty.value = false
-  quickCreatePrompt.value = ''
-  presetCreateTime.value = ''
-  selectDate(date, calendarViewMode.value === 'week')
-  openTodoPanel()
+  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges(openSelectedDay)) return
+
+  openSelectedDay()
 }
 
 function closeDayPreview() {
-  if (!confirmDiscardPreviewChanges()) return
+  const closePreview = () => {
+    isDayPreviewOpen.value = false
+    isDayPreviewFormDirty.value = false
+    scheduleTodayBubbleAfterPanelClose()
+  }
 
-  isDayPreviewOpen.value = false
-  isDayPreviewFormDirty.value = false
-  resetDesktopDraftState()
-  scheduleTodayBubbleAfterPanelClose()
+  if (!confirmDiscardPreviewChanges(closePreview)) return
+
+  closePreview()
 }
 
 function closeTodayBubble() {
@@ -623,42 +693,6 @@ function clearToastTimer() {
   toastTimer = undefined
 }
 
-function clearDesktopDraftQuery() {
-  if (!route.query.todoDraftId) return
-
-  const nextQuery = { ...route.query }
-  delete nextQuery.todoDraftId
-  void router.replace({ query: nextQuery })
-}
-
-function resetDesktopDraftState(clearQuery = true) {
-  activeDesktopDraftId.value = ''
-  externalDraft.value = null
-  if (clearQuery) clearDesktopDraftQuery()
-}
-
-async function loadDesktopDraft(draftId?: string) {
-  const normalizedDraftId = draftId?.trim()
-  if (!normalizedDraftId || normalizedDraftId === activeDesktopDraftId.value) return
-  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges()) return
-
-  try {
-    const draft = await getDesktopTodoDraft(normalizedDraftId)
-    activeDesktopDraftId.value = draft.draftId
-    externalDraft.value = draft.result
-    externalDraftKey.value += 1
-    quickCreatePrompt.value = ''
-    presetCreateTime.value = ''
-    isDayPreviewFormDirty.value = false
-    selectDate(draft.result.date)
-    openTodoPanel()
-    showToast('已载入桌面待办草稿')
-  } catch {
-    showToast('待办草稿不存在或已过期')
-    resetDesktopDraftState()
-  }
-}
-
 function showToast(message: string) {
   clearToastTimer()
   toastMessage.value = message
@@ -668,13 +702,54 @@ function showToast(message: string) {
   }, 2200)
 }
 
-async function refreshAssignableUsers() {
-  backendAssignableUsers.value = await serviceLoadAssignableUsers(currentUser.value)
+async function initializeDashboardData() {
+  isDashboardLoading.value = true
+
+  try {
+    if (!userStore.token) {
+      void router.replace({
+        path: routeConfig.loginRoute,
+        query: { redirect: router.currentRoute.value.fullPath },
+      })
+      return
+    }
+
+    if (!userStore.profile) {
+      const profile = await loadCurrentUser()
+      userStore.setProfile(profile)
+    }
+
+    await refreshAssignableUsers()
+    await refreshTodos()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '后台接口连接失败'
+    showToast(message)
+
+    if (message.includes('登录状态') || message.includes('401')) {
+      userStore.logout()
+      void router.replace({
+        path: routeConfig.loginRoute,
+        query: { redirect: router.currentRoute.value.fullPath },
+      })
+    }
+  } finally {
+    isDashboardLoading.value = false
+  }
 }
 
-function confirmDiscardPreviewChanges() {
+async function refreshAssignableUsers() {
+  backendAssignableUsers.value = await serviceLoadAssignableUsers()
+}
+
+async function refreshTodos() {
+  if (!currentUser.value.id) return
+  allEvents.value = await loadTodos(currentUser.value, assignableUsers.value)
+}
+
+function confirmDiscardPreviewChanges(onConfirm?: () => void) {
   if (!isDayPreviewFormDirty.value) return true
-  return window.confirm('当前待办内容还没有保存，确定放弃修改吗？')
+  dayPreviewPanelRef.value?.showDiscardWarning(onConfirm)
+  return false
 }
 
 function tryShowTodayBubble() {
@@ -725,89 +800,98 @@ function scheduleTodayBubbleAfterPanelClose() {
 }
 
 function quickCreateTodo(prompt: string, date: string) {
-  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges()) return
-
-  resetDesktopDraftState()
-  isDayPreviewFormDirty.value = false
-  quickCreatePrompt.value = prompt
-  presetCreateTime.value = ''
-  quickCreateKey.value += 1
-  selectDate(date)
-  if (date === todayDate.value) {
-    isTodayBubbleManualClosed.value = false
+  const createFromPrompt = () => {
+    isDayPreviewFormDirty.value = false
+    quickCreatePrompt.value = prompt
+    presetCreateTime.value = ''
+    quickCreateKey.value += 1
+    selectDate(date)
+    if (date === todayDate.value) {
+      isTodayBubbleManualClosed.value = false
+    }
+    openTodoPanel()
   }
-  openTodoPanel()
+
+  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges(createFromPrompt)) return
+
+  createFromPrompt()
 }
 
 async function createTodo(payload: CalendarTodoDraft) {
-  if (activeDesktopDraftId.value) {
-    try {
-      const response = await createTodoFromDesktopDraft(activeDesktopDraftId.value, payload)
-      allEvents.value = saveTodos([...allEvents.value, response.event])
-      selectDate(response.event.date)
-      openTodoPanel()
-      showToast('桌面待办已创建')
-      resetDesktopDraftState()
-    } catch {
-      showToast('桌面待办创建失败，请重试')
-    }
-    return
-  }
-
   try {
-    allEvents.value = await serviceCreateTodo(allEvents.value, currentUser.value, payload)
+    await serviceCreateTodo(payload)
+    await refreshTodos()
     selectDate(payload.date)
     openTodoPanel()
     showToast('待办已创建')
-  } catch {
-    showToast('待办创建失败，请重试')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '待办创建失败，请重试')
   }
 }
 
-function updateTodo(payload: CalendarTodoUpdate) {
-  allEvents.value = serviceUpdateTodo(allEvents.value, currentUser.value, payload)
-  selectDate(payload.date)
-  openTodoPanel()
-  showToast('待办已保存')
+async function updateTodo(payload: CalendarTodoUpdate) {
+  try {
+    await serviceUpdateTodo(payload)
+    await refreshTodos()
+    selectDate(payload.date)
+    openTodoPanel()
+    showToast('待办已保存')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '待办保存失败，请重试')
+  }
 }
 
-function updateTodoStatus(id: string, status: CalendarEventStatus) {
-  allEvents.value = serviceUpdateTodoStatus(allEvents.value, currentUser.value, id, status)
-  showToast(status === 'done' ? '已标记完成' : '已撤回完成')
+async function updateTodoStatus(id: string, status: CalendarEventStatus) {
+  try {
+    await serviceUpdateTodoStatus(id, currentUser.value, status)
+    await refreshTodos()
+    showToast(status === 'done' ? '已标记完成' : '已撤回完成')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '待办状态更新失败')
+  }
 }
 
-function deleteTodo(id: string) {
+async function deleteTodo(id: string) {
   isDayPreviewFormDirty.value = false
-  allEvents.value = serviceDeleteTodo(allEvents.value, currentUser.value, id)
-  closeDayPreview()
-  showToast('待办已删除')
+  try {
+    await serviceDeleteTodo(id)
+    await refreshTodos()
+    closeDayPreview()
+    showToast('待办已删除')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '待办删除失败，请重试')
+  }
 }
 
 function changePeriod(delta: number) {
-  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges()) return
+  const applyPeriodChange = () => {
+    isDayPreviewFormDirty.value = false
+    if (calendarViewMode.value === 'week') {
+      const selected = new Date(`${selectedDate.value}T12:00:00`)
+      selected.setDate(selected.getDate() + delta * 7)
+      selectedDate.value = ymd(selected)
+      currentMonth.value = new Date(selected.getFullYear(), selected.getMonth(), 1)
+      return
+    }
 
-  isDayPreviewFormDirty.value = false
-  if (calendarViewMode.value === 'week') {
     const selected = new Date(`${selectedDate.value}T12:00:00`)
-    selected.setDate(selected.getDate() + delta * 7)
-    selectedDate.value = ymd(selected)
-    currentMonth.value = new Date(selected.getFullYear(), selected.getMonth(), 1)
-    return
+    const nextMonth = new Date(
+      currentMonth.value.getFullYear(),
+      currentMonth.value.getMonth() + delta,
+      1,
+    )
+    const nextDay = Math.min(
+      selected.getDate(),
+      getDaysInMonth(nextMonth.getFullYear(), nextMonth.getMonth()),
+    )
+
+    currentMonth.value = nextMonth
+    selectedDate.value = ymd(new Date(nextMonth.getFullYear(), nextMonth.getMonth(), nextDay))
   }
 
-  const selected = new Date(`${selectedDate.value}T12:00:00`)
-  const nextMonth = new Date(
-    currentMonth.value.getFullYear(),
-    currentMonth.value.getMonth() + delta,
-    1,
-  )
-  const nextDay = Math.min(
-    selected.getDate(),
-    getDaysInMonth(nextMonth.getFullYear(), nextMonth.getMonth()),
-  )
+  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges(applyPeriodChange)) return
 
-  currentMonth.value = nextMonth
-  selectedDate.value = ymd(new Date(nextMonth.getFullYear(), nextMonth.getMonth(), nextDay))
+  applyPeriodChange()
 }
 
 function openCampusTool(tool: CampusTool) {
@@ -902,16 +986,15 @@ function openAgentList(agentKey?: string) {
 
             <div class="dialog-section">
               <p class="dialog-label">身份</p>
-              <div class="role-switch" aria-label="角色切换">
-                <button
-                  v-for="user in mockUsers"
-                  :key="user.id"
-                  type="button"
-                  :class="{ active: user.id === currentUserId }"
-                  @click="currentUserId = user.id"
-                >
-                  {{ user.role === 'leader' ? '领导' : '员工' }}
-                </button>
+              <div class="point-grid" aria-label="真实登录身份">
+                <span>
+                  <strong>{{ currentUser.role === 'leader' ? '领导' : '员工' }}</strong>
+                  角色
+                </span>
+                <span>
+                  <strong>{{ currentUser.id || '未登录' }}</strong>
+                  账号
+                </span>
               </div>
             </div>
 
@@ -951,27 +1034,97 @@ function openAgentList(agentKey?: string) {
 
         <div class="quick-metrics">
           <article
-            v-for="metric in dashboardMetrics"
-            :key="metric.label"
+            v-if="todayMetric"
             class="metric-card"
-            :class="`metric-card-${metric.tone}`"
+            :class="[`metric-card-${todayMetric.tone}`, `metric-card-${todayMetric.variant}`]"
           >
-            <span class="metric-icon">
-              <component :is="metric.icon" />
-            </span>
-            <div class="metric-copy">
-              <span>{{ metric.label }}</span>
-              <strong
-                ><em>{{ metric.value }}</em
-                >{{ metric.unit }}</strong
+            <header class="metric-card-head">
+              <span class="metric-icon">
+                <component :is="todayMetric.icon" />
+              </span>
+              <div class="metric-title">
+                <span>{{ todayMetric.label }}</span>
+                <strong
+                  ><em>{{ todayMetric.value }}</em
+                  >{{ todayMetric.unit }}</strong
+                >
+              </div>
+            </header>
+
+            <div class="metric-focus">
+              <div
+                class="metric-ring metric-ring-large"
+                :style="{ '--progress': `${todayMetric.progress * 3.6}deg` }"
               >
+                <b>{{ todayMetric.progress }}%</b>
+              </div>
               <p>
-                {{ metric.detail }}
+                <span>待办 {{ todayMetric.pending }}</span>
+                <span>完成 {{ todayMetric.completed }}</span>
               </p>
             </div>
-            <div class="metric-ring" :style="{ '--progress': `${metric.progress * 3.6}deg` }">
-              <b>{{ metric.progress }}%</b>
-            </div>
+            <span class="metric-next">{{ todayMetric.nextText }}</span>
+          </article>
+
+          <article
+            v-if="periodMetric"
+            class="metric-card period-metric-card"
+            :class="[`metric-card-${periodMetric.tone}`, `metric-card-${periodMetric.variant}`]"
+          >
+            <header class="metric-card-head period-card-head">
+              <span class="metric-icon">
+                <component :is="periodMetric.icon" />
+              </span>
+              <div class="metric-title">
+                <span>{{ periodMetric.label }}</span>
+                <strong
+                  ><em>{{ periodMetric.value }}</em
+                  >{{ periodMetric.unit }}</strong
+                >
+              </div>
+              <div class="metric-period-switch" aria-label="任务周期">
+                <button
+                  type="button"
+                  :class="{ active: taskMetricMode === 'week' }"
+                  @click="taskMetricMode = 'week'"
+                >
+                  周
+                </button>
+                <button
+                  type="button"
+                  :class="{ active: taskMetricMode === 'month' }"
+                  @click="taskMetricMode = 'month'"
+                >
+                  月
+                </button>
+              </div>
+            </header>
+
+            <template v-if="taskMetricMode === 'week'">
+              <div class="week-progress period-week-progress">
+                <span :style="{ width: `${periodMetric.progress}%` }"></span>
+              </div>
+              <div class="metric-status-grid period-status-grid">
+                <span v-for="item in periodMetric.statusItems" :key="item.label">
+                  <strong>{{ item.value }}</strong>
+                  {{ item.label }}
+                </span>
+              </div>
+            </template>
+
+            <template v-else>
+              <div class="month-card-body">
+                <p>{{ periodMetric.detail }}</p>
+                <div class="month-heatmap" aria-label="本月任务分布">
+                  <span
+                    v-for="cell in periodMetric.heatCells"
+                    :key="cell.key"
+                    :class="[`heat-${cell.intensity}`, { 'is-today': cell.isToday }]"
+                    :title="`${cell.label}日 ${cell.intensity} 项`"
+                  ></span>
+                </div>
+              </div>
+            </template>
           </article>
 
           <article class="metric-card trend-metric-card">
@@ -980,7 +1133,7 @@ function openAgentList(agentKey?: string) {
                 <IconTrendingUp />
               </span>
               <div class="trend-title">
-                <span>月/周统计</span>
+                <span>趋势</span>
                 <strong>{{ trendTotal }}<em>项</em></strong>
               </div>
               <div class="trend-switch" aria-label="统计周期">
@@ -1001,6 +1154,7 @@ function openAgentList(agentKey?: string) {
               </div>
             </header>
 
+            <p class="trend-insight">{{ trendInsight }}</p>
             <svg
               class="trend-chart"
               viewBox="0 0 210 82"
@@ -1043,6 +1197,7 @@ function openAgentList(agentKey?: string) {
           @pointerdown.stop
         >
           <DayPreviewPanel
+            ref="dayPreviewPanelRef"
             :date="selectedDate"
             :date-label="selectedDateLabel"
             :events="selectedEvents"
@@ -1051,8 +1206,6 @@ function openAgentList(agentKey?: string) {
             :assignable-users="assignableUsers"
             :quick-create-prompt="quickCreatePrompt"
             :quick-create-key="quickCreateKey"
-            :external-draft="externalDraft"
-            :external-draft-key="externalDraftKey"
             :preset-create-time="presetCreateTime"
             :preset-create-key="presetCreateKey"
             show-close
@@ -1209,9 +1362,8 @@ function openAgentList(agentKey?: string) {
   z-index: 999;
   top: calc(50% - 24px);
   right: calc(100% + 16px);
-  width: min(500px, calc(50vw - 42px));
-  min-height: min(620px, calc(100% - 32px));
-  max-height: calc(100% - 32px);
+  width: min(550px, calc(50vw - 42px));
+  height: min(682px, calc(100% - 32px));
   flex: 0 0 auto;
   box-sizing: border-box;
   border: 1px solid rgba(226, 232, 240, 0.92);
@@ -1219,10 +1371,13 @@ function openAgentList(agentKey?: string) {
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 28px 72px -36px rgba(15, 23, 42, 0.58);
   padding: 24px;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: hidden;
   backdrop-filter: blur(18px);
   transform: translateY(-50%);
+}
+
+.day-preview-popover :deep(.preview-panel) {
+  height: 100%;
 }
 
 .day-preview-float-enter-active,
@@ -1310,8 +1465,8 @@ function openAgentList(agentKey?: string) {
   flex: 1 1 auto;
   padding: 0;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) 136px;
-  gap: 14px;
+  grid-template-rows: minmax(0, 1fr) 168px;
+  gap: 12px;
   background: transparent;
   color: #111827;
 }
@@ -1349,20 +1504,7 @@ p {
   pointer-events: none;
 }
 
-.campus-visual::before {
-  z-index: 3;
-  top: -90px;
-  right: -90px;
-  left: -90px;
-  height: 170px;
-  background: linear-gradient(
-    180deg,
-    rgba(249, 251, 255, 1) 0%,
-    rgba(249, 251, 255, 0.9) 42%,
-    rgba(249, 251, 255, 0) 100%
-  );
-  filter: blur(1px);
-}
+
 
 .campus-visual::after {
   z-index: 3;
@@ -1591,40 +1733,103 @@ p {
   grid-column: 1 / -1;
   grid-row: 2;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
 .metric-card {
+  --metric-accent: #2563eb;
+  --metric-accent-dark: #1d4ed8;
+  --metric-soft: rgba(219, 234, 254, 0.58);
   position: relative;
-  min-height: 126px;
+  min-height: 168px;
   box-sizing: border-box;
-  border: 1px solid rgba(226, 232, 240, 0.62);
-  border-radius: 16px;
-  background: linear-gradient(140deg, rgba(255, 255, 255, 0.9), rgba(249, 251, 255, 0.72)),
+  border: 1px solid rgba(226, 232, 240, 0.68);
+  border-radius: 18px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.95), rgba(248, 251, 255, 0.78)),
     rgba(255, 255, 255, 0.7);
-  padding: 15px 50px 13px 54px;
+  padding: 12px;
   color: #64748b;
   font-size: 12px;
   font-weight: 800;
   overflow: hidden;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.74),
-    0 14px 30px -35px rgba(15, 23, 42, 0.22);
+    inset 0 1px 0 rgba(255, 255, 255, 0.88),
+    0 18px 34px -34px rgba(15, 23, 42, 0.26);
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+.metric-card::after {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  content: '';
+  background:
+    linear-gradient(135deg, var(--metric-soft), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.2), transparent 58%);
+  opacity: 0.72;
+}
+
+.metric-card:hover {
+  border-color: color-mix(in srgb, var(--metric-accent) 28%, rgba(226, 232, 240, 0.78));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.94),
+    0 22px 40px -32px rgba(15, 23, 42, 0.34);
+  transform: translateY(-2px);
+}
+
+.metric-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.metric-card-green {
+  --metric-accent: #10b981;
+  --metric-accent-dark: #047857;
+  --metric-soft: rgba(209, 250, 229, 0.58);
+}
+
+.metric-card-violet,
+.trend-metric-card {
+  --metric-accent: #7c3aed;
+  --metric-accent-dark: #6d28d9;
+  --metric-soft: rgba(237, 233, 254, 0.62);
+}
+
+.period-metric-card {
+  grid-column: auto;
+}
+
+.metric-card-head {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.period-card-head {
+  position: relative;
+  padding-right: 0;
+  align-items: center;
 }
 
 .metric-icon {
-  position: absolute;
-  top: 18px;
-  left: 16px;
   width: 30px;
   height: 30px;
   border-radius: 10px;
+  background: linear-gradient(145deg, var(--metric-accent), var(--metric-accent-dark));
   color: #ffffff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 12px 22px -17px rgba(15, 23, 42, 0.44);
+  flex: 0 0 auto;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    0 12px 22px -17px rgba(15, 23, 42, 0.44);
 }
 
 .metric-icon svg {
@@ -1632,51 +1837,87 @@ p {
   height: 15px;
 }
 
-.metric-copy {
+.metric-title {
   min-width: 0;
+  flex: 1 1 auto;
 }
 
-.metric-card strong {
+.period-metric-card .metric-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.metric-title > span,
+.trend-title > span {
+  display: block;
+  overflow: hidden;
+  color: #334155;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.metric-title strong,
+.trend-title strong {
   display: block;
   margin-top: 7px;
-  margin-bottom: 6px;
+  margin-bottom: 0;
   color: #0f172a;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1;
-  font-weight: 900;
+  font-weight: 950;
   white-space: nowrap;
 }
 
-.metric-card strong em {
+.period-metric-card .metric-title strong {
+  margin-top: 0;
+}
+
+.metric-title strong em,
+.trend-title strong em {
   margin-right: 4px;
-  color: #0f172a;
+  color: var(--metric-accent);
   font-style: normal;
   font-size: 24px;
   font-weight: 950;
 }
 
-.metric-card-blue strong em {
-  color: #2563eb;
+.metric-period-switch {
+  position: absolute;
+  top: 38px;
+  right: 0;
+  flex: 0 0 auto;
+  padding: 2px;
+  border-radius: 999px;
+  background: rgba(241, 245, 249, 0.9);
+  display: inline-flex;
+  gap: 2px;
 }
 
-.metric-card-green strong em {
-  color: #059669;
+.metric-period-switch button {
+  width: 24px;
+  height: 22px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #64748b;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 900;
+  cursor: pointer;
 }
 
-.metric-card-violet strong em {
-  color: #6d4df2;
+.metric-period-switch button.active {
+  background: #ffffff;
+  color: var(--metric-accent);
+  box-shadow: 0 6px 14px -12px rgba(15, 23, 42, 0.4);
 }
 
 .metric-icon-violet {
-  background: linear-gradient(145deg, #8b5cf6, #6d4df2);
-}
-
-.metric-copy > span {
-  display: block;
-  color: #334155;
-  font-size: 13px;
-  font-weight: 900;
-  white-space: nowrap;
+  background: linear-gradient(145deg, #8b5cf6, #6d28d9);
 }
 
 .metric-card p {
@@ -1684,21 +1925,18 @@ p {
   color: #64748b;
   font-size: 11px;
   font-weight: 850;
-  line-height: 1.25;
+  line-height: 1.3;
 }
 
 .metric-ring {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  width: 42px;
-  height: 42px;
+  width: 44px;
+  height: 44px;
   border-radius: 999px;
-  background: conic-gradient(#059669 var(--progress), #e5e7eb 0);
-  transform: translateY(-50%);
+  background: conic-gradient(var(--metric-accent) var(--progress), #e5e7eb 0);
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 auto;
 }
 
 .metric-ring::before {
@@ -1716,64 +1954,200 @@ p {
   font-weight: 950;
 }
 
-.metric-card-blue .metric-ring {
-  background: conic-gradient(#2563eb var(--progress), #e5e7eb 0);
+.metric-ring-large {
+  width: 42px;
+  height: 42px;
 }
 
-.metric-card-violet .metric-ring {
-  background: conic-gradient(#6d4df2 var(--progress), #e5e7eb 0);
+.metric-focus {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.metric-focus p {
+  overflow: hidden;
+  color: #334155;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.metric-focus p span {
+  display: block;
+}
+
+.metric-next {
+  min-width: 0;
+  min-height: 24px;
+  margin-top: 8px;
+  border: 1px solid color-mix(in srgb, var(--metric-accent) 18%, rgba(226, 232, 240, 0.92));
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #475569;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.week-progress {
+  height: 8px;
+  margin-top: 14px;
+  border-radius: 999px;
+  background: rgba(226, 232, 240, 0.86);
+  overflow: hidden;
+}
+
+.period-week-progress {
+  margin-top: 34px;
+}
+
+.week-progress span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--metric-accent), #22c55e);
+  transition: width 0.24s ease;
+}
+
+.metric-status-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.metric-status-grid span {
+  min-width: 0;
+  min-height: 38px;
+  box-sizing: border-box;
+  border: 1px solid rgba(226, 232, 240, 0.68);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.58);
+  color: #64748b;
+  padding: 6px 1px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  text-align: center;
+  font-size: 9px;
+  font-weight: 850;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.metric-status-grid strong {
+  color: var(--metric-accent-dark);
+  font-size: 15px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.month-card-body {
+  margin-top: 9px;
+}
+
+.period-metric-card .month-card-body {
+  margin-top: 34px;
+}
+
+.month-card-body p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.month-heatmap {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px 3px;
+}
+
+.month-heatmap span {
+  height: 7px;
+  border-radius: 3px;
+  background: #e2e8f0;
+  outline: 0 solid transparent;
+}
+
+.month-heatmap .heat-1 {
+  background: rgba(124, 58, 237, 0.32);
+}
+
+.month-heatmap .heat-2 {
+  background: rgba(124, 58, 237, 0.48);
+}
+
+.month-heatmap .heat-3 {
+  background: rgba(124, 58, 237, 0.66);
+}
+
+.month-heatmap .heat-4 {
+  background: rgba(124, 58, 237, 0.86);
+}
+
+.month-heatmap .is-today {
+  outline: 1px solid #7c3aed;
+  outline-offset: 1px;
 }
 
 .trend-metric-card {
-  padding: 13px 12px 8px;
+  padding: 12px 10px 9px;
 }
 
 .trend-card-head {
+  position: relative;
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 42px;
-  padding-left: 46px;
+  justify-content: flex-start;
+  gap: 7px;
+  min-height: 37px;
 }
 
 .trend-title {
   min-width: 0;
-}
-
-.trend-title > span {
-  display: block;
-  color: #334155;
-  font-size: 13px;
-  font-weight: 900;
-  white-space: nowrap;
+  flex: 1 1 auto;
 }
 
 .trend-title strong {
-  margin-top: 6px;
-  margin-bottom: 0;
-  color: #6d4df2;
+  color: #0f172a;
 }
 
 .trend-title strong em {
-  margin-left: 2px;
+  margin-left: 1px;
   color: #0f172a;
   font-size: 13px;
   font-style: normal;
 }
 
 .trend-switch {
+  position: absolute;
+  top: 0;
+  right: 0;
   flex: 0 0 auto;
   padding: 2px;
   border-radius: 999px;
-  background: rgba(241, 245, 249, 0.86);
+  background: rgba(241, 245, 249, 0.9);
   display: inline-flex;
   gap: 2px;
 }
 
 .trend-switch button {
-  width: 26px;
-  height: 22px;
+  width: 24px;
+  height: 20px;
   border: 0;
   border-radius: 999px;
   background: transparent;
@@ -1786,14 +2160,24 @@ p {
 
 .trend-switch button.active {
   background: #ffffff;
-  color: #6d4df2;
+  color: var(--metric-accent);
   box-shadow: 0 6px 14px -12px rgba(15, 23, 42, 0.4);
+}
+
+.trend-insight {
+  margin-top: 7px;
+  overflow: hidden;
+  color: #64748b;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 850;
 }
 
 .trend-chart {
   width: 100%;
-  height: 58px;
-  margin-top: 4px;
+  height: 52px;
+  margin-top: 5px;
   overflow: visible;
   display: block;
 }
@@ -1804,12 +2188,12 @@ p {
 }
 
 .trend-chart polygon {
-  fill: rgba(109, 77, 242, 0.1);
+  fill: rgba(124, 58, 237, 0.1);
 }
 
 .trend-chart polyline {
   fill: none;
-  stroke: #6d4df2;
+  stroke: var(--metric-accent);
   stroke-width: 3;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -1817,7 +2201,7 @@ p {
 
 .trend-chart circle {
   fill: #ffffff;
-  stroke: #6d4df2;
+  stroke: var(--metric-accent);
   stroke-width: 2;
 }
 
@@ -2321,8 +2705,7 @@ p {
     top: auto;
     right: auto;
     width: 100%;
-    min-height: 0;
-    max-height: 420px;
+    height: 462px;
     margin-bottom: 0;
     border-radius: 18px;
     transform: none;
@@ -2468,8 +2851,20 @@ p {
   }
 
   .metric-card {
-    min-height: 106px;
-    padding: 18px 86px 16px 66px;
+    min-height: 136px;
+    padding: 14px;
+  }
+
+  .period-metric-card {
+    grid-column: auto;
+  }
+
+  .metric-status-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .month-heatmap span {
+    height: 8px;
   }
 
   .calendar-panel {

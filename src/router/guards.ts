@@ -1,13 +1,27 @@
 import type { Router } from 'vue-router'
-import { useUserStore } from '@/stores/user.store'
+import { routeConfig } from '@/config/route.config'
 import { APP_TITLE } from '@/shared/constants/app'
+import { useUserStore } from '@/stores/user.store'
 
 export function setupRouterGuards(router: Router) {
   router.beforeEach((to) => {
     const userStore = useUserStore()
+    const isLoginRoute = to.path === routeConfig.loginRoute
+
+    if (isLoginRoute && userStore.isLoggedIn) {
+      const redirect = Array.isArray(to.query.redirect) ? to.query.redirect[0] : to.query.redirect
+      return redirect?.startsWith('/') && !redirect.startsWith('//')
+        ? redirect
+        : routeConfig.defaultRoute
+    }
 
     if (to.meta.requiresAuth && !userStore.isLoggedIn) {
-      userStore.setGuestSession()
+      return {
+        path: routeConfig.loginRoute,
+        query: {
+          redirect: to.fullPath,
+        },
+      }
     }
 
     return true

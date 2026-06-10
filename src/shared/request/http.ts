@@ -5,7 +5,7 @@ import type { RequestConfig } from './types'
 
 const httpClient = axios.create({
   baseURL: import.meta.env.VITE_APP_BASE_API,
-  timeout: 20_000,
+  timeout: 60_000,
 })
 
 setupInterceptors(httpClient)

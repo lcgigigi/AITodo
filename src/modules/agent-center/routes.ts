@@ -8,7 +8,7 @@ export const agentCenterRoutes: RouteRecordRaw[] = [
     component: () => import('./index.vue'),
     meta: {
       title: '智能体中心',
-      requiresAuth: false,
+      requiresAuth: true,
       permission: PERMISSIONS.AGENT_LIST_VIEW,
     },
   },

@@ -8,7 +8,7 @@ export const homeRoutes: RouteRecordRaw[] = [
     component: () => import('./DashboardPage.vue'),
     meta: {
       title: '首页',
-      requiresAuth: false,
+      requiresAuth: true,
     },
   },
 ]

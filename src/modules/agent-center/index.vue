@@ -61,32 +61,47 @@
           </div>
 
           <div class="panel-actions">
-            <input
+            <Input
               v-model="searchKeyword"
               class="soft-search"
               type="search"
               placeholder="搜索智能体..."
               aria-label="搜索智能体"
             />
-            <select v-model="categoryFilter" class="soft-select category-select" aria-label="智能体分类">
-              <option v-for="option in categoryOptions" :key="option.key" :value="option.key">
-                {{ option.label }}
-              </option>
-            </select>
-            <select
-              v-model="permissionFilter"
-              class="soft-select permission-select"
-              aria-label="智能体状态筛选"
-            >
-              <option v-for="option in permissionOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
-            <select v-model="sortType" class="soft-select sort-select" aria-label="智能体排序">
-              <option v-for="option in sortOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
+            <Select v-model="categoryFilter">
+              <SelectTrigger class="soft-select category-select" aria-label="智能体分类">
+                <SelectValue placeholder="智能体分类" />
+              </SelectTrigger>
+              <SelectContent position="popper">
+                <SelectItem v-for="option in categoryOptions" :key="option.key" :value="option.key">
+                  {{ option.label }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <Select v-model="permissionFilter">
+              <SelectTrigger class="soft-select permission-select" aria-label="智能体状态筛选">
+                <SelectValue placeholder="状态筛选" />
+              </SelectTrigger>
+              <SelectContent position="popper">
+                <SelectItem
+                  v-for="option in permissionOptions"
+                  :key="option.value"
+                  :value="option.value"
+                >
+                  {{ option.label }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <Select v-model="sortType">
+              <SelectTrigger class="soft-select sort-select" aria-label="智能体排序">
+                <SelectValue placeholder="智能体排序" />
+              </SelectTrigger>
+              <SelectContent position="popper">
+                <SelectItem v-for="option in sortOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -149,7 +164,7 @@
         <div v-else class="agent-empty">
           <h3>没有匹配的智能体</h3>
           <p>调整搜索词、分类或状态筛选后再试。</p>
-          <button type="button" @click="resetAgentFilters">清空筛选</button>
+          <Button type="button" @click="resetAgentFilters">清空筛选</Button>
         </div>
       </section>
 
@@ -157,15 +172,16 @@
         <section class="card overview-card">
           <div class="panel-head small">
             <h2>Token 使用概览</h2>
-            <select
-              v-model="overviewPeriod"
-              class="soft-select period-select"
-              aria-label="Token 统计周期"
-            >
-              <option v-for="option in periodOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
+            <Select v-model="overviewPeriod">
+              <SelectTrigger class="soft-select period-select" aria-label="Token 统计周期">
+                <SelectValue placeholder="统计周期" />
+              </SelectTrigger>
+              <SelectContent position="popper">
+                <SelectItem v-for="option in periodOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <div class="overview-grid">
@@ -332,6 +348,15 @@ import IconInfo from '~icons/lucide/info'
 import IconPlay from '~icons/lucide/play'
 import IconSettings from '~icons/lucide/settings'
 import logoDarkImage from '@/assets/logoDark1.png'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   agents,
   categories,
@@ -1042,15 +1067,13 @@ onBeforeUnmount(() => {
 
 .soft-select {
   height: 38px;
-  padding: 0 36px 0 14px;
+  padding: 0 12px 0 14px;
   border: 1px solid rgba(151, 164, 198, 0.28);
   border-radius: 14px;
-  appearance: none;
-  background:
-    linear-gradient(45deg, transparent 50%, #8b94ad 50%) right 18px center / 6px 6px no-repeat,
-    linear-gradient(135deg, #8b94ad 50%, transparent 50%) right 13px center / 6px 6px no-repeat,
-    rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.88);
   color: #263158;
+  display: inline-flex;
+  justify-content: space-between;
   font-size: 13px;
   font-weight: 700;
   box-shadow: 0 8px 20px rgba(31, 45, 86, 0.04);
@@ -1065,9 +1088,12 @@ onBeforeUnmount(() => {
 .soft-select:hover {
   border-color: rgba(79, 124, 255, 0.48);
   background-color: #ffffff;
+  color: #263158;
 }
 
-.soft-select:focus {
+.soft-select:focus,
+.soft-select:focus-visible,
+.soft-select[aria-expanded='true'] {
   border-color: rgba(79, 124, 255, 0.72);
   box-shadow: 0 0 0 3px rgba(79, 124, 255, 0.12);
 }

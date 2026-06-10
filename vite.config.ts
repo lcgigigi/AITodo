@@ -3,6 +3,8 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import Icons from 'unplugin-icons/vite'
 
+const smartTodoApiTarget = 'http://192.168.0.210:8066'
+
 export default defineConfig({
   plugins: [
     vue(),
@@ -20,6 +22,18 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 5173,
     proxy: {
+      '/login': {
+        target: smartTodoApiTarget,
+        changeOrigin: true,
+      },
+      '/getInfo': {
+        target: smartTodoApiTarget,
+        changeOrigin: true,
+      },
+      '/smart-todo': {
+        target: smartTodoApiTarget,
+        changeOrigin: true,
+      },
       '/api': {
         target: 'http://127.0.0.1:8080',
         changeOrigin: true,
@@ -27,11 +41,6 @@ export default defineConfig({
       '/prod-api': {
         target: 'http://10.8.7.57:5000',
         changeOrigin: true,
-      },
-      '/gptData': {
-        target: 'http://10.8.7.57:5000',
-        changeOrigin: true,
-        rewrite: (apiPath) => apiPath.replace(/^\/gptData/, ''),
       },
     },
   },

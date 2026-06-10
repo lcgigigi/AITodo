@@ -1,5 +1,17 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
+import TodoDatePicker from './components/TodoDatePicker.vue'
+import TodoTimePicker from './components/TodoTimePicker.vue'
 import type { CalendarTodoForm, CalendarUser } from './types'
 import { formatFormDateTime } from './todoDisplay'
 import { parseTodoText as serviceParseTodoText } from './todo.service'
@@ -101,6 +113,9 @@ async function parseTodoText() {
   todoForm.value = {
     ...todoForm.value,
     ...parsed,
+    mode:
+      parsed.mode ??
+      (parsed.endDate && parsed.endDate !== parsed.date ? 'deadline' : 'scheduled'),
     endDate: parsed.endDate ?? parsed.date ?? todoForm.value.endDate,
     time: parsed.time ?? todoForm.value.time,
   }
@@ -112,10 +127,6 @@ function selectAssignee(id: string) {
   todoForm.value.assigneeId = assignee.id
   todoForm.value.assigneeName = assignee.name
   todoForm.value.owner = assignee.name
-}
-
-function onAssigneeChange(event: Event) {
-  selectAssignee((event.target as HTMLSelectElement).value)
 }
 
 function submitTodo() {
@@ -149,16 +160,16 @@ function submitTodo() {
         <section v-if="canEditDialog" class="dialog-section ai-section">
           <label class="field field-full">
             <span>AI 辅助描述</span>
-            <textarea
+            <Textarea
               v-model="aiPrompt"
               rows="3"
               placeholder="例如：明天下午给刘畅布置一项开发任务，任务内容为“开发公司官方网站”"
-            ></textarea>
+            />
           </label>
           <div class="ai-actions">
-            <button type="button" :disabled="isParsing || !aiPrompt.trim()" @click="parseTodoText">
+            <Button type="button" :disabled="isParsing || !aiPrompt.trim()" @click="parseTodoText">
               {{ isParsing ? '解析中...' : 'AI 解析并填入' }}
-            </button>
+            </Button>
           </div>
         </section>
 
@@ -170,26 +181,31 @@ function submitTodo() {
           <div class="form-grid">
             <label class="field">
               <span>日期</span>
-              <input
+              <TodoDatePicker
                 v-model="todoForm.date"
                 class="soft-picker"
-                type="date"
                 :disabled="!canEditDialog"
+                aria-label="选择待办日期"
               />
             </label>
             <label class="field">
               <span>时间</span>
-              <input
+              <TodoTimePicker
                 v-model="todoForm.time"
                 class="soft-picker"
-                type="time"
                 :disabled="!canEditDialog"
+                aria-label="选择待办时间"
               />
             </label>
             <label class="field field-full">
               <span>待办内容</span>
-              <textarea v-if="!canEditDialog" v-model="todoForm.title" rows="3" readonly></textarea>
-              <input
+              <Textarea
+                v-if="!canEditDialog"
+                v-model="todoForm.title"
+                rows="3"
+                readonly
+              />
+              <Input
                 v-else
                 v-model="todoForm.title"
                 type="text"
@@ -199,32 +215,37 @@ function submitTodo() {
             </label>
             <label class="field">
               <span>负责人</span>
-              <select
-                v-model="todoForm.assigneeId"
+              <Select
+                :model-value="todoForm.assigneeId"
                 :disabled="!canEditDialog"
-                @change="onAssigneeChange"
+                @update:model-value="selectAssignee(String($event))"
               >
-                <option v-for="user in assignableUsers" :key="user.id" :value="user.id">
-                  {{ user.name }}
-                </option>
-              </select>
+                <SelectTrigger class="soft-select-trigger" aria-label="选择负责人">
+                  <SelectValue placeholder="选择负责人" />
+                </SelectTrigger>
+                <SelectContent position="popper">
+                  <SelectItem v-for="user in assignableUsers" :key="user.id" :value="user.id">
+                    {{ user.name }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
             </label>
             <label class="field">
               <span>备注</span>
-              <textarea
+              <Textarea
                 v-if="!canEditDialog"
                 v-model="todoForm.source"
                 rows="3"
                 readonly
-              ></textarea>
-              <input v-else v-model="todoForm.source" type="text" placeholder="备注或来源" />
+              />
+              <Input v-else v-model="todoForm.source" type="text" placeholder="备注或来源" />
             </label>
           </div>
         </section>
 
         <div class="modal-actions">
-          <button type="button" @click="requestClose">取消</button>
-          <button v-if="canEditDialog" type="submit" :disabled="!canSubmit">保存</button>
+          <Button type="button" @click="requestClose">取消</Button>
+          <Button v-if="canEditDialog" type="submit" :disabled="!canSubmit">保存</Button>
         </div>
       </form>
     </div>
@@ -396,6 +417,37 @@ function submitTodo() {
   color: #111827;
   font-size: 13px;
   font-weight: 500;
+}
+
+.soft-select-trigger {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  border-color: #dfe8f3;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111827;
+  padding: 0 10px;
+  justify-content: space-between;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: none;
+}
+
+.soft-select-trigger:hover,
+.soft-select-trigger[aria-expanded='true'] {
+  border-color: #111827;
+  background: #ffffff;
+  color: #111827;
+  box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.07);
+}
+
+.soft-select-trigger:disabled {
+  background: #f8fafc;
+  color: #475569;
+  cursor: default;
+  opacity: 1;
 }
 
 .field textarea {

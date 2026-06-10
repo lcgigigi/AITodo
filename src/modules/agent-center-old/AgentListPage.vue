@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { Input } from '@/components/ui/input'
 import {
   levelDescriptions,
   mockAgents,
@@ -186,7 +187,7 @@ function formatUsage(count: number) {
     <section class="workbench-grid">
       <aside class="filter-rail" aria-label="筛选">
         <div class="search-field">
-          <input v-model="searchKeyword" type="search" placeholder="搜索名称、场景、负责人" />
+          <Input v-model="searchKeyword" type="search" placeholder="搜索名称、场景、负责人" />
           <button
             v-if="searchKeyword"
             type="button"

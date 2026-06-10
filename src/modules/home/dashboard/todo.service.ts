@@ -1,41 +1,45 @@
-import axios from 'axios'
 import type { AxiosRequestConfig } from 'axios'
 import { httpClient } from '@/shared/request/http'
-import { setupInterceptors } from '@/shared/request/interceptors'
 import type {
   CalendarEvent,
   CalendarEventStatus,
   CalendarTodoDraft,
+  CalendarTodoScope,
   CalendarTodoUpdate,
   CalendarUser,
   ParsedTodoDraft,
 } from './types'
-import { addDays, compareDate, parseDate, ymd } from './todoDisplay'
-import {
-  createTodo as createMockTodo,
-  deleteTodo as deleteMockTodo,
-  listTodos as listMockTodos,
-  mockInitialTodos,
-  mockUsers,
-  parseTodoText as parseMockTodoText,
-  updateTodo as updateMockTodo,
-  updateTodoStatus as updateMockTodoStatus,
-} from './todoMock'
+import { compareEvents, ymd } from './todoDisplay'
 
-export const TODO_STORAGE_KEY = 'ai-workbench.todos.v1'
+const SMART_TODO_REQUEST_TIMEOUT = 60_000
+const DEFAULT_LOGIN_USERNAME = import.meta.env.VITE_APP_TODO_USERNAME || 'admin'
+const DEFAULT_LOGIN_PASSWORD = import.meta.env.VITE_APP_TODO_PASSWORD || 'admin123'
 
-const seedAnchorDate = '2026-05-04'
-const SMART_TODO_CREATE_PATH = '/smart-todocreate'
-const SMART_TODO_USER_LIST_PATH = '/smart-todouser-list'
-const SMART_TODO_GENERATE_PATH = '/smartTodoGenerate'
-const SMART_TODO_REQUEST_TIMEOUT = 20_000
-
-interface SmartTodoResponse<T> {
+interface SmartTodoResponse<T = unknown> {
   code?: number
   msg?: string
   message?: string
-  data: T | null
+  traceId?: string
+  data?: T | null
   success?: boolean
+}
+
+interface SmartTodoLoginResponse extends SmartTodoResponse {
+  token?: string
+}
+
+interface SmartTodoInfoResponse extends SmartTodoResponse {
+  user?: {
+    userId?: string | number
+    userName?: string
+    nickName?: string
+    avatar?: string
+    deptName?: string
+    department?: string
+    isSecurityPassword?: 'yes' | 'no'
+  }
+  roles?: string[]
+  permissions?: string[]
 }
 
 interface SmartTodoBackendUser {
@@ -43,86 +47,76 @@ interface SmartTodoBackendUser {
   name?: string
 }
 
-interface SmartTodoCreatePayload {
-  title: string
-  timeType: 1 | 2 | 3 | 4 | 5
-  specificDate?: string
-  specificTime?: string
+interface SmartTodoBackendItem {
+  id?: string | number
+  title?: string
+  timeType?: 1 | 2
+  specificDate?: string | null
+  specificTime?: string | null
+  startDate?: string | null
+  endDate?: string | null
+  content?: string | null
+  assigneeId?: string | number | null
+  remark?: string | null
+  creatorId?: string | number | null
+  creatorName?: string | null
+  createTime?: string | null
+  status?: 0 | 3 | 6 | 9 | 99
+  currentHandlerId?: string | number | null
+  handlerIds?: string | null
+  receiveStatus?: number | null
+}
+
+interface SmartTodoAnalyzeData {
+  task?: string
+  timeType?: string
+  date?: string
+  time?: string
   startDate?: string
   endDate?: string
-  content?: string
-  assigneeId?: string
+  assigneeId?: string | number
   remark?: string
 }
 
-interface SmartTodoGenerateResponse {
-  state?: string
-  message?: string
-  msg?: string
-  data?: SmartTodoGenerateData | null
-}
-
-interface SmartTodoGenerateData {
+interface SmartTodoPayload {
+  id?: string | number
+  title: string
+  timeType: 1 | 2
+  specificDate: string | null
+  specificTime: string | null
+  startDate: string | null
+  endDate: string | null
+  content: string
   assigneeId?: string
-  date?: string
-  endDate?: string
-  startDate?: string
-  task?: string
-  time?: string
-  timeType?: string
+  remark: string
 }
 
-const smartTodoAiClient = axios.create({
-  baseURL: import.meta.env.VITE_APP_GPT_API || '/gptData',
-  timeout: SMART_TODO_REQUEST_TIMEOUT,
-})
-
-setupInterceptors(smartTodoAiClient)
-
-function isBrowserStorageAvailable() {
-  return typeof window !== 'undefined' && Boolean(window.localStorage)
+export interface SmartTodoLoginCredentials {
+  username?: string
+  password?: string
 }
 
-function cloneEvents(events: CalendarEvent[]) {
-  return events.map((event) => ({ ...event }))
+export interface SmartTodoCurrentUser extends CalendarUser {
+  roles: string[]
+  permissions: string[]
+  isSecurityPassword?: 'yes' | 'no'
 }
 
-function shiftDate(date: string, days: number) {
-  return ymd(addDays(parseDate(date), days))
-}
-
-function getWeekStart(date: Date) {
-  const start = new Date(date)
-  start.setHours(12, 0, 0, 0)
-  const offset = (start.getDay() + 6) % 7
-  start.setDate(start.getDate() - offset)
-  return start
-}
-
-function shouldUseRemoteSmartTodoApi() {
-  return import.meta.env.MODE !== 'test'
-}
-
-function getMockAssignableUsers(currentUser: CalendarUser) {
-  if (currentUser.role === 'leader') {
-    const teamIds = currentUser.teamMemberIds ?? []
-    return mockUsers.filter((user) => user.id === currentUser.id || teamIds.includes(user.id))
-  }
-
-  return [currentUser]
+function getResponseMessage(response: SmartTodoResponse, fallbackMessage: string) {
+  return response.msg || response.message || fallbackMessage
 }
 
 function unwrapSmartTodoResponse<T>(response: SmartTodoResponse<T>, fallbackMessage: string): T {
   if (response.success === false) {
-    throw new Error(response.message || response.msg || fallbackMessage)
+    throw new Error(getResponseMessage(response, fallbackMessage))
   }
 
   if (typeof response.code === 'number' && response.code !== 200) {
-    throw new Error(response.msg || response.message || fallbackMessage)
+    throw new Error(getResponseMessage(response, fallbackMessage))
   }
 
   if (response.data === null || response.data === undefined) {
-    throw new Error(response.msg || response.message || fallbackMessage)
+    throw new Error(getResponseMessage(response, fallbackMessage))
   }
 
   return response.data
@@ -137,29 +131,15 @@ async function requestSmartTodoData<T>(config: AxiosRequestConfig, fallbackMessa
   return unwrapSmartTodoResponse(response.data, fallbackMessage)
 }
 
-function normalizeBackendUsers(users: SmartTodoBackendUser[]) {
-  return users
-    .map((user): CalendarUser | null => {
-      const id = String(user.badge ?? '').trim()
-      const name = String(user.name ?? '').trim()
-
-      if (!id || !name) return null
-
-      return {
-        id,
-        name,
-        role: 'employee',
-      }
-    })
-    .filter((user): user is CalendarUser => Boolean(user))
+function toId(value?: string | number | null) {
+  return value === null || value === undefined ? '' : String(value).trim()
 }
 
-function isLocalMockUserId(id?: string) {
-  if (!id) return true
-  return id === 'mock-user' || id.startsWith('leader-') || id.startsWith('employee-')
+function todayDate() {
+  return ymd(new Date())
 }
 
-function normalizeBackendTime(time?: string) {
+function normalizeBackendTime(time?: string | null) {
   const trimmed = time?.trim()
 
   if (!trimmed) return '00:00:00'
@@ -180,75 +160,105 @@ function normalizeBackendTime(time?: string) {
   return '00:00:00'
 }
 
-function normalizeFormTime(time?: string) {
+function normalizeFormTime(time?: string | null) {
   const backendTime = normalizeBackendTime(time)
-  return backendTime.slice(0, 5)
+  return backendTime === '00:00:00' ? undefined : backendTime.slice(0, 5)
 }
 
-function buildSmartTodoPayload(payload: CalendarTodoDraft): SmartTodoCreatePayload {
-  const title = payload.title.trim()
-  const assigneeId = payload.assigneeId?.trim()
-  const remark = payload.source?.trim()
-  const data: SmartTodoCreatePayload = {
-    title,
-    timeType: payload.endDate ? 2 : 1,
-    content: title,
-  }
-
-  if (payload.endDate) {
-    data.startDate = payload.date
-    data.endDate = payload.endDate
-  } else {
-    data.specificDate = payload.date
-    data.specificTime = normalizeBackendTime(payload.time)
-  }
-
-  if (assigneeId && !isLocalMockUserId(assigneeId)) {
-    data.assigneeId = assigneeId
-  }
-
-  if (remark) {
-    data.remark = remark
-  }
-
-  return data
+function resolveRole(roles: string[] = []): CalendarUser['role'] {
+  return roles.some((role) => ['admin', 'leader'].includes(role)) ? 'leader' : 'employee'
 }
 
-function createEventFromBackendId(
-  id: string | number,
+function createUserMap(users: CalendarUser[]) {
+  return new Map(users.map((user) => [user.id, user]))
+}
+
+function resolveScope(
+  creatorId: string,
+  assigneeId: string,
   currentUser: CalendarUser,
-  payload: CalendarTodoDraft,
+): CalendarTodoScope | undefined {
+  if (!currentUser.id || !creatorId || !assigneeId) return undefined
+  if (creatorId === currentUser.id && assigneeId === currentUser.id) return 'self'
+  if (creatorId === currentUser.id && assigneeId !== currentUser.id) return 'assigned_by_me'
+  return 'assigned_to_me'
+}
+
+function mapBackendStatus(status?: SmartTodoBackendItem['status']): CalendarEventStatus {
+  return status === 6 ? 'done' : 'todo'
+}
+
+function normalizeBackendTodo(
+  item: SmartTodoBackendItem,
+  currentUser: CalendarUser,
+  users: CalendarUser[] = [],
 ): CalendarEvent {
-  const assigneeName = payload.assigneeName ?? payload.owner ?? currentUser.name
-  const assigneeId =
-    payload.assigneeId && !isLocalMockUserId(payload.assigneeId)
-      ? payload.assigneeId
-      : currentUser.id
+  const userMap = createUserMap(users)
+  const id = toId(item.id) || `todo-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const assigneeId = toId(item.assigneeId)
+  const creatorId = toId(item.creatorId)
+  const currentHandlerId = toId(item.currentHandlerId)
+  const assignee = userMap.get(assigneeId)
+  const creator = userMap.get(creatorId)
+  const assigneeName = assignee?.name || assigneeId || '未指定'
+  const creatorName = item.creatorName?.trim() || creator?.name || (creatorId === currentUser.id ? currentUser.name : '')
+  const timeType = item.timeType === 2 ? 2 : 1
+  const date =
+    (timeType === 2 ? item.startDate || item.specificDate : item.specificDate || item.startDate) ||
+    todayDate()
+  const endDate = timeType === 2 ? item.endDate || date : undefined
+  const title = item.title?.trim() || item.content?.trim() || '未命名待办'
+  const status = mapBackendStatus(item.status)
+  const completable =
+    status !== 'done' &&
+    (currentHandlerId
+      ? currentHandlerId === currentUser.id
+      : !assigneeId || assigneeId === currentUser.id)
 
   return {
-    id: `backend-${String(id)}`,
-    date: payload.date,
-    endDate: payload.endDate && payload.endDate !== payload.date ? payload.endDate : undefined,
-    time: payload.time,
-    title: payload.title.trim(),
+    id,
+    date,
+    endDate: endDate && endDate !== date ? endDate : undefined,
+    time: timeType === 1 ? normalizeFormTime(item.specificTime) : undefined,
+    title,
     type: 'task',
     owner: assigneeName,
-    status: 'todo',
-    source: payload.source?.trim() || '自建待办',
-    creatorId: currentUser.id,
-    creatorName: currentUser.name,
-    assigneeId,
+    status,
+    source: item.remark?.trim() || item.content?.trim() || undefined,
+    creatorId: creatorId || undefined,
+    creatorName: creatorName || undefined,
+    assigneeId: assigneeId || undefined,
     assigneeName,
+    scope: resolveScope(creatorId, assigneeId, currentUser),
+    editable: !creatorId || creatorId === currentUser.id,
+    completable,
+    backendStatus: item.status,
+    receiveStatus: item.receiveStatus ?? undefined,
+    currentHandlerId: currentHandlerId || undefined,
+    handlerIds: item.handlerIds ?? undefined,
+    content: item.content ?? undefined,
+    remark: item.remark ?? undefined,
   }
 }
 
-function resolveParsedAssignee(
-  assigneeText: string | undefined,
+function normalizeBackendTodos(
+  items: SmartTodoBackendItem[],
+  currentUser: CalendarUser,
+  users: CalendarUser[] = [],
+) {
+  return items
+    .filter((item) => item.status !== 99)
+    .map((item) => normalizeBackendTodo(item, currentUser, users))
+    .sort(compareEvents)
+}
+
+function findAssignee(
+  assigneeText: string | number | undefined,
   currentUser: CalendarUser,
   assignableUsers: CalendarUser[],
   fallback: ParsedTodoDraft,
 ) {
-  const normalizedAssignee = assigneeText?.trim()
+  const normalizedAssignee = toId(assigneeText)
   const matchedAssignee = assignableUsers.find(
     (user) =>
       normalizedAssignee &&
@@ -260,174 +270,332 @@ function resolveParsedAssignee(
   if (matchedAssignee) return matchedAssignee
 
   return {
-    id: fallback.assigneeId ?? currentUser.id,
-    name: normalizedAssignee || fallback.assigneeName || fallback.owner || currentUser.name,
+    id: fallback.assigneeId || normalizedAssignee || currentUser.id,
+    name: fallback.assigneeName || fallback.owner || normalizedAssignee || currentUser.name,
   }
 }
 
-async function parseRemoteTodoText(
+function normalizeAnalyzeData(
+  data: SmartTodoAnalyzeData,
+  currentUser: CalendarUser,
+  assignableUsers: CalendarUser[],
+  fallback: ParsedTodoDraft,
+): ParsedTodoDraft {
+  const timeType = (data.timeType ?? '').toLowerCase()
+  const hasRangeDates = Boolean(data.startDate?.trim() && data.endDate?.trim())
+  const isRange =
+    timeType.includes('range') ||
+    timeType.includes('period') ||
+    timeType.includes('deadline') ||
+    (hasRangeDates && !timeType.includes('specific'))
+  const date =
+    (isRange ? data.startDate?.trim() : data.date?.trim()) || data.date?.trim() || fallback.date
+  const endDate = isRange ? data.endDate?.trim() || data.date?.trim() || date : undefined
+  const assignee = findAssignee(data.assigneeId, currentUser, assignableUsers, fallback)
+
+  return {
+    mode: isRange ? 'deadline' : 'scheduled',
+    date,
+    endDate: endDate && endDate !== date ? endDate : undefined,
+    time: isRange ? undefined : normalizeFormTime(data.time) || fallback.time,
+    title: data.task?.trim() || fallback.title?.trim() || '',
+    owner: assignee.name,
+    assigneeId: assignee.id,
+    assigneeName: assignee.name,
+    source: data.remark?.trim() || fallback.source || 'AI预填',
+  }
+}
+
+function buildSmartTodoPayload(payload: CalendarTodoDraft | CalendarTodoUpdate): SmartTodoPayload {
+  const isRange = Boolean(payload.endDate && payload.endDate !== payload.date)
+  const title = payload.title.trim()
+
+  return {
+    id: 'id' in payload ? payload.id : undefined,
+    title,
+    timeType: isRange ? 2 : 1,
+    specificDate: isRange ? null : payload.date,
+    specificTime: isRange ? null : normalizeBackendTime(payload.time),
+    startDate: isRange ? payload.date : null,
+    endDate: isRange ? payload.endDate || payload.date : null,
+    content: title,
+    assigneeId: payload.assigneeId?.trim() || undefined,
+    remark: payload.source?.trim() || '',
+  }
+}
+
+function buildIds(ids: string | string[]) {
+  return Array.isArray(ids) ? ids.join(',') : ids
+}
+
+export async function loginSmartTodo(credentials: SmartTodoLoginCredentials = {}) {
+  const response = await httpClient.post<SmartTodoLoginResponse>(
+    '/login',
+    {
+      username: credentials.username || DEFAULT_LOGIN_USERNAME,
+      password: credentials.password || DEFAULT_LOGIN_PASSWORD,
+    },
+    {
+      timeout: SMART_TODO_REQUEST_TIMEOUT,
+    },
+  )
+
+  if (typeof response.data.code === 'number' && response.data.code !== 200) {
+    throw new Error(getResponseMessage(response.data, '登录失败'))
+  }
+
+  if (!response.data.token) {
+    throw new Error(getResponseMessage(response.data, '登录失败，后台未返回 token'))
+  }
+
+  return response.data.token
+}
+
+export async function loadCurrentUser(): Promise<SmartTodoCurrentUser> {
+  const response = await httpClient.get<SmartTodoInfoResponse>('/getInfo', {
+    timeout: SMART_TODO_REQUEST_TIMEOUT,
+  })
+  const result = response.data
+
+  if (typeof result.code === 'number' && result.code !== 200) {
+    throw new Error(getResponseMessage(result, '获取当前用户失败'))
+  }
+
+  if (!result.user) {
+    throw new Error(getResponseMessage(result, '获取当前用户失败'))
+  }
+
+  const roles = result.roles ?? []
+  const id = result.user.userName || toId(result.user.userId)
+
+  return {
+    id,
+    name: result.user.nickName || result.user.userName || id || '未命名用户',
+    avatar: result.user.avatar,
+    department: result.user.department || result.user.deptName,
+    role: resolveRole(roles),
+    roles,
+    permissions: result.permissions ?? [],
+    isSecurityPassword: result.user.isSecurityPassword,
+  }
+}
+
+export async function analyzeTodoText(
   text: string,
   currentUser: CalendarUser,
   assignableUsers: CalendarUser[],
   fallback: ParsedTodoDraft,
-): Promise<ParsedTodoDraft> {
-  const response = await smartTodoAiClient.post<SmartTodoGenerateResponse>(
-    SMART_TODO_GENERATE_PATH,
+) {
+  const data = await requestSmartTodoData<SmartTodoAnalyzeData>(
     {
-      text: text.trim(),
+      method: 'POST',
+      url: '/smart-todo/analyze',
+      data: { text: text.trim() },
     },
-  )
-  const result = response.data
-
-  if (result.state !== 'success' || !result.data) {
-    throw new Error(result.message || result.msg || 'AI分析待办失败')
-  }
-
-  const data = result.data
-  const timeType = data.timeType ?? ''
-  const isDeadline = timeType.includes('deadline')
-  const date = data.startDate?.trim() || data.date?.trim() || fallback.date
-  const endDate = isDeadline
-    ? data.endDate?.trim() || data.date?.trim() || date
-    : data.endDate?.trim() || fallback.endDate
-  const assignee = resolveParsedAssignee(data.assigneeId, currentUser, assignableUsers, fallback)
-
-  return {
-    date,
-    endDate: endDate || undefined,
-    time: isDeadline ? undefined : normalizeFormTime(data.time ?? fallback.time),
-    title: data.task?.trim() || fallback.title?.trim() || text.trim(),
-    owner: assignee.name,
-    assigneeId: assignee.id,
-    assigneeName: assignee.name,
-    source: fallback.source || 'AI预填',
-  }
-}
-
-export function createSeedTodos(now = new Date()): CalendarEvent[] {
-  const seedStart = getWeekStart(now)
-  const shiftDays = Math.round(
-    (seedStart.getTime() - parseDate(seedAnchorDate).getTime()) / 86_400_000,
+    'AI解析待办失败',
   )
 
-  return mockInitialTodos.map((event) => ({
-    ...event,
-    id: `seed-${event.id}`,
-    date: shiftDate(event.date, shiftDays),
-    endDate: event.endDate ? shiftDate(event.endDate, shiftDays) : undefined,
-    priority: event.priority ?? 'normal',
-  }))
+  return normalizeAnalyzeData(data, currentUser, assignableUsers, fallback)
 }
 
-function normalizeTodo(event: CalendarEvent): CalendarEvent {
-  const removedLegacyKey = ['completion', 'Ideas'].join('')
-  const todo = Object.fromEntries(
-    Object.entries(event).filter(([key]) => key !== removedLegacyKey),
-  ) as CalendarEvent
+export async function analyzeTodoTextByGet(
+  text: string,
+  currentUser: CalendarUser,
+  assignableUsers: CalendarUser[],
+  fallback: ParsedTodoDraft,
+) {
+  const data = await requestSmartTodoData<SmartTodoAnalyzeData>(
+    {
+      method: 'GET',
+      url: '/smart-todo/analyze',
+      params: { text: text.trim() },
+    },
+    'AI解析待办失败',
+  )
 
-  return {
-    ...todo,
-    endDate: todo.endDate && compareDate(todo.endDate, todo.date) >= 0 ? todo.endDate : undefined,
-    time: todo.time || undefined,
-    title: todo.title.trim(),
-    owner: todo.owner || todo.assigneeName || '未指定',
-    status: todo.status === 'done' ? 'done' : 'todo',
-    priority: todo.priority === 'urgent' ? 'urgent' : 'normal',
-    source: todo.source?.trim() || undefined,
-  }
+  return normalizeAnalyzeData(data, currentUser, assignableUsers, fallback)
 }
 
-export function saveTodos(events: CalendarEvent[]) {
-  const normalizedEvents = events.map(normalizeTodo)
+export async function loadAssignableUsers() {
+  const users = await requestSmartTodoData<SmartTodoBackendUser[]>(
+    {
+      method: 'GET',
+      url: '/smart-todo/user-list',
+    },
+    '查询用户列表失败',
+  )
 
-  if (isBrowserStorageAvailable()) {
-    window.localStorage.setItem(TODO_STORAGE_KEY, JSON.stringify(normalizedEvents))
-  }
+  return users
+    .map((user): CalendarUser | null => {
+      const id = toId(user.badge)
+      const name = user.name?.trim()
 
-  return cloneEvents(normalizedEvents)
-}
+      if (!id || !name) return null
 
-export function loadTodos(now = new Date()) {
-  if (isBrowserStorageAvailable()) {
-    const raw = window.localStorage.getItem(TODO_STORAGE_KEY)
-
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw)
-        if (Array.isArray(parsed)) return saveTodos(parsed as CalendarEvent[])
-      } catch {
-        window.localStorage.removeItem(TODO_STORAGE_KEY)
+      return {
+        id,
+        name,
+        role: 'employee',
       }
-    }
-  }
+    })
+    .filter((user): user is CalendarUser => Boolean(user))
+}
 
-  return saveTodos(createSeedTodos(now))
+export async function loadTodos(currentUser: CalendarUser, users: CalendarUser[] = []) {
+  const items = await requestSmartTodoData<SmartTodoBackendItem[]>(
+    {
+      method: 'GET',
+      url: '/smart-todo/month-list',
+    },
+    '查询待办列表失败',
+  )
+
+  return normalizeBackendTodos(items, currentUser, users)
+}
+
+export async function loadPendingTodos(currentUser: CalendarUser, users: CalendarUser[] = []) {
+  const items = await requestSmartTodoData<SmartTodoBackendItem[]>(
+    {
+      method: 'GET',
+      url: '/smart-todo/pending-list',
+    },
+    '查询待接受待办失败',
+  )
+
+  return normalizeBackendTodos(items, currentUser, users)
+}
+
+export async function loadTodoDetail(
+  id: string,
+  currentUser: CalendarUser,
+  users: CalendarUser[] = [],
+) {
+  const item = await requestSmartTodoData<SmartTodoBackendItem>(
+    {
+      method: 'GET',
+      url: `/smart-todo/${encodeURIComponent(id)}`,
+    },
+    '查询待办详情失败',
+  )
+
+  return normalizeBackendTodo(item, currentUser, users)
+}
+
+export async function createTodo(payload: CalendarTodoDraft) {
+  return requestSmartTodoData<string | number>(
+    {
+      method: 'POST',
+      url: '/smart-todo/create',
+      data: buildSmartTodoPayload(payload),
+    },
+    '创建待办事项失败',
+  )
+}
+
+export async function updateTodo(payload: CalendarTodoUpdate) {
+  return requestSmartTodoData<boolean>(
+    {
+      method: 'PUT',
+      url: '/smart-todo',
+      data: buildSmartTodoPayload(payload),
+    },
+    '更新待办事项失败',
+  )
+}
+
+export async function deleteTodo(id: string) {
+  return requestSmartTodoData<boolean>(
+    {
+      method: 'DELETE',
+      url: `/smart-todo/${encodeURIComponent(id)}`,
+    },
+    '删除待办事项失败',
+  )
+}
+
+export async function completeTodo(
+  id: string,
+  currentUser: CalendarUser,
+  handleDesc = '已完成',
+) {
+  return requestSmartTodoData<boolean>(
+    {
+      method: 'POST',
+      url: `/smart-todo/complete/${encodeURIComponent(id)}`,
+      params: { handleDesc },
+      headers: currentUser.id ? { userId: currentUser.id } : undefined,
+    },
+    '完成待办事项失败',
+  )
+}
+
+export async function rejectTodo(id: string, handleDesc: string) {
+  return requestSmartTodoData<boolean>(
+    {
+      method: 'POST',
+      url: '/smart-todo/reject',
+      data: { id, handleDesc },
+    },
+    '拒绝待办事项失败',
+  )
+}
+
+export async function acceptTodos(ids: string | string[]) {
+  return requestSmartTodoData<boolean>(
+    {
+      method: 'POST',
+      url: '/smart-todo/accept',
+      data: { ids: buildIds(ids) },
+    },
+    '接受待办事项失败',
+  )
+}
+
+export async function transferTodos(ids: string | string[], assigneeId: string) {
+  return requestSmartTodoData<boolean>(
+    {
+      method: 'POST',
+      url: '/smart-todo/transfer',
+      data: {
+        ids: buildIds(ids),
+        assigneeId,
+      },
+    },
+    '转发待办事项失败',
+  )
 }
 
 export function listTodos(events: CalendarEvent[], currentUser: CalendarUser) {
-  return listMockTodos(events, currentUser)
+  return events
+    .map((event) => {
+      const creatorId = event.creatorId ?? ''
+      const assigneeId = event.assigneeId ?? ''
+
+      return {
+        ...event,
+        scope: event.scope ?? resolveScope(creatorId, assigneeId, currentUser),
+        editable: event.editable ?? (!creatorId || creatorId === currentUser.id),
+        completable:
+          event.completable ??
+          (event.status !== 'done' &&
+            (event.currentHandlerId
+              ? event.currentHandlerId === currentUser.id
+              : !assigneeId || assigneeId === currentUser.id)),
+      }
+    })
+    .sort(compareEvents)
 }
 
-export async function loadAssignableUsers(currentUser: CalendarUser) {
-  if (!shouldUseRemoteSmartTodoApi()) return getMockAssignableUsers(currentUser)
-
-  try {
-    const users = await requestSmartTodoData<SmartTodoBackendUser[]>(
-      {
-        method: 'GET',
-        url: SMART_TODO_USER_LIST_PATH,
-      },
-      '查询用户列表失败',
-    )
-    const normalizedUsers = normalizeBackendUsers(users)
-
-    return normalizedUsers.length ? normalizedUsers : getMockAssignableUsers(currentUser)
-  } catch (error) {
-    console.warn('[smart-todo] user-list fallback:', error)
-    return getMockAssignableUsers(currentUser)
-  }
-}
-
-export async function createTodo(
-  events: CalendarEvent[],
-  currentUser: CalendarUser,
-  payload: CalendarTodoDraft,
-) {
-  if (shouldUseRemoteSmartTodoApi()) {
-    const createdId = await requestSmartTodoData<string | number>(
-      {
-        method: 'POST',
-        url: SMART_TODO_CREATE_PATH,
-        data: buildSmartTodoPayload(payload),
-      },
-      '创建待办事项失败',
-    )
-
-    return saveTodos([...events, createEventFromBackendId(createdId, currentUser, payload)])
-  }
-
-  return saveTodos(createMockTodo(events, currentUser, payload))
-}
-
-export function updateTodo(
-  events: CalendarEvent[],
-  currentUser: CalendarUser,
-  payload: CalendarTodoUpdate,
-) {
-  return saveTodos(updateMockTodo(events, currentUser, payload))
-}
-
-export function updateTodoStatus(
-  events: CalendarEvent[],
-  currentUser: CalendarUser,
+export async function updateTodoStatus(
   id: string,
+  currentUser: CalendarUser,
   status: CalendarEventStatus,
 ) {
-  return saveTodos(updateMockTodoStatus(events, currentUser, id, status))
-}
+  if (status !== 'done') {
+    throw new Error('后台暂未提供撤回完成接口')
+  }
 
-export function deleteTodo(events: CalendarEvent[], currentUser: CalendarUser, id: string) {
-  return saveTodos(deleteMockTodo(events, currentUser, id))
+  return completeTodo(id, currentUser)
 }
 
 export function parseTodoText(
@@ -436,12 +604,5 @@ export function parseTodoText(
   assignableUsers: CalendarUser[],
   fallback: ParsedTodoDraft,
 ) {
-  if (shouldUseRemoteSmartTodoApi()) {
-    return parseRemoteTodoText(text, currentUser, assignableUsers, fallback).catch((error) => {
-      console.warn('[smart-todo] ai-parse fallback:', error)
-      return parseMockTodoText(text, currentUser, assignableUsers, fallback)
-    })
-  }
-
-  return parseMockTodoText(text, currentUser, assignableUsers, fallback)
+  return analyzeTodoText(text, currentUser, assignableUsers, fallback)
 }

@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import type { CalendarDay, CalendarEvent } from './types'
 import { formatEventTime, formatMonthEventTime, isAllDayEvent, isRangeEvent } from './todoDisplay'
 
@@ -265,8 +267,8 @@ function quickCreateFromHeader() {
         aria-label="一句话创建待办"
         @submit.prevent="quickCreateFromHeader"
       >
-        <input v-model="headerQuickInput" type="text" placeholder="一句话创建待办..." />
-        <button v-if="hasHeaderQuickInput" type="submit">AI解析</button>
+        <Input v-model="headerQuickInput" type="text" placeholder="一句话创建待办..." />
+        <Button v-if="hasHeaderQuickInput" type="submit">AI解析</Button>
       </form>
       <div class="calendar-controls">
         <button
@@ -455,8 +457,7 @@ function quickCreateFromHeader() {
               <span>{{ event.title }}</span>
             </button>
             <div v-if="!todayEvents.length" class="today-bubble-empty">
-              <p>今日暂无待办，可以新建安排或查看 Agent 能力。</p>
-              <button type="button" @click="emit('openAgentCenter')">查看 Agent 能力</button>
+              <p>今日暂无待办</p>
             </div>
           </div>
           <form
@@ -464,8 +465,8 @@ function quickCreateFromHeader() {
             :class="{ 'has-value': hasTodayQuickInput }"
             @submit.prevent="quickCreateToday"
           >
-            <input v-model="todayQuickInput" type="text" placeholder="一句话创建待办..." />
-            <button v-if="hasTodayQuickInput" type="submit">AI解析</button>
+            <Input v-model="todayQuickInput" type="text" placeholder="一句话创建待办..." />
+            <Button v-if="hasTodayQuickInput" type="submit">AI解析</Button>
           </form>
         </section>
       </div>
@@ -1599,24 +1600,6 @@ h2 {
   margin: 0;
   max-width: 210px;
   line-height: 1.45;
-}
-
-.today-bubble-empty button {
-  min-height: 28px;
-  border: 1px solid #dbeafe;
-  border-radius: 999px;
-  background: #eff6ff;
-  color: #1d4ed8;
-  padding: 0 10px;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 900;
-  cursor: pointer;
-}
-
-.today-bubble-empty button:hover {
-  border-color: #bfdbfe;
-  background: #dbeafe;
 }
 
 .today-quick-create {
