@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from 'vue'
-import { computed, useAttrs } from 'vue'
+import { computed, nextTick, ref, useAttrs, watch } from 'vue'
 import IconCheck from '~icons/lucide/check'
 import IconClock3 from '~icons/lucide/clock-3'
 import { Button } from '@/components/ui/button'
@@ -34,11 +34,22 @@ const emit = defineEmits<{
 }>()
 
 const attrs = useAttrs()
+const open = ref(false)
+const rootRef = ref<HTMLElement | null>(null)
+const popoverWidth = ref('')
+const hourTouched = ref(false)
+const minuteTouched = ref(false)
 const externalClass = computed(() => attrs.class as HTMLAttributes['class'])
-const hourOptions = Array.from({ length: 24 }, (_, index) => String(index).padStart(2, '0'))
+const baseHourOptions = Array.from({ length: 17 }, (_, index) => String(index + 7).padStart(2, '0'))
 const baseMinuteOptions = Array.from({ length: 12 }, (_, index) => String(index * 5).padStart(2, '0'))
 
 const parsedTime = computed(() => parseTime(props.modelValue))
+const hourOptions = computed(() => {
+  const currentHour = parsedTime.value?.hour
+  if (!currentHour || baseHourOptions.includes(currentHour)) return baseHourOptions
+
+  return [...baseHourOptions, currentHour].sort((first, second) => Number(first) - Number(second))
+})
 const minuteOptions = computed(() => {
   const currentMinute = parsedTime.value?.minute
   if (!currentMinute || baseMinuteOptions.includes(currentMinute)) return baseMinuteOptions
@@ -60,82 +71,126 @@ function parseTime(value: string) {
 
 function setHour(hour: string) {
   const minute = parsedTime.value?.minute ?? '00'
+  hourTouched.value = true
   emitTime(hour, minute)
+  tryClosePopover()
 }
 
 function setMinute(minute: string) {
-  const hour = parsedTime.value?.hour ?? '09'
+  const hour = parsedTime.value?.hour ?? '07'
+  minuteTouched.value = true
   emitTime(hour, minute)
+  tryClosePopover()
 }
 
 function emitTime(hour: string, minute: string) {
   emit('update:modelValue', `${hour}:${minute}`)
   emit('change')
 }
+
+function resetSelectionState() {
+  hourTouched.value = Boolean(parsedTime.value?.hour)
+  minuteTouched.value = false
+}
+
+function tryClosePopover() {
+  if (hourTouched.value && minuteTouched.value) {
+    open.value = false
+  }
+}
+
+function syncPopoverWidth() {
+  const trigger = rootRef.value?.querySelector('button')
+  const width = trigger?.getBoundingClientRect().width ?? rootRef.value?.getBoundingClientRect().width
+  if (!width) return
+
+  popoverWidth.value = `${Math.round(width)}px`
+}
+
+watch(open, (isOpen) => {
+  if (!isOpen) return
+
+  resetSelectionState()
+  nextTick(() => {
+    syncPopoverWidth()
+    requestAnimationFrame(syncPopoverWidth)
+  })
+})
 </script>
 
 <template>
-  <Popover>
-    <PopoverTrigger as-child>
-      <Button
-        type="button"
-        variant="outline"
-        :disabled="disabled"
-        :aria-label="ariaLabel"
-        :class="
-          cn(
-            'todo-time-trigger',
-            highlighted && 'is-ai-highlighted',
-            externalClass,
-          )
-        "
+  <div ref="rootRef" class="todo-time-picker">
+    <Popover v-model:open="open">
+      <PopoverTrigger as-child>
+        <Button
+          type="button"
+          variant="outline"
+          :disabled="disabled"
+          :aria-label="ariaLabel"
+          :class="
+            cn(
+              'todo-time-trigger',
+              highlighted && 'is-ai-highlighted',
+              externalClass,
+            )
+          "
+        >
+          <span class="todo-picker-value" :class="{ 'is-placeholder': !parsedTime }">
+            {{ displayValue }}
+          </span>
+          <IconClock3 aria-hidden="true" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        :style="{ '--todo-time-popover-width': popoverWidth || undefined }"
+        class="todo-time-popover gap-0 p-0"
       >
-        <span class="todo-picker-value" :class="{ 'is-placeholder': !parsedTime }">
-          {{ displayValue }}
-        </span>
-        <IconClock3 aria-hidden="true" />
-      </Button>
-    </PopoverTrigger>
-    <PopoverContent align="start" class="todo-time-popover">
-      <div class="todo-time-panel">
-        <div class="todo-time-column" aria-label="小时">
-          <span class="todo-time-label">时</span>
-          <ScrollArea class="todo-time-scroll">
-            <button
-              v-for="hour in hourOptions"
-              :key="hour"
-              class="todo-time-option"
-              :class="{ active: parsedTime?.hour === hour }"
-              type="button"
-              @click="setHour(hour)"
-            >
-              <span class="todo-time-option-value">{{ hour }}</span>
-              <IconCheck v-if="parsedTime?.hour === hour" aria-hidden="true" />
-            </button>
-          </ScrollArea>
+        <div class="todo-time-panel">
+          <div class="todo-time-column" aria-label="小时">
+            <span class="todo-time-label">时</span>
+            <ScrollArea class="todo-time-scroll">
+              <button
+                v-for="hour in hourOptions"
+                :key="hour"
+                class="todo-time-option"
+                :class="{ active: parsedTime?.hour === hour }"
+                type="button"
+                @click="setHour(hour)"
+              >
+                <span class="todo-time-option-value">{{ hour }}</span>
+                <IconCheck v-if="parsedTime?.hour === hour" aria-hidden="true" />
+              </button>
+            </ScrollArea>
+          </div>
+          <div class="todo-time-column" aria-label="分钟">
+            <span class="todo-time-label">分</span>
+            <ScrollArea class="todo-time-scroll">
+              <button
+                v-for="minute in minuteOptions"
+                :key="minute"
+                class="todo-time-option"
+                :class="{ active: parsedTime?.minute === minute }"
+                type="button"
+                @click="setMinute(minute)"
+              >
+                <span class="todo-time-option-value">{{ minute }}</span>
+                <IconCheck v-if="parsedTime?.minute === minute" aria-hidden="true" />
+              </button>
+            </ScrollArea>
+          </div>
         </div>
-        <div class="todo-time-column" aria-label="分钟">
-          <span class="todo-time-label">分</span>
-          <ScrollArea class="todo-time-scroll">
-            <button
-              v-for="minute in minuteOptions"
-              :key="minute"
-              class="todo-time-option"
-              :class="{ active: parsedTime?.minute === minute }"
-              type="button"
-              @click="setMinute(minute)"
-            >
-              <span class="todo-time-option-value">{{ minute }}</span>
-              <IconCheck v-if="parsedTime?.minute === minute" aria-hidden="true" />
-            </button>
-          </ScrollArea>
-        </div>
-      </div>
-    </PopoverContent>
-  </Popover>
+      </PopoverContent>
+    </Popover>
+  </div>
 </template>
 
 <style scoped>
+.todo-time-picker {
+  width: 100%;
+  min-width: 0;
+}
+
 .todo-time-trigger {
   width: 100%;
   min-width: 0;
@@ -189,18 +244,11 @@ function emitTime(hour: string, minute: string) {
   animation: ai-picker-value-highlight 0.55s ease-in-out 2;
 }
 
-.todo-time-popover {
-  width: 164px;
-  padding: 9px;
-  border-color: rgba(203, 213, 225, 0.86);
-  border-radius: 14px;
-  box-shadow: 0 18px 40px -28px rgba(15, 23, 42, 0.38);
-}
-
 .todo-time-panel {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 7px;
+  width: 100%;
 }
 
 .todo-time-column {
@@ -231,7 +279,7 @@ function emitTime(hour: string, minute: string) {
   border-radius: 8px;
   background: transparent;
   color: #334155;
-  padding: 0 9px;
+  padding: 0 8px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -288,5 +336,18 @@ function emitTime(hour: string, minute: string) {
   .todo-time-trigger.is-ai-highlighted .todo-picker-value {
     animation: none;
   }
+}
+</style>
+
+<style>
+[data-slot='popover-content'].todo-time-popover {
+  width: var(--todo-time-popover-width) !important;
+  min-width: var(--todo-time-popover-width) !important;
+  max-width: var(--todo-time-popover-width) !important;
+  box-sizing: border-box;
+  padding: 9px;
+  border-color: rgba(203, 213, 225, 0.86);
+  border-radius: 14px;
+  box-shadow: 0 18px 40px -28px rgba(15, 23, 42, 0.38);
 }
 </style>

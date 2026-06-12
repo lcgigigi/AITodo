@@ -25,8 +25,18 @@ export default defineConfig({
       '/login': {
         target: smartTodoApiTarget,
         changeOrigin: true,
+        bypass(req) {
+          // 前端登录页路由也是 /login；刷新时浏览器发 GET，应返回 SPA 而非转发后台
+          if (req.method === 'GET' || req.method === 'HEAD') {
+            return '/index.html'
+          }
+        },
       },
       '/getInfo': {
+        target: smartTodoApiTarget,
+        changeOrigin: true,
+      },
+      '/logout': {
         target: smartTodoApiTarget,
         changeOrigin: true,
       },

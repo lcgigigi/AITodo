@@ -33,7 +33,7 @@ export function dateRange(startDate: string, endDate?: string) {
 }
 
 export function isRangeEvent(event: CalendarEvent) {
-  return Boolean(event.endDate && event.endDate !== event.date)
+  return Boolean(event.endDate)
 }
 
 export function isAllDayEvent(event: CalendarEvent) {
@@ -45,9 +45,50 @@ export function formatShortDate(date: string) {
   return `${value.getMonth() + 1}/${value.getDate()}`
 }
 
+export type EventSchedulePoint = {
+  date: string
+  time?: string
+}
+
+export type EventScheduleDisplay =
+  | { kind: 'time'; time: string }
+  | { kind: 'allDay'; label: string }
+  | { kind: 'range'; start: EventSchedulePoint; end: EventSchedulePoint }
+
+export function getEventScheduleDisplay(
+  event: CalendarEvent,
+  allDayText = '全天',
+): EventScheduleDisplay {
+  if (isRangeEvent(event)) {
+    return {
+      kind: 'range',
+      start: {
+        date: formatShortDate(event.date),
+        time: event.time,
+      },
+      end: {
+        date: formatShortDate(event.endDate ?? event.date),
+        time: event.endTime,
+      },
+    }
+  }
+
+  if (event.time) {
+    return { kind: 'time', time: event.time }
+  }
+
+  return { kind: 'allDay', label: allDayText }
+}
+
 export function formatEventTime(event: CalendarEvent, allDayText = '全天') {
-  if (isRangeEvent(event)) return `${formatShortDate(event.date)} ~ ${formatShortDate(event.endDate ?? event.date)}`
-  return event.time || allDayText
+  const display = getEventScheduleDisplay(event, allDayText)
+
+  if (display.kind === 'time') return display.time
+  if (display.kind === 'allDay') return display.label
+
+  const start = `${display.start.date}${display.start.time ? ` ${display.start.time}` : ''}`
+  const end = `${display.end.date}${display.end.time ? ` ${display.end.time}` : ''}`
+  return `${start} ~ ${end}`
 }
 
 export function formatMonthEventTime(event: CalendarEvent) {
@@ -55,9 +96,13 @@ export function formatMonthEventTime(event: CalendarEvent) {
   return event.time || '·'
 }
 
-export function formatFormDateTime(event: Pick<CalendarEvent, 'date' | 'endDate' | 'time'>) {
-  if (event.endDate && event.endDate !== event.date) {
-    return `${formatShortDate(event.date)} ~ ${formatShortDate(event.endDate)}`
+export function formatFormDateTime(
+  event: Pick<CalendarEvent, 'date' | 'endDate' | 'time' | 'endTime'>,
+) {
+  if (event.endDate) {
+    const start = `${formatShortDate(event.date)}${event.time ? ` ${event.time}` : ''}`
+    const end = `${formatShortDate(event.endDate)}${event.endTime ? ` ${event.endTime}` : ''}`
+    return `${start} ~ ${end}`
   }
 
   return `${event.date} ${event.time || '全天'}`

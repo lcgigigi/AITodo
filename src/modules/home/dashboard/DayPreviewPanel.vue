@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/select'
 import AppRive from '@/shared/components/animation/AppRive.vue'
 import TodoDatePicker from './components/TodoDatePicker.vue'
+import TodoDeadlineDateTimeRange from './components/TodoDeadlineDateTimeRange.vue'
 import TodoTimePicker from './components/TodoTimePicker.vue'
 import type {
   CalendarEvent,
@@ -24,15 +25,15 @@ import type {
   CalendarTodoUpdate,
   CalendarUser,
 } from './types'
+import EventScheduleTime from './components/EventScheduleTime.vue'
 import {
   addDays,
-  formatEventTime,
   formatFormDateTime,
   isRangeEvent,
   parseDate,
   ymd,
 } from './todoDisplay'
-import { parseTodoText as serviceParseTodoText } from './todo.service'
+import { loadTodoDetail, parseTodoText as serviceParseTodoText } from './todo.service'
 
 const props = defineProps<{
   date: string
@@ -56,11 +57,12 @@ const emit = defineEmits<{
   updateStatus: [id: string, status: CalendarEventStatus]
   deleteTodo: [id: string]
   dirtyChange: [dirty: boolean]
+  notify: [message: string]
   close: []
 }>()
 
-type PanelMode = 'list' | 'create' | 'edit'
-type ParsedHighlightField = 'date' | 'time' | 'endDate' | 'title' | 'source' | 'assignee'
+type PanelMode = 'list' | 'create' | 'edit' | 'view'
+type ParsedHighlightField = 'date' | 'time' | 'endDate' | 'endTime' | 'title' | 'source' | 'assignee'
 
 const scheduledTimePresets = [
   { label: '中午12点', value: '12:00' },
@@ -78,6 +80,7 @@ const highlightedFields = ref<Set<ParsedHighlightField>>(new Set())
 const todoForm = ref<CalendarTodoForm>(createEmptyForm(props.date))
 const initialFormSnapshot = ref(formSnapshot(todoForm.value))
 const discardWarningVisible = ref(false)
+const deleteWarningVisible = ref(false)
 let pendingDiscardAction: (() => void) | undefined
 let highlightTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -90,15 +93,20 @@ const specialText: Record<CalendarSpecialDay['type'], string> = {
 const pendingCount = computed(() => props.events.filter((event) => event.status !== 'done').length)
 const doneCount = computed(() => props.events.length - pendingCount.value)
 const isFormMode = computed(() => panelMode.value !== 'list')
-const formTitle = computed(() => (panelMode.value === 'edit' ? '编辑待办' : '新增待办'))
-const canSubmit = computed(() => Boolean(todoForm.value.title.trim()))
+const isViewMode = computed(() => panelMode.value === 'view')
+const canEditForm = computed(() => panelMode.value === 'create' || panelMode.value === 'edit')
+const formTitle = computed(() => {
+  if (panelMode.value === 'view') return '查看待办'
+  if (panelMode.value === 'edit') return '编辑待办'
+  return '新增待办'
+})
+const canSubmit = computed(() => canEditForm.value && Boolean(todoForm.value.title.trim()))
+const isFormReadonly = computed(() => isParsing.value || isViewMode.value)
 const formDateTimeLabel = computed(() => formatFormDateTime(todoForm.value))
 const isDeadlineMode = computed(() => todoForm.value.mode === 'deadline')
-const canChooseAssignee = computed(
-  () => props.currentUser.role === 'leader' && props.assignableUsers.length > 1,
-)
+const canChooseAssignee = computed(() => props.assignableUsers.length > 1)
 const hasUnsavedChanges = computed(
-  () => isFormMode.value && formSnapshot(todoForm.value) !== initialFormSnapshot.value,
+  () => canEditForm.value && formSnapshot(todoForm.value) !== initialFormSnapshot.value,
 )
 
 watch(
@@ -143,10 +151,11 @@ watch(
     if (!draft) return
 
     beginCreateForm({
-      mode: draft.endDate && draft.endDate !== draft.date ? 'deadline' : 'scheduled',
+      mode: draft.endDate ? 'deadline' : 'scheduled',
       date: draft.date,
       endDate: draft.endDate ?? draft.date,
       time: draft.time ?? '',
+      endTime: draft.endTime ?? '',
       title: draft.title,
       owner: draft.owner ?? draft.assigneeName ?? props.currentUser.name,
       assigneeId: draft.assigneeId ?? props.currentUser.id,
@@ -180,6 +189,7 @@ function createEmptyForm(date = props.date): CalendarTodoForm {
     date,
     endDate: date,
     time: '',
+    endTime: '',
     title: '',
     owner: assignee.name,
     assigneeId: assignee.id,
@@ -202,6 +212,7 @@ function createFormFromEvent(event: CalendarEvent): CalendarTodoForm {
     date: event.date,
     endDate: event.endDate ?? event.date,
     time: event.time ?? '',
+    endTime: event.endTime ?? '',
     title: event.title,
     owner: event.owner,
     assigneeId: event.assigneeId ?? props.currentUser.id,
@@ -216,6 +227,7 @@ function createFormCopy(form: CalendarTodoForm): CalendarTodoForm {
     date: form.date,
     endDate: form.endDate,
     time: form.time,
+    endTime: form.endTime,
     title: form.title,
     owner: form.owner,
     assigneeId: form.assigneeId,
@@ -240,7 +252,12 @@ function hideDiscardWarning() {
   pendingDiscardAction = undefined
 }
 
+function hideDeleteWarning() {
+  deleteWarningVisible.value = false
+}
+
 function showDiscardWarning(onConfirm?: () => void) {
+  hideDeleteWarning()
   pendingDiscardAction = onConfirm
   discardWarningVisible.value = true
 }
@@ -263,6 +280,7 @@ function confirmDiscardChanges(onConfirm?: () => void) {
 
 function resetFormState() {
   hideDiscardWarning()
+  hideDeleteWarning()
   clearParsedHighlights()
   const nextForm = createEmptyForm(props.date)
   editingId.value = ''
@@ -295,18 +313,65 @@ function openCreateForm() {
   beginCreateForm()
 }
 
-function openEditForm(event: CalendarEvent) {
-  if (!event.editable) return
-
-  if (!confirmDiscardChanges(() => beginEditForm(event))) return
-
-  beginEditForm(event)
+function shouldOpenViewForm(event: CalendarEvent) {
+  return event.status === 'done' || !event.editable
 }
 
-function beginEditForm(event: CalendarEvent) {
+function openEventDetail(event: CalendarEvent) {
+  if (shouldOpenViewForm(event)) {
+    openViewForm(event)
+    return
+  }
+
+  openEditForm(event)
+}
+
+function openViewForm(event: CalendarEvent) {
+  if (!confirmDiscardChanges(() => void beginViewForm(event))) return
+
+  void beginViewForm(event)
+}
+
+function openEditForm(event: CalendarEvent) {
+  if (!event.editable || event.status === 'done') return
+
+  if (!confirmDiscardChanges(() => void beginEditForm(event))) return
+
+  void beginEditForm(event)
+}
+
+async function beginViewForm(event: CalendarEvent) {
   clearParsedHighlights()
-  const nextForm = createFormFromEvent(event)
-  editingId.value = event.id
+
+  let detailEvent = event
+  try {
+    detailEvent = await loadTodoDetail(event.id, props.currentUser, props.assignableUsers)
+  } catch {
+    // 列表数据不可用时回退到当前事件
+  }
+
+  const nextForm = createFormFromEvent(detailEvent)
+  editingId.value = detailEvent.id
+  aiPrompt.value = ''
+  isParsing.value = false
+  todoForm.value = nextForm
+  syncFormSnapshot(nextForm)
+  panelMode.value = 'view'
+  emit('dirtyChange', false)
+}
+
+async function beginEditForm(event: CalendarEvent) {
+  clearParsedHighlights()
+
+  let detailEvent = event
+  try {
+    detailEvent = await loadTodoDetail(event.id, props.currentUser, props.assignableUsers)
+  } catch {
+    // 列表数据不可用时回退到当前事件
+  }
+
+  const nextForm = createFormFromEvent(detailEvent)
+  editingId.value = detailEvent.id
   aiPrompt.value = ''
   isParsing.value = false
   todoForm.value = nextForm
@@ -348,14 +413,18 @@ async function parseTodoText() {
     const nextForm = {
       ...todoForm.value,
       ...parsed,
-      mode:
-        parsed.mode ??
-        (parsed.endDate && parsed.endDate !== parsed.date ? 'deadline' : 'scheduled'),
+      mode: parsed.mode ?? (parsed.endDate ? 'deadline' : 'scheduled'),
       endDate: parsed.endDate ?? parsed.date ?? todoForm.value.endDate,
       time: parsed.time ?? todoForm.value.time,
+      endTime: parsed.endTime ?? todoForm.value.endTime,
     }
     todoForm.value = nextForm
     triggerParsedHighlights(previousForm, nextForm)
+  } catch (error) {
+    emit(
+      'notify',
+      error instanceof Error ? error.message : 'AI 解析待办失败，请稍后重试',
+    )
   } finally {
     isParsing.value = false
   }
@@ -380,6 +449,8 @@ function triggerParsedHighlights(previousForm: CalendarTodoForm, nextForm: Calen
 
   if (nextForm.mode === 'deadline') {
     if (nextForm.endDate !== previousForm.endDate) fields.push('endDate')
+    if (nextForm.time !== previousForm.time) fields.push('time')
+    if (nextForm.endTime !== previousForm.endTime) fields.push('endTime')
   } else if (nextForm.time !== previousForm.time) {
     fields.push('time')
   }
@@ -460,7 +531,7 @@ function selectAssignee(id: string) {
 }
 
 function submitTodo() {
-  if (!todoForm.value.title.trim()) return
+  if (!canEditForm.value || !todoForm.value.title.trim()) return
 
   const payload = createFormCopy(todoForm.value)
 
@@ -469,7 +540,8 @@ function submitTodo() {
       id: editingId.value,
       date: payload.date,
       endDate: payload.mode === 'deadline' ? payload.endDate : undefined,
-      time: payload.mode === 'scheduled' ? payload.time || undefined : undefined,
+      time: payload.time || undefined,
+      endTime: payload.mode === 'deadline' ? payload.endTime || undefined : undefined,
       title: payload.title,
       owner: payload.owner || '未指定',
       source: payload.source,
@@ -480,7 +552,8 @@ function submitTodo() {
     emit('createTodo', {
       date: payload.date,
       endDate: payload.mode === 'deadline' ? payload.endDate : undefined,
-      time: payload.mode === 'scheduled' ? payload.time || undefined : undefined,
+      time: payload.time || undefined,
+      endTime: payload.mode === 'deadline' ? payload.endTime || undefined : undefined,
       title: payload.title,
       owner: payload.owner,
       source: payload.source,
@@ -492,11 +565,18 @@ function submitTodo() {
   resetFormState()
 }
 
-function deleteCurrentTodo() {
-  if (panelMode.value !== 'edit' || !editingId.value) return
-  if (!window.confirm('确定删除这个待办吗？')) return
+function requestDeleteTodo() {
+  if (panelMode.value !== 'edit' || !editingId.value || isParsing.value) return
+  hideDiscardWarning()
+  deleteWarningVisible.value = true
+}
 
-  emit('deleteTodo', editingId.value)
+function confirmDeleteWarning() {
+  const id = editingId.value
+  hideDeleteWarning()
+  if (!id) return
+
+  emit('deleteTodo', id)
   resetFormState()
 }
 
@@ -506,7 +586,7 @@ function toggleStatus(event: CalendarEvent) {
 }
 
 function shouldShowEventMeta(event: CalendarEvent) {
-  return Boolean((event.scope === 'assigned_to_me' && event.creatorName) || event.source)
+  return Boolean(event.source)
 }
 
 function statusText(event: CalendarEvent) {
@@ -520,10 +600,14 @@ defineExpose({
 </script>
 
 <template>
-  <section class="preview-panel" :class="{ 'is-form-mode': isFormMode }">
+  <section
+    class="preview-panel"
+    :class="{ 'is-form-mode': isFormMode, 'is-view-mode': isViewMode }"
+  >
     <header class="preview-head">
       <div>
-        <p v-if="!isFormMode">待办详情</p>
+        <p v-if="isViewMode">查看安排</p>
+        <p v-else-if="!isFormMode">待办详情</p>
         <h2>{{ isFormMode ? formTitle : props.dateLabel }}</h2>
       </div>
       <button
@@ -541,22 +625,19 @@ defineExpose({
 
     <template v-if="!isFormMode">
       <div class="preview-toolbar">
-        <span class="event-count">{{
-          events.length ? `${events.length} 个待办` : '当天空闲'
-        }}</span>
         <button class="add-btn" type="button" @click="openCreateForm">+ 新增</button>
       </div>
 
       <div class="summary-grid" aria-label="当天待办概览">
-        <span>
+        <span class="summary-card summary-total">
           <strong>{{ events.length }}</strong>
           待办总数
         </span>
-        <span>
+        <span class="summary-card summary-pending">
           <strong>{{ pendingCount }}</strong>
           待处理
         </span>
-        <span>
+        <span class="summary-card summary-done">
           <strong>{{ doneCount }}</strong>
           已完成
         </span>
@@ -584,27 +665,33 @@ defineExpose({
             event.scope ? `scope-${event.scope}` : '',
           ]"
           tabindex="0"
-          @click="openEditForm(event)"
-          @keydown.enter.prevent="openEditForm(event)"
+          @click="openEventDetail(event)"
+          @keydown.enter.prevent="openEventDetail(event)"
         >
-          <time>{{ formatEventTime(event) }}</time>
+          <EventScheduleTime :event="event" />
           <div class="event-body">
-            <div class="event-topline">
-              <span v-if="event.scope === 'assigned_by_me'" class="dispatch-target">
-                派发：{{ event.assigneeName ?? event.owner }}
-              </span>
-            </div>
             <div class="event-title-row">
               <div class="event-title-block">
                 <h3>{{ event.title }}</h3>
-                <span
-                  class="event-status"
-                  :class="{
-                    'is-done': event.status === 'done',
-                  }"
-                >
-                  {{ statusText(event) }}
-                </span>
+                <div class="event-meta-row">
+                  <span v-if="event.scope === 'assigned_by_me'" class="dispatch-target">
+                    派发：{{ event.assigneeName ?? event.owner }}
+                  </span>
+                  <span
+                    v-else-if="event.scope === 'assigned_to_me' && event.creatorName"
+                    class="dispatch-target"
+                  >
+                    派发人：{{ event.creatorName }}
+                  </span>
+                  <span
+                    class="event-status"
+                    :class="{
+                      'is-done': event.status === 'done',
+                    }"
+                  >
+                    {{ statusText(event) }}
+                  </span>
+                </div>
               </div>
               <div class="item-actions">
                 <button
@@ -615,10 +702,18 @@ defineExpose({
                   @click.stop="toggleStatus(event)"
                 >
                   <span aria-hidden="true">{{ event.status === 'done' ? '✓' : '' }}</span>
-                  {{ event.status === 'done' ? '撤回' : '完成' }}
+                  {{ event.status === 'done' ? '撤销' : '完成' }}
                 </button>
                 <button
-                  v-if="event.editable"
+                  v-if="shouldOpenViewForm(event)"
+                  class="edit-action is-view"
+                  type="button"
+                  @click.stop="openViewForm(event)"
+                >
+                  查看
+                </button>
+                <button
+                  v-else
                   class="edit-action"
                   type="button"
                   @click.stop="openEditForm(event)"
@@ -628,9 +723,6 @@ defineExpose({
               </div>
             </div>
             <div v-if="shouldShowEventMeta(event)" class="event-note">
-              <p v-if="event.scope === 'assigned_to_me' && event.creatorName">
-                派发人：{{ event.creatorName }}
-              </p>
               <p v-if="event.source">备注：{{ event.source }}</p>
             </div>
           </div>
@@ -664,7 +756,23 @@ defineExpose({
         </div>
       </Transition>
 
+      <Transition name="discard-warning">
+        <div v-if="deleteWarningVisible" class="inline-discard-warning" role="alert">
+          <div>
+            <strong>确定删除这个待办吗？</strong>
+            <p>删除后无法恢复，请确认是否继续。</p>
+          </div>
+          <div class="discard-warning-actions">
+            <button type="button" @click="hideDeleteWarning">继续编辑</button>
+            <button class="discard-confirm" type="button" @click="confirmDeleteWarning">
+              确认删除
+            </button>
+          </div>
+        </div>
+      </Transition>
+
       <section
+        v-if="canEditForm"
         class="inline-section ai-inline-section"
         :class="{ 'is-parsing': isParsing }"
         :aria-busy="isParsing"
@@ -739,7 +847,8 @@ defineExpose({
 
       <section
         class="inline-section todo-details-section"
-        :class="{ 'has-parse-scrim': isParsing }"
+        :class="{ 'has-parse-scrim': isParsing, 'is-readonly': isViewMode }"
+        :aria-disabled="isFormReadonly"
       >
         <div class="section-title">
           <h3>基础信息</h3>
@@ -749,6 +858,7 @@ defineExpose({
           <button
             type="button"
             :class="{ active: todoForm.mode === 'scheduled' }"
+            :disabled="isFormReadonly"
             @click="setMode('scheduled')"
           >
             指定时间
@@ -756,17 +866,30 @@ defineExpose({
           <button
             type="button"
             :class="{ active: todoForm.mode === 'deadline' }"
+            :disabled="isFormReadonly"
             @click="setMode('deadline')"
           >
             截止日期
           </button>
         </div>
-        <div class="form-grid">
-          <label class="field" :class="{ 'field-date-range': isDeadlineMode }">
+        <div class="form-grid" :inert="isFormReadonly">
+          <TodoDeadlineDateTimeRange
+            v-if="isDeadlineMode"
+            v-model:start-date="todoForm.date"
+            v-model:start-time="todoForm.time"
+            v-model:end-date="todoForm.endDate"
+            v-model:end-time="todoForm.endTime"
+            :disabled="isFormReadonly"
+            :start-highlighted="isAiHighlighted('date') || isAiHighlighted('time')"
+            :end-highlighted="isAiHighlighted('endDate') || isAiHighlighted('endTime')"
+            @change="syncDateRange"
+          />
+          <label v-else class="field">
             <span>日期</span>
             <TodoDatePicker
               v-model="todoForm.date"
               class="soft-picker"
+              :disabled="isFormReadonly"
               :highlighted="isAiHighlighted('date')"
               aria-label="选择待办日期"
               @change="syncDateRange"
@@ -777,6 +900,7 @@ defineExpose({
             <TodoTimePicker
               v-model="todoForm.time"
               class="soft-picker"
+              :disabled="isFormReadonly"
               :highlighted="isAiHighlighted('time')"
               aria-label="选择待办时间"
             />
@@ -787,41 +911,23 @@ defineExpose({
               :key="preset.value"
               type="button"
               :class="{ active: todoForm.time === preset.value }"
+              :disabled="isFormReadonly"
               @click="applyScheduledTime(preset.value)"
             >
               {{ preset.label }}
             </button>
           </div>
-          <label v-else class="field">
-            <span>截止</span>
-            <TodoDatePicker
-              v-model="todoForm.endDate"
-              class="soft-picker"
-              :highlighted="isAiHighlighted('endDate')"
-              aria-label="选择截止日期"
-              @change="syncDateRange"
-            />
-          </label>
           <div v-if="isDeadlineMode" class="quick-range-row field-full" aria-label="快捷时间">
-            <button type="button" @click="applyQuickRange('today')">今天</button>
-            <button type="button" @click="applyQuickRange('week')">本周内</button>
-            <button type="button" @click="applyQuickRange('nextWeek')">下周前</button>
-            <button type="button" @click="applyQuickRange('month')">本月内</button>
+            <button type="button" :disabled="isFormReadonly" @click="applyQuickRange('today')">今天</button>
+            <button type="button" :disabled="isFormReadonly" @click="applyQuickRange('week')">本周内</button>
+            <button type="button" :disabled="isFormReadonly" @click="applyQuickRange('nextWeek')">下周前</button>
+            <button type="button" :disabled="isFormReadonly" @click="applyQuickRange('month')">本月内</button>
           </div>
-          <label class="field field-full">
-            <span>待办内容</span>
-            <Input
-              v-model="todoForm.title"
-              :class="{ 'is-ai-highlighted': isAiHighlighted('title') }"
-              type="text"
-              required
-              placeholder="输入待办内容"
-            />
-          </label>
-          <label v-if="canChooseAssignee" class="field">
+          <label v-if="canChooseAssignee" class="field field-full">
             <span>负责人</span>
             <Select
               :model-value="todoForm.assigneeId"
+              :disabled="isFormReadonly"
               @update:model-value="selectAssignee(String($event))"
             >
               <SelectTrigger
@@ -829,6 +935,7 @@ defineExpose({
                   'soft-select-trigger',
                   { 'is-ai-highlighted': isAiHighlighted('assignee') },
                 ]"
+                :disabled="isFormReadonly"
                 aria-label="选择负责人"
               >
                 <SelectValue placeholder="选择负责人" />
@@ -841,11 +948,25 @@ defineExpose({
             </Select>
           </label>
           <label class="field field-full">
+            <span>待办内容</span>
+            <Input
+              v-model="todoForm.title"
+              :class="{ 'is-ai-highlighted': isAiHighlighted('title') }"
+              type="text"
+              required
+              :disabled="isFormReadonly"
+              :readonly="isViewMode"
+              placeholder="输入待办内容"
+            />
+          </label>
+          <label class="field field-full">
             <span>备注</span>
             <Input
               v-model="todoForm.source"
               :class="{ 'is-ai-highlighted': isAiHighlighted('source') }"
               type="text"
+              :disabled="isFormReadonly"
+              :readonly="isViewMode"
               placeholder="备注或来源"
             />
           </label>
@@ -853,16 +974,22 @@ defineExpose({
       </section>
 
       <div class="form-actions">
-        <Button
-          v-if="panelMode === 'edit'"
-          class="delete-btn"
-          type="button"
-          @click="deleteCurrentTodo"
-        >
-          删除
-        </Button>
-        <Button type="button" @click="requestCancelForm">取消</Button>
-        <Button type="submit" :disabled="!canSubmit">保存</Button>
+        <template v-if="isViewMode">
+          <Button type="button" @click="requestCancelForm">返回</Button>
+        </template>
+        <template v-else>
+          <Button
+            v-if="panelMode === 'edit'"
+            class="delete-btn"
+            type="button"
+            :disabled="isParsing"
+            @click="requestDeleteTodo"
+          >
+            删除
+          </Button>
+          <Button type="button" :disabled="isParsing" @click="requestCancelForm">取消</Button>
+          <Button type="submit" :disabled="!canSubmit || isParsing">保存</Button>
+        </template>
       </div>
     </form>
   </section>
@@ -922,22 +1049,8 @@ defineExpose({
 .preview-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 10px;
-}
-
-.event-count {
-  min-height: 28px;
-  padding: 0 11px;
-  border-radius: 999px;
-  background: #fff7ed;
-  color: #9a3412;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 820;
-  white-space: nowrap;
 }
 
 .summary-grid {
@@ -946,27 +1059,48 @@ defineExpose({
   gap: 8px;
 }
 
-.summary-grid span {
-  min-height: 56px;
+.summary-card {
+  min-height: 58px;
   box-sizing: border-box;
-  border: 1px solid rgba(226, 232, 240, 0.72);
+  border: 0;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.72);
-  color: #64748b;
-  padding: 10px;
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 4px;
-  font-size: 12px;
-  font-weight: 820;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 850;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 1px 3px rgba(15, 23, 42, 0.14),
+    0 4px 10px rgba(15, 23, 42, 0.12),
+    0 0 16px rgba(15, 23, 42, 0.08);
 }
 
-.summary-grid strong {
-  color: #0f172a;
+.summary-card strong {
   font-size: 22px;
   line-height: 1;
-  font-weight: 930;
+  font-weight: 950;
+}
+
+.summary-total,
+.summary-pending,
+.summary-done {
+  background: #ffffff;
+  color: #64748b;
+}
+
+.summary-total strong {
+  color: #d97706;
+}
+
+.summary-pending strong {
+  color: #1d4ed8;
+}
+
+.summary-done strong {
+  color: #059669;
 }
 
 .add-btn,
@@ -994,7 +1128,6 @@ defineExpose({
 
 .add-btn,
 .form-actions button[type='submit'],
-.discard-warning-actions .discard-confirm,
 .ai-inline-row button {
   border-color: var(--todo-primary);
   background: var(--todo-primary);
@@ -1024,7 +1157,7 @@ defineExpose({
 .close-btn:hover,
 .item-actions button:hover,
 .form-actions button:hover,
-.discard-warning-actions button:hover,
+.discard-warning-actions button:not(.discard-confirm):hover,
 .ai-inline-row button:hover {
   border-color: #cbd5e1;
   background: #f8fafc;
@@ -1033,7 +1166,6 @@ defineExpose({
 
 .add-btn:hover,
 .form-actions button[type='submit']:not(:disabled):hover,
-.discard-warning-actions .discard-confirm:hover,
 .ai-inline-row button:not(:disabled):hover {
   border-color: var(--todo-primary-hover);
   background: var(--todo-primary-hover);
@@ -1120,7 +1252,7 @@ defineExpose({
   border-radius: 14px;
   padding: 11px 8px;
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
+  grid-template-columns: 72px minmax(0, 1fr);
   gap: 12px;
   cursor: default;
   transition:
@@ -1144,12 +1276,10 @@ defineExpose({
   outline-offset: 4px;
 }
 
-time {
-  padding-top: 2px;
-  color: #9a3412;
-  font-size: 12px;
-  font-weight: 850;
-  font-variant-numeric: tabular-nums;
+.timeline-item :deep(.event-schedule) {
+  align-self: start;
+  padding-top: 1px;
+  color: #c2410c;
 }
 
 .event-body {
@@ -1170,27 +1300,19 @@ time {
   opacity: 0.66;
 }
 
-.event-topline {
+.event-meta-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 5px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
 .dispatch-target {
-  min-height: 19px;
-  padding: 0 7px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 750;
-  display: inline-flex;
-  align-items: center;
-}
-
-.dispatch-target {
-  background: #ecfeff;
   color: #0e7490;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .timeline-item.scope-assigned_by_me {
@@ -1265,7 +1387,7 @@ p {
 .event-title-block {
   min-width: 0;
   display: grid;
-  gap: 7px;
+  gap: 6px;
 }
 
 .event-status {
@@ -1418,7 +1540,8 @@ p {
   border-radius: 16px;
   background: rgba(248, 250, 252, 0.58);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.58);
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: wait;
 }
 
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
@@ -1785,6 +1908,13 @@ p {
   color: #ffffff;
 }
 
+.mode-switch button:disabled,
+.quick-range-row button:disabled,
+.quick-time-row button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .section-title {
   display: flex;
   align-items: center;
@@ -1969,6 +2099,13 @@ p {
 .discard-warning-actions .discard-confirm {
   border-color: #f59e0b;
   background: #f59e0b;
+  color: #ffffff;
+}
+
+.discard-warning-actions .discard-confirm:hover {
+  border-color: #d97706;
+  background: #d97706;
+  color: #ffffff;
 }
 
 .discard-warning-enter-active,

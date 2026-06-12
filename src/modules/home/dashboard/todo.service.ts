@@ -51,10 +51,8 @@ interface SmartTodoBackendItem {
   id?: string | number
   title?: string
   timeType?: 1 | 2
-  specificDate?: string | null
-  specificTime?: string | null
-  startDate?: string | null
-  endDate?: string | null
+  startDateShow?: string | null
+  endDateShow?: string | null
   content?: string | null
   assigneeId?: string | number | null
   remark?: string | null
@@ -69,11 +67,14 @@ interface SmartTodoBackendItem {
 
 interface SmartTodoAnalyzeData {
   task?: string
-  timeType?: string
+  timeType?: number | string
   date?: string
   time?: string
   startDate?: string
   endDate?: string
+  endTime?: string
+  startDateShow?: string
+  endDateShow?: string
   assigneeId?: string | number
   remark?: string
 }
@@ -82,10 +83,8 @@ interface SmartTodoPayload {
   id?: string | number
   title: string
   timeType: 1 | 2
-  specificDate: string | null
-  specificTime: string | null
-  startDate: string | null
-  endDate: string | null
+  startDateShow: string
+  endDateShow?: string
   content: string
   assigneeId?: string
   remark: string
@@ -160,9 +159,96 @@ function normalizeBackendTime(time?: string | null) {
   return '00:00:00'
 }
 
-function normalizeFormTime(time?: string | null) {
+function normalizeFormTime(time?: string | null, preserveMidnight = false) {
   const backendTime = normalizeBackendTime(time)
-  return backendTime === '00:00:00' ? undefined : backendTime.slice(0, 5)
+  if (!preserveMidnight && backendTime === '00:00:00') return undefined
+  return backendTime.slice(0, 5)
+}
+
+function parseDateTimeShow(value?: string | null, preserveMidnight = false) {
+  const trimmed = value?.trim()
+  if (!trimmed) {
+    return {
+      date: undefined,
+      time: undefined,
+    }
+  }
+
+  const [datePart, timePart] = trimmed.split(/\s+/)
+  if (!datePart || !/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+    return {
+      date: undefined,
+      time: undefined,
+    }
+  }
+
+  return {
+    date: datePart,
+    time: timePart ? normalizeFormTime(timePart, preserveMidnight) : undefined,
+  }
+}
+
+function buildDateTimeShow(date: string, time?: string | null) {
+  return `${date} ${normalizeBackendTime(time)}`
+}
+
+function resolveAnalyzeTimeType(value?: number | string | null): 1 | 2 {
+  if (value === 2 || value === '2') return 2
+
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase()
+
+  if (['deadline', 'date_range', 'range', 'deadline_range'].includes(normalized)) {
+    return 2
+  }
+
+  return 1
+}
+
+function isValidAnalyzeDate(value?: string | null) {
+  const trimmed = value?.trim()
+  return Boolean(trimmed && /^\d{4}-\d{2}-\d{2}$/.test(trimmed))
+}
+
+function normalizeAnalyzeSchedule(data: SmartTodoAnalyzeData) {
+  const isRangeByType = resolveAnalyzeTimeType(data.timeType) === 2
+  const startDate = data.startDate?.trim()
+  const endDate = data.endDate?.trim()
+  const hasRangeDates = isValidAnalyzeDate(startDate) && isValidAnalyzeDate(endDate)
+  const isRange = isRangeByType || hasRangeDates
+  const preserveMidnight = isRange
+
+  if (isValidAnalyzeDate(data.date)) {
+    return {
+      isRange,
+      date: isRange && isValidAnalyzeDate(startDate) ? startDate! : data.date!.trim(),
+      time: normalizeFormTime(data.time, preserveMidnight),
+      endDate: isRange ? endDate : undefined,
+      endTime: isRange ? normalizeFormTime(data.endTime, true) : undefined,
+    }
+  }
+
+  if (isRange && isValidAnalyzeDate(startDate)) {
+    return {
+      isRange: true,
+      date: startDate!,
+      time: normalizeFormTime(data.time, true),
+      endDate: endDate || startDate,
+      endTime: normalizeFormTime(data.endTime, true),
+    }
+  }
+
+  const start = parseDateTimeShow(data.startDateShow, preserveMidnight)
+  const end = parseDateTimeShow(data.endDateShow, preserveMidnight)
+
+  return {
+    isRange,
+    date: start.date,
+    time: start.time,
+    endDate: isRange ? end.date : undefined,
+    endTime: isRange ? end.time : undefined,
+  }
 }
 
 function resolveRole(roles: string[] = []): CalendarUser['role'] {
@@ -203,23 +289,21 @@ function normalizeBackendTodo(
   const assigneeName = assignee?.name || assigneeId || '未指定'
   const creatorName = item.creatorName?.trim() || creator?.name || (creatorId === currentUser.id ? currentUser.name : '')
   const timeType = item.timeType === 2 ? 2 : 1
-  const date =
-    (timeType === 2 ? item.startDate || item.specificDate : item.specificDate || item.startDate) ||
-    todayDate()
-  const endDate = timeType === 2 ? item.endDate || date : undefined
+  const preserveMidnight = timeType === 2
+  const start = parseDateTimeShow(item.startDateShow, preserveMidnight)
+  const end = parseDateTimeShow(item.endDateShow, preserveMidnight)
+  const date = start.date || todayDate()
+  const endDate = timeType === 2 ? end.date || date : undefined
   const title = item.title?.trim() || item.content?.trim() || '未命名待办'
   const status = mapBackendStatus(item.status)
-  const completable =
-    status !== 'done' &&
-    (currentHandlerId
-      ? currentHandlerId === currentUser.id
-      : !assigneeId || assigneeId === currentUser.id)
+  const completable = resolveCompletable(assigneeId, currentHandlerId, currentUser)
 
   return {
     id,
     date,
-    endDate: endDate && endDate !== date ? endDate : undefined,
-    time: timeType === 1 ? normalizeFormTime(item.specificTime) : undefined,
+    endDate,
+    time: start.time,
+    endTime: timeType === 2 ? end.time : undefined,
     title,
     type: 'task',
     owner: assigneeName,
@@ -230,7 +314,7 @@ function normalizeBackendTodo(
     assigneeId: assigneeId || undefined,
     assigneeName,
     scope: resolveScope(creatorId, assigneeId, currentUser),
-    editable: !creatorId || creatorId === currentUser.id,
+    editable: status !== 'done' && (!creatorId || creatorId === currentUser.id),
     completable,
     backendStatus: item.status,
     receiveStatus: item.receiveStatus ?? undefined,
@@ -281,23 +365,17 @@ function normalizeAnalyzeData(
   assignableUsers: CalendarUser[],
   fallback: ParsedTodoDraft,
 ): ParsedTodoDraft {
-  const timeType = (data.timeType ?? '').toLowerCase()
-  const hasRangeDates = Boolean(data.startDate?.trim() && data.endDate?.trim())
-  const isRange =
-    timeType.includes('range') ||
-    timeType.includes('period') ||
-    timeType.includes('deadline') ||
-    (hasRangeDates && !timeType.includes('specific'))
-  const date =
-    (isRange ? data.startDate?.trim() : data.date?.trim()) || data.date?.trim() || fallback.date
-  const endDate = isRange ? data.endDate?.trim() || data.date?.trim() || date : undefined
+  const schedule = normalizeAnalyzeSchedule(data)
+  const date = schedule.date || fallback.date
+  const endDate = schedule.isRange ? schedule.endDate || date : undefined
   const assignee = findAssignee(data.assigneeId, currentUser, assignableUsers, fallback)
 
   return {
-    mode: isRange ? 'deadline' : 'scheduled',
+    mode: schedule.isRange ? 'deadline' : 'scheduled',
     date,
-    endDate: endDate && endDate !== date ? endDate : undefined,
-    time: isRange ? undefined : normalizeFormTime(data.time) || fallback.time,
+    endDate,
+    time: schedule.time || fallback.time,
+    endTime: schedule.isRange ? schedule.endTime || fallback.endTime : undefined,
     title: data.task?.trim() || fallback.title?.trim() || '',
     owner: assignee.name,
     assigneeId: assignee.id,
@@ -307,21 +385,44 @@ function normalizeAnalyzeData(
 }
 
 function buildSmartTodoPayload(payload: CalendarTodoDraft | CalendarTodoUpdate): SmartTodoPayload {
-  const isRange = Boolean(payload.endDate && payload.endDate !== payload.date)
+  const isRange = Boolean(payload.endDate)
   const title = payload.title.trim()
+
+  if (isRange) {
+    const endDate = payload.endDate || payload.date
+    const endTime = payload.endTime?.trim()
+
+    return {
+      id: 'id' in payload ? payload.id : undefined,
+      title,
+      timeType: 2,
+      startDateShow: buildDateTimeShow(payload.date, payload.time),
+      endDateShow: endTime ? buildDateTimeShow(endDate, endTime) : `${endDate} 23:59:59`,
+      content: title,
+      assigneeId: payload.assigneeId?.trim() || undefined,
+      remark: payload.source?.trim() || '',
+    }
+  }
 
   return {
     id: 'id' in payload ? payload.id : undefined,
     title,
-    timeType: isRange ? 2 : 1,
-    specificDate: isRange ? null : payload.date,
-    specificTime: isRange ? null : normalizeBackendTime(payload.time),
-    startDate: isRange ? payload.date : null,
-    endDate: isRange ? payload.endDate || payload.date : null,
+    timeType: 1,
+    startDateShow: buildDateTimeShow(payload.date, payload.time),
     content: title,
     assigneeId: payload.assigneeId?.trim() || undefined,
     remark: payload.source?.trim() || '',
   }
+}
+
+function resolveCompletable(
+  assigneeId: string,
+  currentHandlerId: string,
+  currentUser: CalendarUser,
+) {
+  return currentHandlerId
+    ? currentHandlerId === currentUser.id
+    : !assigneeId || assigneeId === currentUser.id
 }
 
 function buildIds(ids: string | string[]) {
@@ -337,6 +438,8 @@ export async function loginSmartTodo(credentials: SmartTodoLoginCredentials = {}
     },
     {
       timeout: SMART_TODO_REQUEST_TIMEOUT,
+      showLoading: false,
+      showError: false,
     },
   )
 
@@ -351,9 +454,25 @@ export async function loginSmartTodo(credentials: SmartTodoLoginCredentials = {}
   return response.data.token
 }
 
-export async function loadCurrentUser(): Promise<SmartTodoCurrentUser> {
+export async function logoutSmartTodo() {
+  const response = await httpClient.post<SmartTodoResponse>(
+    '/logout',
+    undefined,
+    {
+      timeout: SMART_TODO_REQUEST_TIMEOUT,
+    },
+  )
+
+  if (typeof response.data.code === 'number' && response.data.code !== 200) {
+    throw new Error(getResponseMessage(response.data, '退出登录失败'))
+  }
+}
+
+export async function loadCurrentUser(options?: { silent?: boolean }): Promise<SmartTodoCurrentUser> {
   const response = await httpClient.get<SmartTodoInfoResponse>('/getInfo', {
     timeout: SMART_TODO_REQUEST_TIMEOUT,
+    showLoading: false,
+    showError: !options?.silent,
   })
   const result = response.data
 
@@ -441,11 +560,45 @@ export async function loadAssignableUsers() {
     .filter((user): user is CalendarUser => Boolean(user))
 }
 
-export async function loadTodos(currentUser: CalendarUser, users: CalendarUser[] = []) {
+export type TodoDateRange = {
+  startDate: string
+  endDate: string
+}
+
+export function getTodoMonthRange(month: Date): TodoDateRange {
+  const year = month.getFullYear()
+  const monthIndex = month.getMonth()
+
+  return {
+    startDate: ymd(new Date(year, monthIndex, 1)),
+    endDate: ymd(new Date(year, monthIndex + 1, 0)),
+  }
+}
+
+export function getTodoWeekRange(anchorDate: string): TodoDateRange {
+  const start = new Date(`${anchorDate}T12:00:00`)
+  const offset = (start.getDay() + 6) % 7
+  start.setDate(start.getDate() - offset)
+
+  const end = new Date(start)
+  end.setDate(start.getDate() + 6)
+
+  return {
+    startDate: ymd(start),
+    endDate: ymd(end),
+  }
+}
+
+export async function loadTodos(
+  currentUser: CalendarUser,
+  users: CalendarUser[] = [],
+  range?: TodoDateRange,
+) {
   const items = await requestSmartTodoData<SmartTodoBackendItem[]>(
     {
       method: 'GET',
       url: '/smart-todo/month-list',
+      params: range,
     },
     '查询待办列表失败',
   )
@@ -565,6 +718,17 @@ export async function transferTodos(ids: string | string[], assigneeId: string) 
   )
 }
 
+export async function syncCalendar() {
+  return requestSmartTodoData<boolean>(
+    {
+      method: 'POST',
+      url: '/smart-todo/sync-calendar',
+      showError: false,
+    },
+    '同步邮箱日程失败',
+  )
+}
+
 export function listTodos(events: CalendarEvent[], currentUser: CalendarUser) {
   return events
     .map((event) => {
@@ -574,28 +738,52 @@ export function listTodos(events: CalendarEvent[], currentUser: CalendarUser) {
       return {
         ...event,
         scope: event.scope ?? resolveScope(creatorId, assigneeId, currentUser),
-        editable: event.editable ?? (!creatorId || creatorId === currentUser.id),
+        editable:
+          event.editable ??
+          (event.status !== 'done' && (!creatorId || creatorId === currentUser.id)),
         completable:
           event.completable ??
-          (event.status !== 'done' &&
-            (event.currentHandlerId
-              ? event.currentHandlerId === currentUser.id
-              : !assigneeId || assigneeId === currentUser.id)),
+          resolveCompletable(
+            assigneeId,
+            event.currentHandlerId ?? '',
+            currentUser,
+          ),
       }
     })
     .sort(compareEvents)
+}
+
+export async function cancelTodoComplete(id: string, handleDesc = '撤销完成') {
+  return requestSmartTodoData<boolean>(
+    {
+      method: 'POST',
+      url: '/smart-todo/cancel',
+      data: { id, handleDesc },
+    },
+    '撤销待办事项失败',
+  )
+}
+
+export async function revokeTodoComplete(
+  id: string,
+  _currentUser?: CalendarUser,
+  _users: CalendarUser[] = [],
+  handleDesc = '撤销完成',
+) {
+  return cancelTodoComplete(id, handleDesc)
 }
 
 export async function updateTodoStatus(
   id: string,
   currentUser: CalendarUser,
   status: CalendarEventStatus,
+  users: CalendarUser[] = [],
 ) {
-  if (status !== 'done') {
-    throw new Error('后台暂未提供撤回完成接口')
+  if (status === 'done') {
+    return completeTodo(id, currentUser)
   }
 
-  return completeTodo(id, currentUser)
+  return revokeTodoComplete(id, currentUser, users)
 }
 
 export function parseTodoText(

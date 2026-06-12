@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import IconChevronLeft from '~icons/lucide/chevron-left'
+import IconChevronRight from '~icons/lucide/chevron-right'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { CalendarDay, CalendarEvent } from './types'
@@ -34,6 +36,7 @@ const props = defineProps<{
   todayDate: string
   todayEvents: CalendarEvent[]
   showTodayBubble: boolean
+  isSyncingCalendar?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -43,6 +46,7 @@ const emit = defineEmits<{
   calendarInteraction: []
   closeTodayBubble: []
   quickCreateTodo: [prompt: string, date: string]
+  syncCalendar: []
   openAgentCenter: []
   'update:viewMode': [mode: CalendarViewMode]
 }>()
@@ -261,16 +265,28 @@ function quickCreateFromHeader() {
       <div class="calendar-title-line">
         <h2>{{ displayLabel }}</h2>
       </div>
-      <form
-        class="calendar-quick-create"
-        :class="{ 'has-value': hasHeaderQuickInput }"
-        aria-label="一句话创建待办"
-        @submit.prevent="quickCreateFromHeader"
-      >
-        <Input v-model="headerQuickInput" type="text" placeholder="一句话创建待办..." />
-        <Button v-if="hasHeaderQuickInput" type="submit">AI解析</Button>
-      </form>
+      <div class="calendar-head-main">
+        <form
+          class="calendar-quick-create"
+          :class="{ 'has-value': hasHeaderQuickInput }"
+          aria-label="一句话创建待办"
+          @submit.prevent="quickCreateFromHeader"
+        >
+          <Input v-model="headerQuickInput" type="text" placeholder="一句话创建待办..." />
+          <Button v-if="hasHeaderQuickInput" type="submit">AI解析</Button>
+        </form>
+     
+      </div>
       <div class="calendar-controls">
+        <button
+          type="button"
+          class="calendar-sync-btn"
+          :disabled="isSyncingCalendar"
+          aria-label="同步邮箱日程"
+          @click="emit('syncCalendar')"
+        >
+          {{ isSyncingCalendar ? '同步中…' : '同步' }}
+        </button>
         <button
           v-if="viewMode === 'month'"
           type="button"
@@ -296,8 +312,12 @@ function quickCreateFromHeader() {
           </button>
         </div>
         <div class="month-actions" :aria-label="`${periodActionLabel}切换`">
-          <button type="button" :aria-label="`上一${periodActionLabel}`" @click="emit('previousPeriod')">‹</button>
-          <button type="button" :aria-label="`下一${periodActionLabel}`" @click="emit('nextPeriod')">›</button>
+          <button type="button" :aria-label="`上一${periodActionLabel}`" @click="emit('previousPeriod')">
+            <IconChevronLeft aria-hidden="true" />
+          </button>
+          <button type="button" :aria-label="`下一${periodActionLabel}`" @click="emit('nextPeriod')">
+            <IconChevronRight aria-hidden="true" />
+          </button>
         </div>
       </div>
     </header>
@@ -542,6 +562,14 @@ h2 {
   color: #111827;
 }
 
+.calendar-head-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .calendar-controls {
   display: inline-flex;
   align-items: center;
@@ -552,8 +580,8 @@ h2 {
 .calendar-quick-create {
   position: relative;
   flex: 1 1 auto;
-  max-width: 390px;
-  min-width: 220px;
+  max-width: 260px;
+  min-width: 160px;
   min-height: 34px;
 }
 
@@ -614,6 +642,39 @@ h2 {
 .calendar-quick-create button:hover {
   background: #1d4ed8;
   transform: translateY(-1px);
+}
+
+.calendar-sync-btn {
+  flex: 0 0 auto;
+  min-height: 34px;
+  border: 1px solid #e5edf6;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #475569;
+  padding: 0 13px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease,
+    opacity 0.18s ease;
+}
+
+.calendar-sync-btn:hover:not(:disabled) {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  box-shadow: 0 12px 20px -20px rgba(37, 99, 235, 0.5);
+}
+
+.calendar-sync-btn:disabled {
+  opacity: 0.72;
+  cursor: default;
 }
 
 .range-style-toggle {
@@ -687,12 +748,17 @@ h2 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  padding: 0;
   font: inherit;
-  font-size: 20px;
-  font-weight: 850;
-  line-height: 1;
+  line-height: 0;
   cursor: pointer;
   transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+
+.month-actions button svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
 }
 
 .month-actions button:hover {
@@ -1675,6 +1741,10 @@ h2 {
   .calendar-head {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .calendar-head-main {
+    width: 100%;
   }
 
   .calendar-quick-create {

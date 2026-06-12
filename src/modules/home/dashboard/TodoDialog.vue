@@ -64,6 +64,7 @@ function createFormCopy(form: CalendarTodoForm): CalendarTodoForm {
     date: form.date,
     endDate: form.endDate,
     time: form.time,
+    endTime: form.endTime,
     title: form.title,
     owner: form.owner,
     assigneeId: form.assigneeId,

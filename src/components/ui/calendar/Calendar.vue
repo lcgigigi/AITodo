@@ -6,7 +6,7 @@ import { getLocalTimeZone, today } from "@internationalized/date"
 import { createReusableTemplate, reactiveOmit, useVModel } from "@vueuse/core"
 import { CalendarRoot, useDateFormatter, useForwardPropsEmits } from "reka-ui"
 import { createYear, createYearRange, toDate } from "reka-ui/date"
-import { computed, toRaw } from "vue"
+import { computed, ref, toRaw } from "vue"
 import { cn } from "@/lib/utils"
 import {
   Select,
@@ -46,6 +46,14 @@ const [DefineMonthTemplate, ReuseMonthTemplate] = createReusableTemplate<{ date:
 const [DefineYearTemplate, ReuseYearTemplate] = createReusableTemplate<{ date: DateValue }>()
 
 const forwarded = useForwardPropsEmits(delegatedProps, emits)
+const isMonthSelectOpen = ref(false)
+const isYearSelectOpen = ref(false)
+const isPeriodSelectOpen = computed(() => isMonthSelectOpen.value || isYearSelectOpen.value)
+
+function closePeriodSelects() {
+  isMonthSelectOpen.value = false
+  isYearSelectOpen.value = false
+}
 
 function updatePlaceholder(part: "month" | "year", value: unknown) {
   const numericValue = Number(value)
@@ -59,7 +67,11 @@ function updatePlaceholder(part: "month" | "year", value: unknown) {
 
 <template>
   <DefineMonthTemplate v-slot="{ date }">
-    <Select :model-value="date.month" @update:model-value="updatePlaceholder('month', $event)">
+    <Select
+      v-model:open="isMonthSelectOpen"
+      :model-value="date.month"
+      @update:model-value="updatePlaceholder('month', $event)"
+    >
       <SelectTrigger
         class="h-8 min-w-[74px] rounded-xl border-slate-200 bg-slate-50/80 px-2 text-sm font-bold text-slate-800 shadow-none hover:border-blue-200 hover:bg-white"
         size="sm"
@@ -69,7 +81,7 @@ function updatePlaceholder(part: "month" | "year", value: unknown) {
           {{ formatter.custom(toDate(date), { month: 'short' }) }}
         </SelectValue>
       </SelectTrigger>
-      <SelectContent position="popper" class="min-w-[88px] rounded-xl">
+      <SelectContent position="popper" class="calendar-select-content min-w-[88px] rounded-xl">
         <SelectItem
           v-for="month in createYear({ dateObj: date })"
           :key="month.toString()"
@@ -82,7 +94,11 @@ function updatePlaceholder(part: "month" | "year", value: unknown) {
   </DefineMonthTemplate>
 
   <DefineYearTemplate v-slot="{ date }">
-    <Select :model-value="date.year" @update:model-value="updatePlaceholder('year', $event)">
+    <Select
+      v-model:open="isYearSelectOpen"
+      :model-value="date.year"
+      @update:model-value="updatePlaceholder('year', $event)"
+    >
       <SelectTrigger
         class="h-8 min-w-[84px] rounded-xl border-slate-200 bg-slate-50/80 px-2 text-sm font-bold text-slate-800 shadow-none hover:border-blue-200 hover:bg-white"
         size="sm"
@@ -92,7 +108,7 @@ function updatePlaceholder(part: "month" | "year", value: unknown) {
           {{ formatter.custom(toDate(date), { year: 'numeric' }) }}
         </SelectValue>
       </SelectTrigger>
-      <SelectContent position="popper" class="min-w-[96px] rounded-xl">
+      <SelectContent position="popper" class="calendar-select-content min-w-[96px] rounded-xl">
         <SelectItem
           v-for="year in yearRange"
           :key="year.toString()"
@@ -109,33 +125,40 @@ function updatePlaceholder(part: "month" | "year", value: unknown) {
     v-bind="forwarded"
     v-model:placeholder="placeholder"
     data-slot="calendar"
-    :class="cn('w-[264px] p-3 [--cell-radius:12px] [--cell-size:32px] group/calendar bg-white in-data-[slot=card-content]:bg-transparent in-data-[slot=popover-content]:bg-transparent', props.class)"
+    :class="cn('relative w-[264px] overflow-hidden rounded-2xl p-3 [--cell-radius:12px] [--cell-size:32px] group/calendar bg-white in-data-[slot=card-content]:bg-transparent in-data-[slot=popover-content]:bg-transparent', props.class)"
   >
-    <CalendarHeader class="px-0 pt-0">
-      <nav class="flex items-center gap-1 absolute top-0 inset-x-0 justify-between">
-        <CalendarPrevButton>
+    <div
+      v-if="isPeriodSelectOpen"
+      class="calendar-select-scrim absolute inset-0 z-[6] rounded-[inherit] bg-slate-900/10"
+      aria-hidden="true"
+      @click="closePeriodSelects"
+    />
+
+    <CalendarHeader class="relative z-20 px-0 pt-0">
+      <nav class="pointer-events-none absolute top-0 inset-x-0 flex items-center justify-between gap-1">
+        <CalendarPrevButton class="pointer-events-auto">
           <slot name="calendar-prev-icon" />
         </CalendarPrevButton>
-        <CalendarNextButton>
+        <CalendarNextButton class="pointer-events-auto">
           <slot name="calendar-next-icon" />
         </CalendarNextButton>
       </nav>
 
       <slot name="calendar-heading" :date="date" :month="ReuseMonthTemplate" :year="ReuseYearTemplate">
         <template v-if="layout === 'month-and-year'">
-          <div class="flex items-center justify-center gap-1">
+          <div class="relative z-20 flex items-center justify-center gap-1">
             <ReuseMonthTemplate :date="date" />
             <ReuseYearTemplate :date="date" />
           </div>
         </template>
         <template v-else-if="layout === 'month-only'">
-          <div class="flex items-center justify-center gap-1">
+          <div class="relative z-20 flex items-center justify-center gap-1">
             <ReuseMonthTemplate :date="date" />
             {{ formatter.custom(toDate(date), { year: 'numeric' }) }}
           </div>
         </template>
         <template v-else-if="layout === 'year-only'">
-          <div class="flex items-center justify-center gap-1">
+          <div class="relative z-20 flex items-center justify-center gap-1">
             {{ formatter.custom(toDate(date), { month: 'short' }) }}
             <ReuseYearTemplate :date="date" />
           </div>
@@ -146,7 +169,7 @@ function updatePlaceholder(part: "month" | "year", value: unknown) {
       </slot>
     </CalendarHeader>
 
-    <div class="flex flex-col gap-y-2 mt-3 sm:flex-row sm:gap-x-2 sm:gap-y-0">
+    <div class="relative z-[1] mt-3 flex flex-col gap-y-2 sm:flex-row sm:gap-x-2 sm:gap-y-0">
       <CalendarGrid v-for="month in grid" :key="month.value.toString()">
         <CalendarGridHead>
           <CalendarGridRow>
@@ -175,3 +198,18 @@ function updatePlaceholder(part: "month" | "year", value: unknown) {
     </div>
   </CalendarRoot>
 </template>
+
+<style>
+[data-slot='select-content'].calendar-select-content {
+  --calendar-select-visible-items: 5;
+  --calendar-select-item-size: 2rem;
+  z-index: 1210 !important;
+  max-height: calc(var(--calendar-select-item-size) * var(--calendar-select-visible-items)) !important;
+  overflow-y: auto !important;
+}
+
+[data-slot='select-content'].calendar-select-content [data-slot='select-viewport'][data-position='popper'] {
+  height: auto !important;
+  max-height: calc(var(--calendar-select-item-size) * var(--calendar-select-visible-items)) !important;
+}
+</style>

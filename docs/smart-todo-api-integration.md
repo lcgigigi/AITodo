@@ -36,7 +36,7 @@
 | 10 | `POST /smart-todo/reject` | `rejectTodo()` | 已添加服务方法 |
 | 11 | `GET /smart-todo/user-list` | `loadAssignableUsers()` | 负责人列表使用 |
 | 12 | `GET /smart-todo/pending-list` | `loadPendingTodos()` | 已添加服务方法 |
-| 13 | `GET /smart-todo/month-list` | `loadTodos()` | 日历月待办使用 |
+| 13 | `GET /smart-todo/month-list?startDate=&endDate=` | `loadTodos()` | 日历月/周待办使用，切换月份或周时按可见范围传参 |
 | 14 | `POST /smart-todo/accept` | `acceptTodos()` | 已添加服务方法 |
 | 15 | `POST /smart-todo/transfer` | `transferTodos()` | 已添加服务方法 |
 
@@ -47,8 +47,8 @@
 | `id` | `CalendarEvent.id` |
 | `title` | `CalendarEvent.title` |
 | `content` | `CalendarEvent.content`，同时作为无备注时的来源展示 |
-| `timeType = 1` | `date = specificDate`，`time = specificTime(HH:mm)` |
-| `timeType = 2` | `date = startDate`，`endDate = endDate`，`time` 为空 |
+| `timeType = 1` | `startDateShow` 上送/回传，如 `2026-06-11 08:56:24`；前端拆为 `date` + `time(HH:mm)` |
+| `timeType = 2` | `startDateShow` + `endDateShow` 上送/回传；前端拆为 `date` + `endDate`，`time` 为空 |
 | `assigneeId` | `assigneeId`，并通过 `user-list` 补 `assigneeName` |
 | `creatorId` | `creatorId`，用于 `editable` 和 `scope` |
 | `currentHandlerId` | `currentHandlerId`，用于 `completable` |
@@ -75,7 +75,6 @@
 
 ## 仍需后台确认
 
-1. `GET /smart-todo/month-list` 是否可以增加 `year/month` 或 `startDate/endDate` 参数；当前日历 UI 支持切换月份，但接口文档只返回当前月。
-2. `GET /getInfo` 是否确保 `user.userName` 就是员工工号；前端权限判断需要和 `assigneeId/currentHandlerId` 对齐。
-3. `POST /smart-todo/complete/{id}` 的 `userId` 请求头是否仍必需；当前前端已按文档传入当前用户 ID。
-4. `month-list/pending-list` 是否会返回 `creatorId/currentHandlerId/remark/content/receiveStatus`；如果缺字段，页面会保守处理权限和展示。
+1. `GET /getInfo` 是否确保 `user.userName` 就是员工工号；前端权限判断需要和 `assigneeId/currentHandlerId` 对齐。
+2. `POST /smart-todo/complete/{id}` 的 `userId` 请求头是否仍必需；当前前端已按文档传入当前用户 ID。
+3. `month-list/pending-list` 是否会返回 `creatorId/currentHandlerId/remark/content/receiveStatus`；如果缺字段，页面会保守处理权限和展示。

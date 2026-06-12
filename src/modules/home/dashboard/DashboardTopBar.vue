@@ -1,81 +1,183 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import IconLogOut from '~icons/lucide/log-out'
 import IconMessageCircle from '~icons/lucide/message-circle'
 import IconSettings from '~icons/lucide/settings'
 import IconX from '~icons/lucide/x'
 import girlImage from '@/assets/libao.png'
 import logoDarkImage from '@/assets/logoDark1.png'
+import { routeConfig } from '@/config/route.config'
+import {
+  acceptTodos,
+  loadAssignableUsers,
+  loadPendingTodos,
+  logoutSmartTodo,
+  rejectTodo,
+  transferTodos,
+} from '@/modules/home/dashboard/todo.service'
+import { formatEventTime } from '@/modules/home/dashboard/todoDisplay'
+import type { CalendarEvent, CalendarUser } from '@/modules/home/dashboard/types'
 import { useUserStore } from '@/stores/user.store'
 
+const emit = defineEmits<{
+  'calendar-refresh': []
+  'open-todo': [payload: { id: string; date: string }]
+}>()
+
+const router = useRouter()
 const userStore = useUserStore()
 
-type NotificationTone = 'blue' | 'green' | 'amber' | 'violet'
-
-interface NotificationItem {
-  id: string
-  title: string
-  content: string
-  time: string
-  source: string
-  unread?: boolean
-  tone: NotificationTone
-}
+type PendingActionMode = 'reject' | 'transfer' | null
 
 const notificationPanelRef = ref<HTMLElement | null>(null)
+const userMenuPanelRef = ref<HTMLElement | null>(null)
 const isNotificationPanelOpen = ref(false)
+const isUserMenuOpen = ref(false)
+const isLoggingOut = ref(false)
+const isPendingLoading = ref(false)
+const pendingError = ref('')
+const pendingTodos = ref<CalendarEvent[]>([])
+const assignableUsers = ref<CalendarUser[]>([])
+const activeActionId = ref('')
+const activeActionMode = ref<PendingActionMode>(null)
+const rejectReason = ref('')
+const transferAssigneeId = ref('')
+const processingId = ref('')
 
-const notifications: NotificationItem[] = [
-  {
-    id: 'risk-check',
-    title: '检查上线风险',
-    content: '今日 15:00 的待办即将开始，请提前确认上线风险项。',
-    time: '10 分钟前',
-    source: '待办提醒',
-    unread: true,
-    tone: 'blue',
-  },
-  {
-    id: 'ppt-draft',
-    title: '生成汇报 PPT 初稿',
-    content: '智能 PPT 已生成初稿，可进入月历待办继续完善内容。',
-    time: '32 分钟前',
-    source: '智体工坊',
-    unread: true,
-    tone: 'violet',
-  },
-  {
-    id: 'budget-approval',
-    title: '预算申请复核',
-    content: '有 1 条预算申请等待审批，建议今日处理。',
-    time: '今天 09:20',
-    source: '审批中心',
-    unread: true,
-    tone: 'amber',
-  },
-  {
-    id: 'weekly-plan',
-    title: '周计划校准',
-    content: '本周任务推进已同步，10 项待推进事项已更新。',
-    time: '昨天 18:40',
-    source: '日程助手',
-    tone: 'green',
-  },
-  {
-    id: 'knowledge-sync',
-    title: '知识库问答灰度',
-    content: '知识库问答灰度范围已调整，相关任务已写入本月计划。',
-    time: '6 月 3 日',
-    source: '力宝百问',
-    tone: 'blue',
-  },
-]
+const currentUser = computed<CalendarUser>(() => ({
+  id: userStore.profile?.id ?? '',
+  name: userStore.profile?.name ?? '未登录',
+  role: userStore.profile?.role ?? 'employee',
+  department: userStore.profile?.department,
+  avatar: userStore.profile?.avatar,
+  leaderId: userStore.profile?.leaderId,
+  teamMemberIds: userStore.profile?.teamMemberIds,
+}))
 
 const displayName = computed(() => userStore.profile?.name ?? '刘美华')
 const department = computed(() => userStore.profile?.department ?? '信息技术部')
 const avatarUrl = computed(() => userStore.profile?.avatar ?? girlImage)
-const unreadNotificationCount = computed(() => notifications.filter((item) => item.unread).length)
+const unreadNotificationCount = computed(() => pendingTodos.value.length)
+const transferCandidates = computed(() => {
+  const users = assignableUsers.value.length ? assignableUsers.value : [currentUser.value]
+  return users.filter((user) => user.id && user.id !== currentUser.value.id)
+})
 
-function toggleNotificationPanel() {
+async function refreshAssignableUsers() {
+  if (!currentUser.value.id) {
+    assignableUsers.value = []
+    return
+  }
+
+  try {
+    assignableUsers.value = await loadAssignableUsers()
+  } catch {
+    assignableUsers.value = [currentUser.value]
+  }
+}
+
+async function refreshPendingTodos() {
+  if (!currentUser.value.id) {
+    pendingTodos.value = []
+    return
+  }
+
+  isPendingLoading.value = true
+  pendingError.value = ''
+
+  try {
+    pendingTodos.value = await loadPendingTodos(currentUser.value, assignableUsers.value)
+  } catch (error) {
+    pendingTodos.value = []
+    pendingError.value = error instanceof Error ? error.message : '加载待接受待办失败'
+  } finally {
+    isPendingLoading.value = false
+  }
+}
+
+function resetPendingAction() {
+  activeActionId.value = ''
+  activeActionMode.value = null
+  rejectReason.value = ''
+  transferAssigneeId.value = ''
+}
+
+function pendingSummary(event: CalendarEvent) {
+  const creator = event.creatorName ? `${event.creatorName} 派发` : '待接受待办'
+  const schedule = formatEventTime(event)
+  return `${creator} · ${schedule}`
+}
+
+function togglePendingAction(id: string, mode: Exclude<PendingActionMode, null>) {
+  if (activeActionId.value === id && activeActionMode.value === mode) {
+    resetPendingAction()
+    return
+  }
+
+  activeActionId.value = id
+  activeActionMode.value = mode
+  rejectReason.value = ''
+  transferAssigneeId.value = transferCandidates.value[0]?.id ?? ''
+}
+
+async function handleAcceptTodo(id: string) {
+  processingId.value = id
+  try {
+    await acceptTodos(id)
+    resetPendingAction()
+    await refreshPendingTodos()
+    emit('calendar-refresh')
+  } catch (error) {
+    pendingError.value = error instanceof Error ? error.message : '接受待办失败'
+  } finally {
+    processingId.value = ''
+  }
+}
+
+async function handleRejectTodo(id: string) {
+  processingId.value = id
+  try {
+    await rejectTodo(id, rejectReason.value.trim() || '暂不处理')
+    resetPendingAction()
+    await refreshPendingTodos()
+    emit('calendar-refresh')
+  } catch (error) {
+    pendingError.value = error instanceof Error ? error.message : '拒绝待办失败'
+  } finally {
+    processingId.value = ''
+  }
+}
+
+async function handleTransferTodo(id: string) {
+  if (!transferAssigneeId.value) {
+    pendingError.value = '请选择转发对象'
+    return
+  }
+
+  processingId.value = id
+  try {
+    await transferTodos(id, transferAssigneeId.value)
+    resetPendingAction()
+    await refreshPendingTodos()
+    emit('calendar-refresh')
+  } catch (error) {
+    pendingError.value = error instanceof Error ? error.message : '转发待办失败'
+  } finally {
+    processingId.value = ''
+  }
+}
+
+function handleOpenTodo(event: CalendarEvent) {
+  emit('open-todo', { id: event.id, date: event.date })
+  closeNotificationPanel()
+}
+
+async function toggleNotificationPanel() {
+  if (!isNotificationPanelOpen.value) {
+    closeUserMenu()
+    await refreshPendingTodos()
+  }
   isNotificationPanelOpen.value = !isNotificationPanelOpen.value
 }
 
@@ -83,26 +185,69 @@ function closeNotificationPanel() {
   isNotificationPanelOpen.value = false
 }
 
-function handleDocumentPointerDown(event: PointerEvent) {
-  const panelElement = notificationPanelRef.value
+function toggleUserMenu() {
+  if (!isUserMenuOpen.value) {
+    closeNotificationPanel()
+  }
+  isUserMenuOpen.value = !isUserMenuOpen.value
+}
 
-  if (!panelElement || panelElement.contains(event.target as Node)) {
+function closeUserMenu() {
+  isUserMenuOpen.value = false
+}
+
+async function handleLogout() {
+  if (isLoggingOut.value) {
     return
   }
 
-  closeNotificationPanel()
+  isLoggingOut.value = true
+  closeUserMenu()
+
+  try {
+    await logoutSmartTodo()
+  } catch {
+    // 即使接口失败也清除本地登录态
+  } finally {
+    userStore.logout()
+    isLoggingOut.value = false
+    void router.replace({ path: routeConfig.loginRoute })
+  }
+}
+
+function handleDocumentPointerDown(event: PointerEvent) {
+  const notificationElement = notificationPanelRef.value
+  const userMenuElement = userMenuPanelRef.value
+
+  if (notificationElement && !notificationElement.contains(event.target as Node)) {
+    closeNotificationPanel()
+  }
+
+  if (userMenuElement && !userMenuElement.contains(event.target as Node)) {
+    closeUserMenu()
+  }
 }
 
 function handleDocumentKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape') {
     closeNotificationPanel()
+    closeUserMenu()
   }
 }
 
 onMounted(() => {
   document.addEventListener('pointerdown', handleDocumentPointerDown)
   document.addEventListener('keydown', handleDocumentKeydown)
+  void refreshAssignableUsers().then(() => refreshPendingTodos())
 })
+
+watch(
+  () => userStore.profile?.id,
+  (nextId, previousId) => {
+    if (nextId === previousId) return
+    void refreshAssignableUsers().then(() => refreshPendingTodos())
+  },
+)
 
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', handleDocumentPointerDown)
@@ -145,29 +290,124 @@ onBeforeUnmount(() => {
           >
             <header class="notification-panel__header">
               <div>
-                <strong>消息通知</strong>
-                <span>未读 {{ unreadNotificationCount }} / 全部 {{ notifications.length }}</span>
+                <strong>待接受待办</strong>
+                <span>待处理 {{ unreadNotificationCount }}</span>
               </div>
               <button type="button" aria-label="关闭消息通知" title="关闭消息通知" @click="closeNotificationPanel">
                 <IconX />
               </button>
             </header>
 
+            <p v-if="pendingError" class="notification-error">{{ pendingError }}</p>
+
             <div class="notification-list">
+              <p v-if="isPendingLoading" class="notification-empty">正在加载待接受待办…</p>
+              <p v-else-if="!pendingTodos.length" class="notification-empty">暂无待接受待办</p>
+
               <article
-                v-for="notification in notifications"
-                :key="notification.id"
-                class="notification-item"
-                :class="{ 'is-unread': notification.unread }"
+                v-for="todo in pendingTodos"
+                :key="todo.id"
+                class="notification-item is-unread"
               >
-                <span class="notification-item__marker" :class="`is-${notification.tone}`" aria-hidden="true" />
+                <span class="notification-item__marker is-amber" aria-hidden="true" />
                 <div class="notification-item__content">
                   <div class="notification-item__title-row">
-                    <strong>{{ notification.title }}</strong>
-                    <time>{{ notification.time }}</time>
+                    <strong>{{ todo.title }}</strong>
+                    <time>{{ formatEventTime(todo) }}</time>
                   </div>
-                  <p>{{ notification.content }}</p>
-                  <span>{{ notification.source }}</span>
+                  <p>{{ pendingSummary(todo) }}</p>
+                  <span>待接受</span>
+
+                  <div class="notification-item__actions">
+                    <button
+                      type="button"
+                      class="action-btn is-accept"
+                      :disabled="processingId === todo.id"
+                      @click="handleAcceptTodo(todo.id)"
+                    >
+                      {{ processingId === todo.id && activeActionMode !== 'reject' && activeActionMode !== 'transfer' ? '处理中…' : '接受' }}
+                    </button>
+                    <button
+                      type="button"
+                      class="action-btn is-reject"
+                      :disabled="processingId === todo.id"
+                      @click="togglePendingAction(todo.id, 'reject')"
+                    >
+                      拒绝
+                    </button>
+                    <button
+                      type="button"
+                      class="action-btn is-transfer"
+                      :disabled="processingId === todo.id || !transferCandidates.length"
+                      @click="togglePendingAction(todo.id, 'transfer')"
+                    >
+                      转发
+                    </button>
+                    <button type="button" class="action-btn is-view" @click="handleOpenTodo(todo)">
+                      查看
+                    </button>
+                  </div>
+
+                  <div
+                    v-if="activeActionId === todo.id && activeActionMode === 'reject'"
+                    class="notification-item__form"
+                  >
+                    <input
+                      v-model="rejectReason"
+                      type="text"
+                      class="notification-input"
+                      placeholder="拒绝原因（可选）"
+                    />
+                    <div class="notification-item__form-actions">
+                      <button
+                        type="button"
+                        class="action-btn is-reject"
+                        :disabled="processingId === todo.id"
+                        @click="handleRejectTodo(todo.id)"
+                      >
+                        确认拒绝
+                      </button>
+                      <button type="button" class="action-btn is-muted" @click="resetPendingAction">
+                        取消
+                      </button>
+                    </div>
+                  </div>
+
+                  <div
+                    v-if="activeActionId === todo.id && activeActionMode === 'transfer'"
+                    class="notification-item__form"
+                  >
+                    <div class="notification-transfer-picker">
+                      <span class="notification-transfer-picker__label">选择转发对象</span>
+                      <div class="notification-transfer-picker__list" role="listbox" aria-label="选择转发对象">
+                        <button
+                          v-for="user in transferCandidates"
+                          :key="user.id"
+                          type="button"
+                          role="option"
+                          class="notification-transfer-option"
+                          :class="{ 'is-active': transferAssigneeId === user.id }"
+                          :aria-selected="transferAssigneeId === user.id"
+                          @click="transferAssigneeId = user.id"
+                        >
+                          {{ user.name }}
+                        </button>
+                      </div>
+                    </div>
+                    <div class="notification-item__form-actions">
+                      <button
+                        type="button"
+                        class="action-btn is-transfer"
+                        :disabled="processingId === todo.id"
+                        @click="handleTransferTodo(todo.id)"
+                      >
+                        确认转发
+                      </button>
+                      <button type="button" class="action-btn is-muted" @click="resetPendingAction">
+                        取消
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </article>
             </div>
@@ -178,13 +418,49 @@ onBeforeUnmount(() => {
         <IconSettings />
       </button>
 
-      <button class="user-chip" type="button" aria-label="个人中心">
-        <img :src="avatarUrl" alt="用户头像" />
-        <span>
-          <strong>{{ displayName }}</strong>
-          <em>{{ department }}</em>
-        </span>
-      </button>
+      <div ref="userMenuPanelRef" class="user-menu-wrap">
+        <button
+          class="user-chip"
+          type="button"
+          aria-label="个人中心"
+          aria-controls="dashboard-user-menu"
+          :aria-expanded="isUserMenuOpen"
+          @click="toggleUserMenu"
+        >
+          <img :src="avatarUrl" alt="用户头像" />
+          <span>
+            <strong>{{ displayName }}</strong>
+            <em>{{ department }}</em>
+          </span>
+        </button>
+
+        <Transition name="user-menu-popover">
+          <section
+            v-if="isUserMenuOpen"
+            id="dashboard-user-menu"
+            class="user-menu-panel"
+            aria-label="个人中心"
+          >
+            <header class="user-menu-panel__header">
+              <img :src="avatarUrl" alt="" />
+              <div>
+                <strong>{{ displayName }}</strong>
+                <span>{{ department }}</span>
+              </div>
+            </header>
+
+            <button
+              class="user-menu-panel__logout"
+              type="button"
+              :disabled="isLoggingOut"
+              @click="handleLogout"
+            >
+              <IconLogOut aria-hidden="true" />
+              <span>{{ isLoggingOut ? '正在退出…' : '退出登录' }}</span>
+            </button>
+          </section>
+        </Transition>
+      </div>
     </div>
   </header>
 </template>
@@ -312,7 +588,8 @@ onBeforeUnmount(() => {
   height: 18px;
 }
 
-.notification-wrap {
+.notification-wrap,
+.user-menu-wrap {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -453,13 +730,13 @@ onBeforeUnmount(() => {
   transition:
     border-color 0.18s ease,
     background 0.18s ease,
-    transform 0.18s ease;
+    box-shadow 0.18s ease;
 }
 
 .notification-item:hover {
   border-color: rgba(191, 219, 254, 0.96);
   background: rgba(255, 255, 255, 0.94);
-  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
 }
 
 .notification-item.is-unread {
@@ -550,6 +827,169 @@ onBeforeUnmount(() => {
   padding: 6px 8px;
 }
 
+.notification-error {
+  margin: 0 2px 8px;
+  border-radius: 12px;
+  background: rgba(254, 226, 226, 0.72);
+  color: #b91c1c;
+  font-size: 12px;
+  line-height: 1.45;
+  font-weight: 750;
+  padding: 8px 10px;
+}
+
+.notification-empty {
+  margin: 0;
+  border: 1px dashed rgba(226, 232, 240, 0.92);
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.72);
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+  font-weight: 750;
+  padding: 18px 14px;
+  text-align: center;
+}
+
+.notification-item__actions,
+.notification-item__form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.notification-item__actions {
+  margin-top: 2px;
+}
+
+.notification-item__form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  overflow: visible;
+}
+
+.notification-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  border: 1px solid rgba(226, 232, 240, 0.92);
+  border-radius: 10px;
+  background: #ffffff;
+  color: #0f172a;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 10px;
+}
+
+.notification-transfer-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.notification-transfer-picker__label {
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.2;
+  font-weight: 800;
+}
+
+.notification-transfer-picker__list {
+  max-height: 160px;
+  overflow: auto;
+  border: 1px solid rgba(226, 232, 240, 0.92);
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.notification-transfer-option {
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #334155;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.35;
+  font-weight: 750;
+  text-align: left;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease;
+}
+
+.notification-transfer-option:hover {
+  background: rgba(241, 245, 249, 0.92);
+  color: #0f172a;
+}
+
+.notification-transfer-option.is-active {
+  background: rgba(219, 234, 254, 0.92);
+  color: #1d4ed8;
+  font-weight: 850;
+}
+
+.notification-input:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.28);
+  outline-offset: 2px;
+}
+
+.action-btn {
+  border: 0;
+  border-radius: 999px;
+  background: rgba(241, 245, 249, 0.92);
+  color: #334155;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1;
+  padding: 7px 10px;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.action-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.action-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.action-btn.is-accept {
+  background: rgba(220, 252, 231, 0.92);
+  color: #047857;
+}
+
+.action-btn.is-reject {
+  background: rgba(254, 226, 226, 0.92);
+  color: #b91c1c;
+}
+
+.action-btn.is-transfer {
+  background: rgba(219, 234, 254, 0.92);
+  color: #1d4ed8;
+}
+
+.action-btn.is-view,
+.action-btn.is-muted {
+  background: rgba(241, 245, 249, 0.92);
+  color: #64748b;
+}
+
 .notification-popover-enter-active,
 .notification-popover-leave-active {
   transition:
@@ -559,6 +999,139 @@ onBeforeUnmount(() => {
 
 .notification-popover-enter-from,
 .notification-popover-leave-to {
+  opacity: 0;
+  transform: translateY(-6px) scale(0.98);
+}
+
+.user-menu-panel {
+  position: absolute;
+  top: calc(100% + 14px);
+  right: 0;
+  width: min(240px, calc(100vw - 28px));
+  box-sizing: border-box;
+  border: 1px solid rgba(226, 232, 240, 0.92);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(24px);
+  box-shadow:
+    0 26px 58px -28px rgba(15, 23, 42, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
+  padding: 10px;
+  z-index: 30;
+}
+
+.user-menu-panel::before {
+  position: absolute;
+  top: -7px;
+  right: 24px;
+  width: 14px;
+  height: 14px;
+  border-top: 1px solid rgba(226, 232, 240, 0.92);
+  border-left: 1px solid rgba(226, 232, 240, 0.92);
+  background: rgba(255, 255, 255, 0.92);
+  transform: rotate(45deg);
+  content: '';
+}
+
+.user-menu-panel__header {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 12px;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.82);
+}
+
+.user-menu-panel__header img {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  object-fit: cover;
+  background: #dbeafe;
+  flex: 0 0 auto;
+}
+
+.user-menu-panel__header div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.user-menu-panel__header strong {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 14px;
+  line-height: 1.2;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-menu-panel__header span {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-menu-panel__logout {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  margin-top: 8px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #dc2626;
+  font: inherit;
+  cursor: pointer;
+  padding: 10px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.user-menu-panel__logout:hover:not(:disabled),
+.user-menu-panel__logout:focus-visible {
+  background: rgba(254, 226, 226, 0.72);
+  color: #b91c1c;
+  transform: translateY(-1px);
+}
+
+.user-menu-panel__logout:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.user-menu-panel__logout svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.user-menu-panel__logout span {
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.user-menu-popover-enter-active,
+.user-menu-popover-leave-active {
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.user-menu-popover-enter-from,
+.user-menu-popover-leave-to {
   opacity: 0;
   transform: translateY(-6px) scale(0.98);
 }

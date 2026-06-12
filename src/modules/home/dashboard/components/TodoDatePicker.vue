@@ -71,6 +71,23 @@ function safeParseDate(value: string): DateValue | undefined {
     return undefined
   }
 }
+
+function shouldKeepDatePopoverOpen(event: { target?: EventTarget | null }) {
+  const target = event.target
+  if (!(target instanceof Element)) return false
+
+  return Boolean(
+    target.closest('[data-slot="select-content"]')
+    || target.closest('[data-slot="select-item"]')
+    || target.closest('[data-slot="select-trigger"]')
+    || target.closest('[data-slot="select-viewport"]'),
+  )
+}
+
+function onDatePopoverOutside(event: { target?: EventTarget | null; preventDefault?: () => void }) {
+  if (!shouldKeepDatePopoverOpen(event)) return
+  event.preventDefault?.()
+}
 </script>
 
 <template>
@@ -97,7 +114,9 @@ function safeParseDate(value: string): DateValue | undefined {
     </PopoverTrigger>
     <PopoverContent
       align="start"
-      class="todo-date-popover !w-[264px] !gap-0 !overflow-hidden !rounded-2xl !border !border-slate-200 !bg-white !p-0 !shadow-[0_18px_42px_-30px_rgba(15,23,42,0.45)]"
+      class="todo-date-popover !z-[1200] !w-[264px] !gap-0 !overflow-hidden !rounded-2xl !border !border-slate-200 !bg-white !p-0 !ring-0 !shadow-[0_18px_42px_-30px_rgba(15,23,42,0.45)]"
+      @pointer-down-outside="onDatePopoverOutside"
+      @interact-outside="onDatePopoverOutside"
     >
       <Calendar
         v-model="selectedDate"
@@ -193,5 +212,16 @@ function safeParseDate(value: string): DateValue | undefined {
   .todo-date-trigger.is-ai-highlighted .todo-picker-value {
     animation: none;
   }
+}
+</style>
+
+<style>
+[data-slot='popover-content'].todo-date-popover {
+  box-sizing: border-box;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 16px !important;
+  overflow: hidden !important;
+  background: #ffffff !important;
+  box-shadow: 0 18px 42px -30px rgba(15, 23, 42, 0.45) !important;
 }
 </style>

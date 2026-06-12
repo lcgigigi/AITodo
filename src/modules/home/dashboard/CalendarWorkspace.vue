@@ -17,6 +17,7 @@ import IconUsers from '~icons/lucide/users'
 import libaoImage from '@/assets/libao.png'
 import campusImage from '@/assets/modelone.png'
 import { routeConfig } from '@/config/route.config'
+import { useFeedbackStore } from '@/stores/feedback.store'
 import { useUserStore } from '@/stores/user.store'
 import CalendarMonth from './CalendarMonth.vue'
 import DayPreviewPanel from './DayPreviewPanel.vue'
@@ -36,7 +37,10 @@ import {
   listTodos,
   loadCurrentUser,
   loadAssignableUsers as serviceLoadAssignableUsers,
+  getTodoMonthRange,
+  getTodoWeekRange,
   loadTodos,
+  syncCalendar as serviceSyncCalendar,
   updateTodo as serviceUpdateTodo,
   updateTodoStatus as serviceUpdateTodoStatus,
 } from './todo.service'
@@ -89,17 +93,17 @@ const quickCreateKey = ref(0)
 const presetCreateTime = ref('')
 const presetCreateKey = ref(0)
 const isDayPreviewFormDirty = ref(false)
+const isSyncingCalendar = ref(false)
 const dayPreviewPanelRef = ref<DayPreviewPanelExpose | null>(null)
-const toastMessage = ref('')
 const calendarViewMode = ref<'month' | 'week'>('month')
 const taskMetricMode = ref<'week' | 'month'>('week')
 const trendStatMode = ref<'week' | 'month'>('week')
 const router = useRouter()
 const userStore = useUserStore()
+const feedbackStore = useFeedbackStore()
 let clockTimer: ReturnType<typeof setInterval> | undefined
 let todayBubbleTimer: ReturnType<typeof setTimeout> | undefined
 let panelCloseRestoreTimer: ReturnType<typeof setTimeout> | undefined
-let toastTimer: ReturnType<typeof setTimeout> | undefined
 
 onMounted(() => {
   clockTimer = setInterval(() => {
@@ -112,8 +116,9 @@ onBeforeUnmount(() => {
   if (clockTimer) clearInterval(clockTimer)
   clearTodayBubbleTimer()
   clearPanelCloseRestoreTimer()
-  clearToastTimer()
 })
+
+let hasInitializedTodoRange = false
 
 const campusTools: CampusTool[] = [
   {
@@ -391,7 +396,7 @@ const todayCompletedCount = computed(
   () => todayEvents.value.length - todayPendingEvents.value.length,
 )
 const currentWeekDates = computed(() => {
-  const start = new Date(`${todayDate.value}T12:00:00`)
+  const start = new Date(`${selectedDate.value}T12:00:00`)
   const offset = (start.getDay() + 6) % 7
   start.setDate(start.getDate() - offset)
 
@@ -402,12 +407,19 @@ const currentWeekDates = computed(() => {
   })
 })
 const currentMonthDates = computed(() => {
-  const today = new Date(`${todayDate.value}T12:00:00`)
-  const year = today.getFullYear()
-  const month = today.getMonth()
+  const year = currentMonth.value.getFullYear()
+  const month = currentMonth.value.getMonth()
   const dayCount = getDaysInMonth(year, month)
 
   return Array.from({ length: dayCount }, (_, index) => ymd(new Date(year, month, index + 1)))
+})
+const todoLoadRangeKey = computed(() => {
+  const range =
+    calendarViewMode.value === 'week'
+      ? getTodoWeekRange(selectedDate.value)
+      : getTodoMonthRange(currentMonth.value)
+
+  return `${range.startDate}:${range.endDate}`
 })
 const weekEvents = computed(() =>
   events.value.filter((event) => eventIntersectsDates(event, currentWeekDates.value)),
@@ -687,19 +699,8 @@ function clearPanelCloseRestoreTimer() {
   panelCloseRestoreTimer = undefined
 }
 
-function clearToastTimer() {
-  if (!toastTimer) return
-  clearTimeout(toastTimer)
-  toastTimer = undefined
-}
-
 function showToast(message: string) {
-  clearToastTimer()
-  toastMessage.value = message
-  toastTimer = setTimeout(() => {
-    toastMessage.value = ''
-    toastTimer = undefined
-  }, 2200)
+  feedbackStore.success(message)
 }
 
 async function initializeDashboardData() {
@@ -721,9 +722,9 @@ async function initializeDashboardData() {
 
     await refreshAssignableUsers()
     await refreshTodos()
+    hasInitializedTodoRange = true
   } catch (error) {
     const message = error instanceof Error ? error.message : '后台接口连接失败'
-    showToast(message)
 
     if (message.includes('登录状态') || message.includes('401')) {
       userStore.logout()
@@ -741,10 +742,40 @@ async function refreshAssignableUsers() {
   backendAssignableUsers.value = await serviceLoadAssignableUsers()
 }
 
+function getActiveTodoLoadRange() {
+  return calendarViewMode.value === 'week'
+    ? getTodoWeekRange(selectedDate.value)
+    : getTodoMonthRange(currentMonth.value)
+}
+
 async function refreshTodos() {
   if (!currentUser.value.id) return
-  allEvents.value = await loadTodos(currentUser.value, assignableUsers.value)
+  allEvents.value = await loadTodos(
+    currentUser.value,
+    assignableUsers.value,
+    getActiveTodoLoadRange(),
+  )
 }
+
+async function syncCalendarFromEmail() {
+  if (isSyncingCalendar.value) return
+
+  isSyncingCalendar.value = true
+  try {
+    await serviceSyncCalendar()
+    await refreshTodos()
+    showToast('邮箱日程同步成功')
+  } catch {
+    feedbackStore.error('同步邮箱日程失败')
+  } finally {
+    isSyncingCalendar.value = false
+  }
+}
+
+watch(todoLoadRangeKey, () => {
+  if (!hasInitializedTodoRange) return
+  void refreshTodos()
+})
 
 function confirmDiscardPreviewChanges(onConfirm?: () => void) {
   if (!isDayPreviewFormDirty.value) return true
@@ -824,8 +855,8 @@ async function createTodo(payload: CalendarTodoDraft) {
     selectDate(payload.date)
     openTodoPanel()
     showToast('待办已创建')
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : '待办创建失败，请重试')
+  } catch {
+    // 全局拦截器已统一提示错误
   }
 }
 
@@ -836,18 +867,18 @@ async function updateTodo(payload: CalendarTodoUpdate) {
     selectDate(payload.date)
     openTodoPanel()
     showToast('待办已保存')
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : '待办保存失败，请重试')
+  } catch {
+    // 全局拦截器已统一提示错误
   }
 }
 
 async function updateTodoStatus(id: string, status: CalendarEventStatus) {
   try {
-    await serviceUpdateTodoStatus(id, currentUser.value, status)
+    await serviceUpdateTodoStatus(id, currentUser.value, status, assignableUsers.value)
     await refreshTodos()
-    showToast(status === 'done' ? '已标记完成' : '已撤回完成')
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : '待办状态更新失败')
+    showToast(status === 'done' ? '已标记完成' : '已撤销完成')
+  } catch {
+    // 全局拦截器已统一提示错误
   }
 }
 
@@ -858,10 +889,22 @@ async function deleteTodo(id: string) {
     await refreshTodos()
     closeDayPreview()
     showToast('待办已删除')
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : '待办删除失败，请重试')
+  } catch {
+    // 全局拦截器已统一提示错误
   }
 }
+
+async function openTodoFromNotification(payload: { id: string; date: string }) {
+  isDayPreviewFormDirty.value = false
+  selectDate(payload.date)
+  openTodoPanel()
+  await refreshTodos()
+}
+
+defineExpose({
+  refreshTodos,
+  openTodoFromNotification,
+})
 
 function changePeriod(delta: number) {
   const applyPeriodChange = () => {
@@ -919,12 +962,6 @@ function openAgentList(agentKey?: string) {
 
 <template>
   <div class="calendar-workspace" @click="closeDayPreview">
-    <Transition name="toast-fade">
-      <div v-if="toastMessage" class="workspace-toast" role="status">
-        {{ toastMessage }}
-      </div>
-    </Transition>
-
     <div
       v-if="isDayPreviewOpen"
       class="left-preview-scrim"
@@ -1038,32 +1075,36 @@ function openAgentList(agentKey?: string) {
             class="metric-card"
             :class="[`metric-card-${todayMetric.tone}`, `metric-card-${todayMetric.variant}`]"
           >
-            <header class="metric-card-head">
+            <header class="metric-card-head today-card-head">
               <span class="metric-icon">
                 <component :is="todayMetric.icon" />
               </span>
-              <div class="metric-title">
-                <span>{{ todayMetric.label }}</span>
-                <strong
-                  ><em>{{ todayMetric.value }}</em
-                  >{{ todayMetric.unit }}</strong
-                >
+              <div class="today-card-headline">
+                <span class="today-card-title">{{ todayMetric.label }}</span>
+                <strong class="today-pending-count">
+                  <em>{{ todayMetric.pending }}</em
+                  >项待处理
+                </strong>
               </div>
             </header>
 
-            <div class="metric-focus">
-              <div
-                class="metric-ring metric-ring-large"
-                :style="{ '--progress': `${todayMetric.progress * 3.6}deg` }"
-              >
-                <b>{{ todayMetric.progress }}%</b>
-              </div>
-              <p>
-                <span>待办 {{ todayMetric.pending }}</span>
-                <span>完成 {{ todayMetric.completed }}</span>
+            <div class="today-card-body">
+              <p class="today-meta">
+                <span>共 {{ todayMetric.value }} 项</span>
+                <span>已完成 {{ todayMetric.completed }}</span>
               </p>
+              <div class="today-next-event">
+                <template v-if="nextTodayEvent">
+                  <span class="today-next-label">下一项</span>
+                  <span class="today-next-time">{{ formatEventTime(nextTodayEvent) }}</span>
+                  <span class="today-next-title">{{ nextTodayEvent.title }}</span>
+                </template>
+                <span v-else class="today-next-empty">今天暂无待处理事项</span>
+              </div>
+              <div class="today-progress-track">
+                <span :style="{ width: `${todayMetric.progress}%` }"></span>
+              </div>
             </div>
-            <span class="metric-next">{{ todayMetric.nextText }}</span>
           </article>
 
           <article
@@ -1214,6 +1255,7 @@ function openAgentList(agentKey?: string) {
             @update-status="updateTodoStatus"
             @delete-todo="deleteTodo"
             @dirty-change="isDayPreviewFormDirty = $event"
+            @notify="showToast"
             @close="closeDayPreview"
           />
         </aside>
@@ -1229,10 +1271,12 @@ function openAgentList(agentKey?: string) {
           :today-date="todayDate"
           :today-events="todayEvents"
           :show-today-bubble="shouldShowTodayBubble"
+          :is-syncing-calendar="isSyncingCalendar"
           @select="toggleDayPreview"
           @calendar-interaction="hideTodayBubbleTemporarily"
           @close-today-bubble="closeTodayBubble"
           @quick-create-todo="quickCreateTodo"
+          @sync-calendar="syncCalendarFromEmail"
           @open-agent-center="openAgentList"
           @previous-period="changePeriod(-1)"
           @next-period="changePeriod(1)"
@@ -1255,42 +1299,6 @@ function openAgentList(agentKey?: string) {
   grid-template-rows: minmax(370px, 1.5fr) minmax(240px, 1fr);
   gap: 8px 18px;
   overflow: hidden;
-}
-
-.workspace-toast {
-  position: fixed;
-  z-index: 1400;
-  top: 22px;
-  left: 50%;
-  min-height: 38px;
-  box-sizing: border-box;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 999px;
-  background: rgba(17, 24, 39, 0.94);
-  color: #ffffff;
-  padding: 0 18px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  font-weight: 850;
-  line-height: 1.2;
-  box-shadow: 0 18px 36px -24px rgba(15, 23, 42, 0.82);
-  transform: translateX(-50%);
-  pointer-events: none;
-}
-
-.toast-fade-enter-active,
-.toast-fade-leave-active {
-  transition:
-    opacity 0.18s ease,
-    transform 0.18s ease;
-}
-
-.toast-fade-enter-from,
-.toast-fade-leave-to {
-  opacity: 0;
-  transform: translate(-50%, -8px);
 }
 
 .left-preview-scrim {
@@ -1489,6 +1497,7 @@ p {
 }
 
 .campus-visual {
+  container-type: inline-size;
   position: relative;
   grid-row: 1;
   align-self: stretch;
@@ -1533,6 +1542,13 @@ p {
     radial-gradient(ellipse 86% 74% at 50% 54%, #000 56%, rgba(0, 0, 0, 0.74) 72%, transparent 96%);
   -webkit-mask-composite: source-in;
   mask-composite: intersect;
+}
+
+/* 仅当容器够宽、1040px 上限开始生效时，才改为按 148% 随容器缩放 */
+@container (min-width: 704px) {
+  .campus-visual img {
+    width: 148%;
+  }
 }
 
 .campus-tool {
@@ -1928,76 +1944,121 @@ p {
   line-height: 1.3;
 }
 
-.metric-ring {
-  width: 44px;
-  height: 44px;
-  border-radius: 999px;
-  background: conic-gradient(var(--metric-accent) var(--progress), #e5e7eb 0);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.metric-card-today {
+  display: flex;
+  flex-direction: column;
+}
+
+.today-card-headline {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.today-card-title {
+  overflow: hidden;
+  color: #334155;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.today-pending-count {
+  margin: 0;
   flex: 0 0 auto;
-}
-
-.metric-ring::before {
-  content: '';
-  position: absolute;
-  inset: 6px;
-  border-radius: inherit;
-  background: #ffffff;
-}
-
-.metric-ring b {
-  position: relative;
   color: #0f172a;
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.today-pending-count em {
+  margin-right: 2px;
+  color: var(--metric-accent);
+  font-style: normal;
+  font-size: 24px;
+  font-weight: 950;
+}
+
+.today-card-body {
+  margin-top: auto;
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.today-meta {
+  margin: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.today-progress-track {
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(226, 232, 240, 0.88);
+  overflow: hidden;
+}
+
+.today-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--metric-accent), #60a5fa);
+  transition: width 0.28s ease;
+}
+
+.today-next-event {
+  min-width: 0;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 10px;
+  border-radius: 10px;
+  background: rgba(239, 246, 255, 0.72);
+  border: 1px solid rgba(147, 197, 253, 0.28);
+}
+
+.today-next-label {
+  flex: 0 0 auto;
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.today-next-time {
+  flex: 0 0 auto;
+  color: var(--metric-accent);
   font-size: 11px;
   font-weight: 950;
 }
 
-.metric-ring-large {
-  width: 42px;
-  height: 42px;
-}
-
-.metric-focus {
-  margin-top: 10px;
-  display: grid;
-  grid-template-columns: 42px minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-}
-
-.metric-focus p {
-  overflow: hidden;
-  color: #334155;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 10px;
-  font-weight: 950;
-  white-space: nowrap;
-}
-
-.metric-focus p span {
-  display: block;
-}
-
-.metric-next {
+.today-next-title {
   min-width: 0;
-  min-height: 24px;
-  margin-top: 8px;
-  border: 1px solid color-mix(in srgb, var(--metric-accent) 18%, rgba(226, 232, 240, 0.92));
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.72);
-  color: #475569;
-  padding: 0 8px;
-  display: flex;
-  align-items: center;
   overflow: hidden;
+  color: #475569;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.today-next-empty {
+  color: #94a3b8;
   font-size: 10px;
-  font-weight: 900;
+  font-weight: 800;
 }
 
 .week-progress {

@@ -1,17 +1,14 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import IconArrowRight from '~icons/lucide/arrow-right'
 import IconEye from '~icons/lucide/eye'
 import IconEyeOff from '~icons/lucide/eye-off'
 import IconLockKeyhole from '~icons/lucide/lock-keyhole'
-import IconScanLine from '~icons/lucide/scan-line'
-import IconSparkles from '~icons/lucide/sparkles'
 import IconUserRound from '~icons/lucide/user-round'
 import campusImage from '@/assets/modelone.png'
 import logoDarkImage from '@/assets/logoDark1.png'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { routeConfig } from '@/config/route.config'
 import { APP_TITLE } from '@/shared/constants/app'
 import { useUserStore } from '@/stores/user.store'
@@ -20,6 +17,7 @@ import { loadCurrentUser, loginSmartTodo } from '@/modules/home/dashboard/todo.s
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const loginCardRef = ref<HTMLElement | null>(null)
 
 const form = reactive({
   username: import.meta.env.VITE_APP_TODO_USERNAME || '',
@@ -28,6 +26,12 @@ const form = reactive({
 const isPasswordVisible = ref(false)
 const isLoading = ref(false)
 const errorMessage = ref('')
+const isExiting = ref(false)
+const shakeForm = ref(false)
+const activeSignal = ref(0)
+
+const mouse = reactive({ x: 0.5, y: 0.5 })
+const cardTilt = reactive({ rx: 0 })
 
 const signalItems = [
   { label: '需求识别', value: '08:45' },
@@ -36,8 +40,10 @@ const signalItems = [
   { label: 'AI 跟进', value: '14:00' },
 ]
 
-const orbitItems = ['待办', '日程', '知识库', '会议纪要']
 const heroDescription = '智能待办、日程日历和 AI 扩展，一处进入。'
+
+let signalTimer: ReturnType<typeof setInterval> | null = null
+let shakeTimer: ReturnType<typeof setTimeout> | null = null
 
 const redirectTarget = computed(() => {
   const redirect = Array.isArray(route.query.redirect)
@@ -51,11 +57,62 @@ const canSubmit = computed(
   () => Boolean(form.username.trim()) && Boolean(form.password) && !isLoading.value,
 )
 
+const pageStyle = computed(() => ({
+  '--mx': `${(mouse.x - 0.5) * 28}px`,
+  '--my': `${(mouse.y - 0.5) * 18}px`,
+  '--glow-x': `${mouse.x * 100}%`,
+  '--glow-y': `${mouse.y * 100}%`,
+}))
+
+const cardTiltStyle = computed(() => ({
+  transform: `rotateX(${cardTilt.rx}deg)`,
+}))
+
+function handlePointerMove(event: PointerEvent) {
+  mouse.x = event.clientX / window.innerWidth
+  mouse.y = event.clientY / window.innerHeight
+
+  const card = loginCardRef.value
+  if (!card) return
+
+  const rect = card.getBoundingClientRect()
+  const localY = (event.clientY - rect.top) / rect.height - 0.5
+  const inside =
+    event.clientX >= rect.left &&
+    event.clientX <= rect.right &&
+    event.clientY >= rect.top &&
+    event.clientY <= rect.bottom
+
+  cardTilt.rx = inside ? -localY * 8 : -localY * 2
+}
+
+function triggerShake() {
+  shakeForm.value = false
+  if (shakeTimer) clearTimeout(shakeTimer)
+  requestAnimationFrame(() => {
+    shakeForm.value = true
+    shakeTimer = setTimeout(() => {
+      shakeForm.value = false
+    }, 520)
+  })
+}
+
+function lockPageScroll() {
+  document.documentElement.style.overflow = 'hidden'
+  document.body.style.overflow = 'hidden'
+}
+
+function unlockPageScroll() {
+  document.documentElement.style.overflow = ''
+  document.body.style.overflow = ''
+}
+
 async function submitLogin() {
   errorMessage.value = ''
 
   if (!form.username.trim() || !form.password) {
     errorMessage.value = '请输入账号和密码'
+    triggerShake()
     return
   }
 
@@ -68,23 +125,52 @@ async function submitLogin() {
     })
     userStore.setToken(token)
 
-    const profile = await loadCurrentUser()
+    const profile = await loadCurrentUser({ silent: true })
     userStore.setProfile(profile)
 
+    isExiting.value = true
+    lockPageScroll()
+    await new Promise((resolve) => setTimeout(resolve, 480))
     await router.replace(redirectTarget.value)
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '登录失败，请稍后再试'
+    triggerShake()
   } finally {
     isLoading.value = false
   }
 }
+
+onMounted(() => {
+  window.addEventListener('pointermove', handlePointerMove, { passive: true })
+  signalTimer = setInterval(() => {
+    activeSignal.value = (activeSignal.value + 1) % signalItems.length
+  }, 2800)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('pointermove', handlePointerMove)
+  unlockPageScroll()
+  if (signalTimer) clearInterval(signalTimer)
+  if (shakeTimer) clearTimeout(shakeTimer)
+})
 </script>
 
 <template>
-  <main class="login-page" aria-label="登录">
+  <main
+    class="login-page"
+    :class="{ 'is-exiting': isExiting }"
+    :style="pageStyle"
+    aria-label="登录"
+  >
     <section class="visual-plane" aria-label="工作台预览">
       <img class="campus-image" :src="campusImage" alt="" />
       <div class="visual-overlay"></div>
+
+      <div class="ambient-orbs" aria-hidden="true">
+        <span class="orb orb-one"></span>
+        <span class="orb orb-two"></span>
+        <span class="orb orb-three"></span>
+      </div>
 
       <header class="brand-lockup">
         <span class="brand-mark" aria-hidden="true">
@@ -94,56 +180,54 @@ async function submitLogin() {
       </header>
 
       <div class="hero-copy">
-        <span class="eyebrow">Smart Todo Command</span>
-        <h1>{{ APP_TITLE }}</h1>
+        <span class="eyebrow">
+          <span class="eyebrow-text">Smart Todo Command</span>
+          <span class="eyebrow-cursor" aria-hidden="true"></span>
+        </span>
+        <h1>
+          <span class="title-gradient">{{ APP_TITLE }}</span>
+        </h1>
         <p>{{ heroDescription }}</p>
       </div>
 
-      <div class="mission-map" aria-hidden="true">
-        <span class="scan-line"></span>
-        <span class="map-pin pin-one">今天</span>
-        <span class="map-pin pin-two">协同</span>
-        <span class="map-pin pin-three">完成</span>
-        <span
-          v-for="(item, index) in orbitItems"
-          :key="item"
-          class="orbit-tag"
-          :style="{
-            '--x': `${19 + index * 15}%`,
-            '--y': `${12 + (index % 2) * 16}%`,
-            '--delay': `${index * -0.45}s`,
-          }"
-        >
-          {{ item }}
-        </span>
-      </div>
-
       <div class="signal-strip" aria-label="今日节奏">
-        <span v-for="item in signalItems" :key="item.label">
+        <span
+          v-for="(item, index) in signalItems"
+          :key="item.label"
+          class="signal-item"
+          :class="{ 'is-active': activeSignal === index }"
+          :style="{ '--i': index }"
+        >
           <strong>{{ item.value }}</strong>
           {{ item.label }}
+          <span class="signal-progress" aria-hidden="true"></span>
         </span>
       </div>
     </section>
 
-    <section class="login-panel" aria-labelledby="login-title">
-      <div class="panel-head">
-        <span class="panel-icon" aria-hidden="true">
-          <IconScanLine />
-        </span>
-        <div>
-          <p>账号入口</p>
-          <h2 id="login-title">登录工作台</h2>
-        </div>
-      </div>
+    <div class="login-float-shell">
+      <div class="login-float-shadow" aria-hidden="true"></div>
+      <section
+        ref="loginCardRef"
+        class="login-float-card"
+        :style="cardTiltStyle"
+        aria-label="登录表单"
+      >
+        <div class="panel-glow" aria-hidden="true"></div>
+        <div class="card-edge" aria-hidden="true"></div>
 
-      <form class="login-form" @submit.prevent="submitLogin">
-        <label class="field-group">
+        <form
+          class="login-form"
+          :class="{ 'is-shaking': shakeForm, 'is-loading': isLoading }"
+          @submit.prevent="submitLogin"
+        >
+        <label class="field-group field-enter" style="--i: 0">
           <span>账号</span>
           <span class="field-shell">
-            <IconUserRound aria-hidden="true" />
-            <Input
+            <IconUserRound class="field-icon" aria-hidden="true" />
+            <input
               v-model="form.username"
+              class="field-input"
               name="username"
               type="text"
               autocomplete="username"
@@ -153,12 +237,13 @@ async function submitLogin() {
           </span>
         </label>
 
-        <label class="field-group">
+        <label class="field-group field-enter" style="--i: 1">
           <span>密码</span>
           <span class="field-shell">
-            <IconLockKeyhole aria-hidden="true" />
-            <Input
+            <IconLockKeyhole class="field-icon" aria-hidden="true" />
+            <input
               v-model="form.password"
+              class="field-input"
               name="password"
               :type="isPasswordVisible ? 'text' : 'password'"
               autocomplete="current-password"
@@ -178,33 +263,46 @@ async function submitLogin() {
           </span>
         </label>
 
-        <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p>
+        <p
+          v-if="errorMessage"
+          class="form-error field-enter"
+          style="--i: 2"
+          role="alert"
+        >
+          {{ errorMessage }}
+        </p>
 
-        <Button class="submit-button" type="submit" :disabled="!canSubmit">
-          <span>{{ isLoading ? '正在连接' : '进入工作台' }}</span>
-          <IconSparkles v-if="isLoading" class="loading-spark" aria-hidden="true" />
-          <IconArrowRight v-else aria-hidden="true" />
+        <Button
+          class="submit-button field-enter"
+          style="--i: 3"
+          type="submit"
+          :disabled="!canSubmit"
+        >
+          <span class="submit-label">{{ isLoading ? '正在连接' : '进入工作台' }}</span>
+          <span class="submit-icon" aria-hidden="true">
+            <span v-if="isLoading" class="loading-ring"></span>
+            <IconArrowRight v-else />
+          </span>
+          <span class="submit-shimmer" aria-hidden="true"></span>
         </Button>
-      </form>
-
-      <footer class="panel-foot">
-        <span></span>
-        <p>接口：<strong>login</strong></p>
-      </footer>
-    </section>
+        </form>
+      </section>
+    </div>
   </main>
 </template>
 
 <style scoped>
 .login-page {
-  width: 100vw;
-  min-height: 100svh;
-  background:
-    linear-gradient(120deg, rgba(242, 247, 255, 0.96), rgba(239, 249, 246, 0.9)),
-    #f4f7fb;
+  --mx: 0px;
+  --my: 0px;
+  --glow-x: 50%;
+  --glow-y: 50%;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100svh;
+  background: #eef3fb;
   color: #101828;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 432px);
   overflow: hidden;
   font-family:
     Inter,
@@ -214,11 +312,21 @@ async function submitLogin() {
     BlinkMacSystemFont,
     'Segoe UI',
     sans-serif;
+  transition: opacity 0.48s ease, transform 0.48s ease;
+  transform-origin: center center;
+}
+
+.login-page.is-exiting {
+  opacity: 0;
+  transform: scale(1.012);
+  overflow: hidden;
 }
 
 .visual-plane {
   position: relative;
+  z-index: 1;
   min-height: 100svh;
+  width: 100%;
   overflow: hidden;
   isolation: isolate;
   display: flex;
@@ -235,8 +343,10 @@ async function submitLogin() {
   height: 100%;
   object-fit: cover;
   object-position: center;
-  transform: scale(1.06);
-  animation: image-drift 12s ease-in-out infinite alternate;
+  transform: scale(1.06) translate3d(calc(var(--mx) * 0.35), calc(var(--my) * 0.35), 0);
+  animation: image-drift 14s ease-in-out infinite alternate;
+  transition: transform 0.35s ease-out;
+  will-change: transform;
 }
 
 .visual-overlay {
@@ -244,8 +354,56 @@ async function submitLogin() {
   inset: 0;
   z-index: -2;
   background:
-    linear-gradient(90deg, rgba(248, 251, 255, 0.98) 0%, rgba(248, 251, 255, 0.84) 42%, rgba(248, 251, 255, 0.26) 100%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(77, 124, 254, 0.14));
+    linear-gradient(
+      90deg,
+      rgba(248, 251, 255, 0.96) 0%,
+      rgba(248, 251, 255, 0.78) 38%,
+      rgba(248, 251, 255, 0.42) 62%,
+      rgba(248, 251, 255, 0.18) 100%
+    ),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(77, 124, 254, 0.1));
+}
+
+.ambient-orbs {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.orb {
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(48px);
+  opacity: 0.55;
+  animation: orb-drift 9s ease-in-out infinite alternate;
+}
+
+.orb-one {
+  width: 220px;
+  height: 220px;
+  top: 18%;
+  left: 12%;
+  background: rgba(37, 99, 235, 0.22);
+}
+
+.orb-two {
+  width: 180px;
+  height: 180px;
+  right: 22%;
+  top: 42%;
+  background: rgba(16, 185, 129, 0.18);
+  animation-delay: -2.4s;
+}
+
+.orb-three {
+  width: 140px;
+  height: 140px;
+  left: 38%;
+  bottom: 22%;
+  background: rgba(99, 102, 241, 0.16);
+  animation-delay: -4.8s;
 }
 
 .visual-plane::after {
@@ -256,6 +414,8 @@ async function submitLogin() {
   border-radius: 8px;
   pointer-events: none;
   content: '';
+  transform: translate3d(calc(var(--mx) * 0.15), calc(var(--my) * 0.15), 0);
+  transition: transform 0.35s ease-out;
 }
 
 .brand-lockup {
@@ -268,7 +428,6 @@ async function submitLogin() {
   color: #0f172a;
   font-size: 15px;
   font-weight: 900;
-  letter-spacing: 0;
   animation: rise-in 0.48s ease-out both;
 }
 
@@ -282,6 +441,12 @@ async function submitLogin() {
   justify-content: center;
   box-shadow: 0 14px 38px -26px rgba(15, 23, 42, 0.54);
   overflow: hidden;
+  transition: transform 0.28s ease, box-shadow 0.28s ease;
+}
+
+.brand-lockup:hover .brand-mark {
+  transform: rotate(-4deg) scale(1.06);
+  box-shadow: 0 18px 42px -24px rgba(37, 99, 235, 0.42);
 }
 
 .brand-mark img {
@@ -293,26 +458,45 @@ async function submitLogin() {
 .hero-copy {
   position: relative;
   z-index: 2;
-  max-width: 620px;
+  max-width: min(620px, calc(100vw - 580px));
   padding-bottom: min(13vh, 118px);
   animation: rise-in 0.58s 0.08s ease-out both;
+  transform: translate3d(calc(var(--mx) * 0.2), calc(var(--my) * 0.2), 0);
+  transition: transform 0.35s ease-out;
 }
 
 .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   color: #2563eb;
   font-size: 13px;
   font-weight: 950;
   text-transform: uppercase;
 }
 
+.eyebrow-cursor {
+  width: 2px;
+  height: 14px;
+  background: #2563eb;
+  animation: cursor-blink 1.1s step-end infinite;
+}
+
 .hero-copy h1 {
   max-width: 590px;
   margin: 18px 0 18px;
-  color: #0f172a;
   font-size: clamp(52px, 6.4vw, 92px);
   font-weight: 950;
   line-height: 0.94;
-  letter-spacing: 0;
+}
+
+.title-gradient {
+  background: linear-gradient(120deg, #0f172a 0%, #1e3a8a 45%, #0f766e 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: title-shimmer 6s ease-in-out infinite alternate;
 }
 
 .hero-copy p {
@@ -324,95 +508,10 @@ async function submitLogin() {
   font-weight: 700;
 }
 
-.mission-map {
-  position: absolute;
-  z-index: 1;
-  right: clamp(20px, 3vw, 46px);
-  bottom: 58px;
-  width: min(34vw, 390px);
-  aspect-ratio: 1.42;
-  pointer-events: none;
-}
-
-.mission-map::before {
-  position: absolute;
-  inset: 16% 8%;
-  border: 1px solid rgba(37, 99, 235, 0.22);
-  border-radius: 8px;
-  background:
-    linear-gradient(90deg, rgba(37, 99, 235, 0.13) 1px, transparent 1px),
-    linear-gradient(180deg, rgba(16, 185, 129, 0.12) 1px, transparent 1px);
-  background-size: 46px 46px;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.62);
-  content: '';
-  transform: skewY(-4deg);
-}
-
-.scan-line {
-  position: absolute;
-  left: 12%;
-  right: 12%;
-  top: 27%;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, rgba(37, 99, 235, 0.9), transparent);
-  animation: scan-pass 3.4s ease-in-out infinite;
-}
-
-.map-pin,
-.orbit-tag {
-  position: absolute;
-  min-width: 54px;
-  height: 30px;
-  border: 1px solid rgba(255, 255, 255, 0.72);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.78);
-  color: #0f172a;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 950;
-  box-shadow: 0 16px 34px -28px rgba(15, 23, 42, 0.46);
-  backdrop-filter: blur(12px);
-}
-
-.map-pin::before {
-  width: 7px;
-  height: 7px;
-  margin-right: 6px;
-  border-radius: 999px;
-  background: #10b981;
-  content: '';
-}
-
-.pin-one {
-  left: 17%;
-  top: 33%;
-}
-
-.pin-two {
-  right: 23%;
-  top: 45%;
-}
-
-.pin-three {
-  left: 44%;
-  bottom: 20%;
-}
-
-.orbit-tag {
-  left: var(--x);
-  bottom: var(--y);
-  border-color: rgba(37, 99, 235, 0.18);
-  color: #2563eb;
-  animation: tag-float 4s ease-in-out infinite;
-  animation-delay: var(--delay);
-}
-
 .signal-strip {
   position: relative;
   z-index: 2;
-  width: min(760px, 100%);
+  width: min(760px, calc(100vw - 580px));
   border-top: 1px solid rgba(37, 99, 235, 0.16);
   padding-top: 18px;
   display: grid;
@@ -421,122 +520,213 @@ async function submitLogin() {
   animation: rise-in 0.58s 0.18s ease-out both;
 }
 
-.signal-strip span {
+.login-float-shell {
+  position: fixed;
+  z-index: 20;
+  right: clamp(24px, 4vw, 64px);
+  top: 50%;
+  width: min(520px, calc(100vw - 48px));
+  perspective: 1200px;
+  translate: 0 -50%;
+  transform: rotateX(5deg);
+  transform-origin: center center;
+  animation:
+    shell-rise 0.72s 0.1s cubic-bezier(0.22, 1, 0.36, 1) both,
+    shell-float 5.5s 0.82s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.login-float-shadow {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  bottom: -28px;
+  height: 36px;
+  border-radius: 999px;
+  background: radial-gradient(ellipse, rgba(15, 23, 42, 0.28), transparent 72%);
+  filter: blur(10px);
+  transform: rotateX(72deg);
+  animation: shadow-pulse 5.5s ease-in-out infinite;
+}
+
+.login-float-card {
+  position: relative;
+  pointer-events: auto;
+  padding: 42px 38px 38px;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  border-radius: 26px;
+  background:
+    linear-gradient(155deg, rgba(255, 255, 255, 0.92) 0%, rgba(255, 255, 255, 0.78) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 22px 44px -14px rgba(15, 23, 42, 0.2),
+    0 48px 96px -28px rgba(37, 99, 235, 0.32);
+  backdrop-filter: blur(22px) saturate(1.2);
+  overflow: hidden;
+  transform-style: preserve-3d;
+  transition: transform 0.28s ease-out, box-shadow 0.28s ease-out;
+}
+
+.login-float-card:hover {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 24px 48px -16px rgba(15, 23, 42, 0.22),
+    0 52px 96px -24px rgba(37, 99, 235, 0.34);
+}
+
+.card-edge {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.08);
+}
+
+.card-edge::after {
+  position: absolute;
+  top: 0;
+  left: 12%;
+  right: 12%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.95), transparent);
+  content: '';
+}
+
+.signal-item {
+  position: relative;
   min-width: 0;
+  padding: 10px 12px 12px;
+  border-radius: 8px;
   color: #64748b;
   font-size: 12px;
   font-weight: 850;
   line-height: 1.3;
+  overflow: hidden;
+  transition:
+    color 0.32s ease,
+    background 0.32s ease,
+    transform 0.32s ease;
 }
 
-.signal-strip strong {
+.signal-item.is-active {
+  color: #334155;
+  background: rgba(255, 255, 255, 0.62);
+  transform: translateY(-2px);
+  box-shadow: 0 14px 28px -22px rgba(37, 99, 235, 0.38);
+}
+
+.signal-item strong {
   display: block;
   margin-bottom: 5px;
   color: #0f172a;
   font-size: 18px;
   font-weight: 950;
+  transition: color 0.32s ease;
 }
 
-.login-panel {
-  position: relative;
-  min-height: 100svh;
-  border-left: 1px solid rgba(203, 213, 225, 0.68);
-  background: rgba(255, 255, 255, 0.84);
-  box-shadow: -30px 0 72px -60px rgba(15, 23, 42, 0.7);
-  padding: clamp(30px, 5vw, 58px);
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  backdrop-filter: blur(18px);
-}
-
-.panel-head {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.panel-icon {
-  width: 46px;
-  height: 46px;
-  border-radius: 8px;
-  background: #0f172a;
-  color: #ffffff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 16px 34px -24px rgba(15, 23, 42, 0.78);
-}
-
-.panel-icon svg {
-  width: 21px;
-  height: 21px;
-}
-
-.panel-head p,
-.panel-head h2 {
-  margin: 0;
-}
-
-.panel-head p {
+.signal-item.is-active strong {
   color: #2563eb;
-  font-size: 12px;
-  font-weight: 950;
 }
 
-.panel-head h2 {
-  margin-top: 5px;
-  color: #101828;
-  font-size: 30px;
-  font-weight: 950;
-  letter-spacing: 0;
+.signal-progress {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.12);
+  overflow: hidden;
+}
+
+.signal-progress::after {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2563eb, #10b981);
+  content: '';
+}
+
+.signal-item.is-active .signal-progress::after {
+  animation: signal-fill 2.8s linear forwards;
+}
+
+.panel-glow {
+  position: absolute;
+  inset: -50%;
+  background: radial-gradient(
+    circle at var(--glow-x) var(--glow-y),
+    rgba(37, 99, 235, 0.16),
+    transparent 40%
+  );
+  pointer-events: none;
 }
 
 .login-form {
-  margin-top: 42px;
+  position: relative;
+  z-index: 1;
   display: grid;
-  gap: 22px;
+  gap: 26px;
+}
+
+.login-form.is-shaking {
+  animation: form-shake 0.48s ease;
+}
+
+.field-enter {
+  animation: field-slide-in 0.55s calc(0.12s + var(--i, 0) * 0.08s) ease-out both;
 }
 
 .field-group {
   display: grid;
-  gap: 9px;
+  gap: 10px;
   color: #334155;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 900;
 }
 
 .field-shell {
-  height: 54px;
+  height: 58px;
   border: 1px solid rgba(148, 163, 184, 0.38);
-  border-radius: 8px;
+  border-radius: 10px;
   background: rgba(248, 250, 252, 0.82);
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 0 14px;
+  gap: 12px;
+  padding: 0 16px;
   color: #64748b;
   transition:
-    border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    background 0.18s ease,
-    transform 0.18s ease;
+    border-color 0.22s ease,
+    box-shadow 0.22s ease,
+    background 0.22s ease,
+    transform 0.22s ease;
 }
 
 .field-shell:focus-within {
   border-color: rgba(37, 99, 235, 0.64);
   background: #ffffff;
-  box-shadow: 0 16px 30px -26px rgba(37, 99, 235, 0.9);
-  transform: translateY(-1px);
+  box-shadow:
+    0 0 0 3px rgba(37, 99, 235, 0.12),
+    0 16px 30px -26px rgba(37, 99, 235, 0.9);
+  transform: translateY(-2px);
 }
 
-.field-shell svg {
+.field-shell:focus-within .field-icon {
+  color: #2563eb;
+  transform: scale(1.08);
+}
+
+.field-icon {
   width: 19px;
   height: 19px;
   flex: 0 0 auto;
+  transition: color 0.22s ease, transform 0.22s ease;
 }
 
-.field-shell input {
+.field-input {
   min-width: 0;
   width: 100%;
   border: 0;
@@ -544,16 +734,36 @@ async function submitLogin() {
   background: transparent;
   color: #0f172a;
   font: inherit;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 800;
+  box-shadow: none;
+  appearance: none;
 }
 
-.field-shell input::placeholder {
+.field-input::placeholder {
   color: #94a3b8;
+  transition: opacity 0.2s ease;
 }
 
-.field-shell input:disabled {
+.field-shell:focus-within .field-input::placeholder {
+  opacity: 0.55;
+}
+
+.field-input:disabled {
   cursor: not-allowed;
+}
+
+.field-input:-webkit-autofill,
+.field-input:-webkit-autofill:hover,
+.field-input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px rgba(248, 250, 252, 0.82) inset;
+  -webkit-text-fill-color: #0f172a;
+  caret-color: #0f172a;
+  transition: background-color 9999s ease-out 0s;
+}
+
+.field-shell:focus-within .field-input:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0 1000px #ffffff inset;
 }
 
 .ghost-icon {
@@ -567,12 +777,14 @@ async function submitLogin() {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
 }
 
 .ghost-icon:hover:not(:disabled),
 .ghost-icon:focus-visible {
   background: rgba(226, 232, 240, 0.68);
   color: #0f172a;
+  transform: scale(1.06);
 }
 
 .form-error {
@@ -581,12 +793,14 @@ async function submitLogin() {
   color: #dc2626;
   font-size: 13px;
   font-weight: 850;
+  animation: error-pop 0.32s ease-out;
 }
 
 .submit-button {
-  height: 56px;
+  position: relative;
+  height: 60px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   background: linear-gradient(135deg, #2563eb, #0f766e);
   color: #ffffff;
   display: inline-flex;
@@ -594,24 +808,33 @@ async function submitLogin() {
   justify-content: center;
   gap: 10px;
   font: inherit;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 950;
   cursor: pointer;
+  overflow: hidden;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.22),
     0 20px 38px -26px rgba(15, 23, 42, 0.82);
   transition:
-    transform 0.18s ease,
-    box-shadow 0.18s ease,
-    filter 0.18s ease;
+    transform 0.22s ease,
+    box-shadow 0.22s ease,
+    filter 0.22s ease;
 }
 
 .submit-button:hover:not(:disabled),
 .submit-button:focus-visible {
-  transform: translateY(-2px);
+  transform: translateY(-3px);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.22),
-    0 24px 44px -24px rgba(15, 23, 42, 0.86);
+    0 26px 48px -22px rgba(37, 99, 235, 0.55);
+}
+
+.submit-button:hover:not(:disabled) .submit-icon {
+  transform: translateX(4px);
+}
+
+.login-form.is-loading .submit-button {
+  animation: submit-pulse 1.2s ease-in-out infinite;
 }
 
 .submit-button:disabled {
@@ -620,41 +843,47 @@ async function submitLogin() {
   opacity: 0.62;
 }
 
-.submit-button svg {
+.submit-icon {
+  display: inline-flex;
+  transition: transform 0.22s ease;
+}
+
+.submit-icon svg {
   width: 19px;
   height: 19px;
 }
 
-.loading-spark {
-  animation: spark-spin 1s linear infinite;
+.submit-shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 38%,
+    rgba(255, 255, 255, 0.28) 50%,
+    transparent 62%
+  );
+  transform: translateX(-120%);
+  transition: transform 0.6s ease;
+  pointer-events: none;
 }
 
-.panel-foot {
-  margin-top: 34px;
-  border-top: 1px solid rgba(203, 213, 225, 0.72);
-  padding-top: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+.submit-button:hover:not(:disabled) .submit-shimmer {
+  transform: translateX(120%);
 }
 
-.panel-foot span {
-  width: 68px;
-  height: 3px;
+.loading-ring {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.32);
+  border-top-color: #ffffff;
   border-radius: 999px;
-  background: linear-gradient(90deg, #2563eb, #10b981);
+  animation: ring-spin 0.75s linear infinite;
 }
 
-.panel-foot p {
-  margin: 0;
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 850;
-}
-
-.panel-foot strong {
-  color: #0f172a;
+@keyframes ring-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @keyframes rise-in {
@@ -668,56 +897,154 @@ async function submitLogin() {
   }
 }
 
+@keyframes field-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(22px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
 @keyframes image-drift {
   from {
-    transform: scale(1.06) translate3d(-1.5%, 0, 0);
+    transform: scale(1.06) translate3d(calc(-1.5% + var(--mx) * 0.35), calc(var(--my) * 0.35), 0);
   }
   to {
-    transform: scale(1.1) translate3d(1.5%, -1%, 0);
+    transform: scale(1.1) translate3d(calc(1.5% + var(--mx) * 0.35), calc(-1% + var(--my) * 0.35), 0);
   }
 }
 
-@keyframes scan-pass {
-  0%,
-  100% {
-    opacity: 0.2;
-    transform: translateY(0);
+@keyframes orb-drift {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
   }
-  42% {
+  to {
+    transform: translate3d(18px, -14px, 0) scale(1.08);
+  }
+}
+
+@keyframes cursor-blink {
+  0%,
+  45% {
     opacity: 1;
-    transform: translateY(132px);
+  }
+  46%,
+  100% {
+    opacity: 0;
   }
 }
 
-@keyframes tag-float {
+@keyframes title-shimmer {
+  from {
+    background-position: 0% center;
+  }
+  to {
+    background-position: 100% center;
+  }
+}
+
+@keyframes signal-fill {
+  from {
+    width: 0;
+  }
+  to {
+    width: 100%;
+  }
+}
+
+@keyframes form-shake {
   0%,
   100% {
+    transform: translateX(0);
+  }
+  20%,
+  60% {
+    transform: translateX(-6px);
+  }
+  40%,
+  80% {
+    transform: translateX(6px);
+  }
+}
+
+@keyframes error-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes submit-pulse {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.22),
+      0 20px 38px -26px rgba(15, 23, 42, 0.82);
   }
   50% {
-    transform: translateY(-10px);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.22),
+      0 24px 48px -20px rgba(37, 99, 235, 0.62);
   }
 }
 
-@keyframes spark-spin {
+@keyframes shell-rise {
+  from {
+    opacity: 0;
+    translate: 0 calc(-50% + 36px);
+  }
   to {
-    transform: rotate(360deg);
+    opacity: 1;
+    translate: 0 -50%;
+  }
+}
+
+@keyframes shell-float {
+  0%,
+  100% {
+    translate: 0 calc(-50% - 4px);
+  }
+  50% {
+    translate: 0 calc(-50% - 14px);
+  }
+}
+
+@keyframes shadow-pulse {
+  0%,
+  100% {
+    opacity: 0.72;
+    transform: rotateX(72deg) scale(0.96);
+  }
+  50% {
+    opacity: 0.95;
+    transform: rotateX(72deg) scale(1.04);
   }
 }
 
 @media (max-width: 1080px) {
-  .login-page {
-    grid-template-columns: 1fr;
+  .login-page:not(.is-exiting) {
     overflow: auto;
   }
 
   .visual-plane {
-    min-height: 48svh;
-    padding: 32px 24px;
+    min-height: 100svh;
+    padding: 32px 24px 400px;
+  }
+
+  .hero-copy,
+  .signal-strip {
+    max-width: 100%;
+    width: 100%;
   }
 
   .hero-copy {
-    max-width: 560px;
     padding: 54px 0 24px;
   }
 
@@ -725,29 +1052,30 @@ async function submitLogin() {
     font-size: clamp(42px, 10vw, 70px);
   }
 
-  .mission-map {
-    right: 18px;
-    bottom: 70px;
-    width: min(56vw, 420px);
-    opacity: 0.76;
+  .login-float-shell {
+    position: fixed;
+    right: 50%;
+    top: auto;
+    bottom: 28px;
+    width: min(480px, calc(100vw - 32px));
+    translate: 50% 0;
+    transform: rotateX(3deg);
+    animation: shell-rise-mobile 0.72s 0.1s cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
-  .login-panel {
-    min-height: auto;
-    border-top: 1px solid rgba(203, 213, 225, 0.72);
-    border-left: 0;
-    padding: 36px 24px 42px;
+  .login-float-shadow {
+    bottom: -20px;
   }
 }
 
 @media (max-width: 680px) {
   .visual-plane {
-    min-height: 42svh;
-    padding: 24px 18px;
+    min-height: 100svh;
+    padding: 24px 18px 380px;
   }
 
   .visual-plane::after,
-  .mission-map {
+  .ambient-orbs {
     display: none;
   }
 
@@ -780,24 +1108,57 @@ async function submitLogin() {
     gap: 12px;
   }
 
-  .login-panel {
-    padding: 30px 18px 36px;
+  .login-float-shell {
+    bottom: 18px;
+    width: calc(100vw - 28px);
   }
 
-  .panel-head h2 {
-    font-size: 26px;
+  .login-float-card {
+    padding: 34px 28px 30px;
+    border-radius: 22px;
+  }
+}
+
+@keyframes shell-rise-mobile {
+  from {
+    opacity: 0;
+    translate: 50% 24px;
+  }
+  to {
+    opacity: 1;
+    translate: 50% 0;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .campus-image,
-  .scan-line,
-  .orbit-tag,
-  .loading-spark,
+  .orb,
+  .eyebrow-cursor,
+  .title-gradient,
+  .signal-progress::after,
+  .loading-ring,
   .brand-lockup,
   .hero-copy,
-  .signal-strip {
+  .signal-strip,
+  .field-enter,
+  .login-page,
+  .submit-button,
+  .login-float-shell,
+  .login-float-shadow {
     animation: none;
+    transition: none;
+  }
+
+  .campus-image,
+  .hero-copy,
+  .visual-plane::after,
+  .login-float-card {
+    transform: none;
+  }
+
+  .login-float-shell {
+    translate: 0 -50%;
+    transform: rotateX(5deg);
   }
 }
 </style>

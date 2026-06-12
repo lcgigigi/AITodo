@@ -1,14 +1,30 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import CalendarWorkspace from './dashboard/CalendarWorkspace.vue'
 import DashboardTopBar from './dashboard/DashboardTopBar.vue'
+
+type CalendarWorkspaceExpose = {
+  refreshTodos: () => Promise<void>
+  openTodoFromNotification: (payload: { id: string; date: string }) => Promise<void>
+}
+
+const calendarWorkspaceRef = ref<CalendarWorkspaceExpose | null>(null)
+
+function handleCalendarRefresh() {
+  void calendarWorkspaceRef.value?.refreshTodos()
+}
+
+function handleOpenTodo(payload: { id: string; date: string }) {
+  void calendarWorkspaceRef.value?.openTodoFromNotification(payload)
+}
 </script>
 
 <template>
   <div class="page-container">
     <main class="dashboard-shell">
-      <DashboardTopBar />
+      <DashboardTopBar @calendar-refresh="handleCalendarRefresh" @open-todo="handleOpenTodo" />
       <div class="dashboard-content">
-        <CalendarWorkspace />
+        <CalendarWorkspace ref="calendarWorkspaceRef" />
       </div>
     </main>
   </div>

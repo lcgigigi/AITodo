@@ -12,11 +12,17 @@ import {
   loadCurrentUser,
   loadPendingTodos,
   loadTodoDetail,
+  getTodoMonthRange,
+  getTodoWeekRange,
   loadTodos,
   loginSmartTodo,
   rejectTodo,
+  cancelTodoComplete,
+  revokeTodoComplete,
+  syncCalendar,
   transferTodos,
   updateTodo,
+  updateTodoStatus,
 } from './todo.service'
 import type { CalendarUser } from './types'
 
@@ -104,9 +110,8 @@ describe('todo.service real backend adapter', () => {
       if (config.url === '/smart-todo/analyze') {
         return backendResponse({
           task: '项目复盘',
-          timeType: 'specific_time',
-          date: '2026-06-07',
-          time: '17:00',
+          timeType: 1,
+          startDateShow: '2026-06-07 17:00:00',
           assigneeId: '1102080',
           remark: '',
         }) as never
@@ -122,8 +127,7 @@ describe('todo.service real backend adapter', () => {
             id: 123,
             title: '项目复盘',
             timeType: 1,
-            specificDate: '2026-06-07',
-            specificTime: '17:00:00',
+            startDateShow: '2026-06-07 17:00:00',
             status: 0,
             assigneeId: '1102080',
             creatorId: '1102080',
@@ -136,15 +140,21 @@ describe('todo.service real backend adapter', () => {
           id: 123,
           title: '项目复盘',
           timeType: 1,
-          specificDate: '2026-06-07',
-          specificTime: '17:00:00',
+          startDateShow: '2026-06-07 17:00:00',
           status: 0,
           assigneeId: '1102080',
           creatorId: '1102080',
         }) as never
       }
 
-      if (config.url === '/smart-todo/create') return backendResponse(123) as never
+      if (config.url === '/smart-todo/create') {
+        expect(config.data).toMatchObject({
+          title: '项目复盘',
+          timeType: 1,
+          startDateShow: '2026-06-07 17:00:00',
+        })
+        return backendResponse(123) as never
+      }
 
       return backendResponse(true) as never
     })
@@ -202,6 +212,9 @@ describe('todo.service real backend adapter', () => {
     ).resolves.toBe(true)
     await expect(deleteTodo('123')).resolves.toBe(true)
     await expect(completeTodo('123', currentUser)).resolves.toBe(true)
+    await expect(cancelTodoComplete('123')).resolves.toBe(true)
+    await expect(revokeTodoComplete('123', currentUser, assignableUsers)).resolves.toBe(true)
+    await expect(updateTodoStatus('123', currentUser, 'todo', assignableUsers)).resolves.toBe(true)
     await expect(rejectTodo('123', '暂不处理')).resolves.toBe(true)
     await expect(acceptTodos(['123', '124'])).resolves.toBe(true)
     await expect(transferTodos(['123', '124'], '1102080')).resolves.toBe(true)
@@ -218,6 +231,7 @@ describe('todo.service real backend adapter', () => {
         { method: 'PUT', url: '/smart-todo' },
         { method: 'DELETE', url: '/smart-todo/123' },
         { method: 'POST', url: '/smart-todo/complete/123' },
+        { method: 'POST', url: '/smart-todo/cancel' },
         { method: 'POST', url: '/smart-todo/reject' },
         { method: 'POST', url: '/smart-todo/accept' },
         { method: 'POST', url: '/smart-todo/transfer' },
@@ -225,7 +239,7 @@ describe('todo.service real backend adapter', () => {
     )
   })
 
-  it('keeps specific_time analyze result in scheduled mode without fallback endDate', async () => {
+  it('maps analyze result with date and time fields for specific_time', async () => {
     vi.mocked(httpClient.request).mockResolvedValueOnce({
       data: {
         code: 200,
@@ -237,6 +251,42 @@ describe('todo.service real backend adapter', () => {
           time: '09:00',
           startDate: '',
           endDate: '',
+          assigneeId: '',
+          remark: '在317',
+        },
+      },
+    })
+
+    const parsed = await analyzeTodoText(
+      '这周五上午九点在317开部门会议',
+      currentUser,
+      assignableUsers,
+      {
+        date: '2026-06-02',
+        endDate: '2026-06-02',
+        title: '',
+      },
+    )
+
+    expect(parsed).toMatchObject({
+      mode: 'scheduled',
+      date: '2026-06-12',
+      time: '09:00',
+      title: '开部门会议',
+      source: '在317',
+    })
+    expect(parsed.endDate).toBeUndefined()
+  })
+
+  it('keeps timeType=1 analyze result in scheduled mode without fallback endDate', async () => {
+    vi.mocked(httpClient.request).mockResolvedValueOnce({
+      data: {
+        code: 200,
+        msg: '操作成功',
+        data: {
+          task: '开部门会议',
+          timeType: 1,
+          startDateShow: '2026-06-12 09:00:00',
           assigneeId: '',
           remark: '在317',
         },
@@ -262,6 +312,161 @@ describe('todo.service real backend adapter', () => {
       source: '在317',
     })
     expect(parsed.endDate).toBeUndefined()
+  })
+
+  it('maps timeType=2 analyze result to deadline mode with startDateShow and endDateShow', async () => {
+    vi.mocked(httpClient.request).mockResolvedValueOnce({
+      data: {
+        code: 200,
+        msg: '操作成功',
+        data: {
+          task: '季度总结',
+          timeType: 2,
+          startDateShow: '2026-06-01 00:00:00',
+          endDateShow: '2026-06-30 23:59:59',
+          assigneeId: '1102080',
+          remark: '',
+        },
+      },
+    })
+
+    const parsed = await analyzeTodoText('本月完成季度总结', currentUser, assignableUsers, {
+      date: '2026-06-09',
+      title: '',
+    })
+
+    expect(parsed).toMatchObject({
+      mode: 'deadline',
+      date: '2026-06-01',
+      time: '00:00',
+      endDate: '2026-06-30',
+      endTime: '23:59',
+      title: '季度总结',
+    })
+  })
+
+  it('sends startDateShow and endDateShow when saving deadline todos', async () => {
+    vi.mocked(httpClient.request).mockImplementation((config) => {
+      if (config.url === '/smart-todo/create') {
+        expect(config.data).toMatchObject({
+          timeType: 2,
+          startDateShow: '2026-06-01 00:00:00',
+          endDateShow: '2026-06-30 23:59:59',
+        })
+        return backendResponse(456) as never
+      }
+
+      return backendResponse(true) as never
+    })
+
+    await expect(
+      createTodo({
+        date: '2026-06-01',
+        endDate: '2026-06-30',
+        title: '季度总结',
+        assigneeId: '1102080',
+      }),
+    ).resolves.toBe(456)
+  })
+
+  it('sends selected start and end times when saving deadline todos with time', async () => {
+    vi.mocked(httpClient.request).mockImplementation((config) => {
+      if (config.url === '/smart-todo/create') {
+        expect(config.data).toMatchObject({
+          timeType: 2,
+          startDateShow: '2026-06-01 09:00:00',
+          endDateShow: '2026-06-30 18:30:00',
+        })
+        return backendResponse(457) as never
+      }
+
+      return backendResponse(true) as never
+    })
+
+    await expect(
+      createTodo({
+        date: '2026-06-01',
+        endDate: '2026-06-30',
+        time: '09:00',
+        endTime: '18:30',
+        title: '季度总结',
+        assigneeId: '1102080',
+      }),
+    ).resolves.toBe(457)
+  })
+
+  it('calls sync-calendar to sync mailbox schedules', async () => {
+    vi.mocked(httpClient.request).mockImplementation((config) => {
+      if (config.url === '/smart-todo/sync-calendar') {
+        expect(config.method).toBe('POST')
+        return backendResponse(true) as never
+      }
+
+      return backendResponse(true) as never
+    })
+
+    await expect(syncCalendar()).resolves.toBe(true)
+  })
+
+  it('preserves midnight start time for deadline todos from backend list', async () => {
+    vi.mocked(httpClient.request).mockImplementation((config) => {
+      if (config.url === '/smart-todo/month-list') {
+        return backendResponse([
+          {
+            id: 2,
+            title: '11',
+            timeType: 2,
+            startDateShow: '2026-06-11 00:00:00',
+            endDateShow: '2026-06-27 23:59:59',
+            status: 3,
+            assigneeId: '1102080',
+            creatorId: '1102080',
+          },
+        ]) as never
+      }
+
+      return backendResponse(true) as never
+    })
+
+    await expect(loadTodos(currentUser, assignableUsers)).resolves.toMatchObject([
+      {
+        id: '2',
+        date: '2026-06-11',
+        time: '00:00',
+        endDate: '2026-06-27',
+        endTime: '23:59',
+      },
+    ])
+  })
+
+  it('loads month-list with startDate and endDate query params', async () => {
+    vi.mocked(httpClient.request).mockImplementation(async (config) => {
+      if (config.url === '/smart-todo/month-list') {
+        expect(config.params).toEqual({
+          startDate: '2026-05-01',
+          endDate: '2026-05-31',
+        })
+        return backendResponse([]) as never
+      }
+
+      return backendResponse(true) as never
+    })
+
+    await loadTodos(currentUser, assignableUsers, {
+      startDate: '2026-05-01',
+      endDate: '2026-05-31',
+    })
+  })
+
+  it('builds month and week date ranges for calendar loading', () => {
+    expect(getTodoMonthRange(new Date(2026, 4, 15))).toEqual({
+      startDate: '2026-05-01',
+      endDate: '2026-05-31',
+    })
+    expect(getTodoWeekRange('2026-06-10')).toEqual({
+      startDate: '2026-06-08',
+      endDate: '2026-06-14',
+    })
   })
 
   it('keeps sorting and permission enrichment local without mock seed data', () => {

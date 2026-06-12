@@ -12,6 +12,7 @@ export interface CalendarEvent {
   date: string
   endDate?: string
   time?: string
+  endTime?: string
   title: string
   type: CalendarEventType
   owner: string
@@ -37,6 +38,7 @@ export interface CalendarTodoDraft {
   date: string
   endDate?: string
   time?: string
+  endTime?: string
   title: string
   owner?: string
   source?: string
@@ -49,6 +51,7 @@ export interface CalendarTodoUpdate {
   date: string
   endDate?: string
   time?: string
+  endTime?: string
   title: string
   owner: string
   source?: string
@@ -61,6 +64,7 @@ export interface CalendarTodoForm {
   date: string
   endDate: string
   time: string
+  endTime: string
   title: string
   owner: string
   assigneeId: string
@@ -83,6 +87,7 @@ export interface ParsedTodoDraft {
   date: string
   endDate?: string
   time?: string
+  endTime?: string
   title: string
   owner?: string
   assigneeId?: string
