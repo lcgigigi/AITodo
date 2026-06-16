@@ -28,7 +28,7 @@ interface SmartTodoLoginResponse extends SmartTodoResponse {
   token?: string
 }
 
-interface SmartTodoInfoResponse extends SmartTodoResponse {
+interface SmartTodoInfoPayload {
   user?: {
     userId?: string | number
     userName?: string
@@ -37,9 +37,18 @@ interface SmartTodoInfoResponse extends SmartTodoResponse {
     deptName?: string
     department?: string
     isSecurityPassword?: 'yes' | 'no'
+    checkEmail?: string | null
   }
   roles?: string[]
   permissions?: string[]
+  checkEmail?: string | null
+}
+
+interface SmartTodoInfoResponse extends SmartTodoResponse<SmartTodoInfoPayload> {
+  user?: SmartTodoInfoPayload['user']
+  roles?: string[]
+  permissions?: string[]
+  checkEmail?: string | null
 }
 
 interface SmartTodoBackendUser {
@@ -63,6 +72,7 @@ interface SmartTodoBackendItem {
   currentHandlerId?: string | number | null
   handlerIds?: string | null
   receiveStatus?: number | null
+  handleDesc?: string | null
 }
 
 interface SmartTodoAnalyzeData {
@@ -99,10 +109,18 @@ export interface SmartTodoCurrentUser extends CalendarUser {
   roles: string[]
   permissions: string[]
   isSecurityPassword?: 'yes' | 'no'
+  checkEmail?: string | null
 }
+
+export type SmartTodoEmailProvider = 'outlook' | 'coremail'
 
 function getResponseMessage(response: SmartTodoResponse, fallbackMessage: string) {
   return response.msg || response.message || fallbackMessage
+}
+
+function getOptionalText(value: unknown) {
+  if (value === null || value === undefined) return undefined
+  return String(value).trim()
 }
 
 function unwrapSmartTodoResponse<T>(response: SmartTodoResponse<T>, fallbackMessage: string): T {
@@ -213,41 +231,69 @@ function isValidAnalyzeDate(value?: string | null) {
 
 function normalizeAnalyzeSchedule(data: SmartTodoAnalyzeData) {
   const isRangeByType = resolveAnalyzeTimeType(data.timeType) === 2
-  const startDate = data.startDate?.trim()
-  const endDate = data.endDate?.trim()
-  const hasRangeDates = isValidAnalyzeDate(startDate) && isValidAnalyzeDate(endDate)
-  const isRange = isRangeByType || hasRangeDates
+  const startFromDateTime = parseDateTimeShow(data.startDate, isRangeByType)
+  const endFromDateTime = parseDateTimeShow(data.endDate, true)
+  const startFromShow = parseDateTimeShow(data.startDateShow, isRangeByType)
+  const endFromShow = parseDateTimeShow(data.endDateShow, true)
+  const hasDateTimeRange = Boolean(startFromDateTime.date && endFromDateTime.date)
+  const hasShowRange = Boolean(startFromShow.date && endFromShow.date)
+  const isRange = isRangeByType || hasDateTimeRange || hasShowRange
   const preserveMidnight = isRange
 
   if (isValidAnalyzeDate(data.date)) {
     return {
       isRange,
-      date: isRange && isValidAnalyzeDate(startDate) ? startDate! : data.date!.trim(),
+      date:
+        isRange && startFromDateTime.date
+          ? startFromDateTime.date
+          : data.date!.trim(),
       time: normalizeFormTime(data.time, preserveMidnight),
-      endDate: isRange ? endDate : undefined,
-      endTime: isRange ? normalizeFormTime(data.endTime, true) : undefined,
+      endDate: isRange ? endFromDateTime.date || endFromShow.date : undefined,
+      endTime: isRange ? endFromDateTime.time || endFromShow.time : undefined,
     }
   }
 
-  if (isRange && isValidAnalyzeDate(startDate)) {
+  if (isRange && startFromDateTime.date) {
     return {
       isRange: true,
-      date: startDate!,
+      date: startFromDateTime.date,
+      time: startFromDateTime.time,
+      endDate: endFromDateTime.date || startFromDateTime.date,
+      endTime: endFromDateTime.time,
+    }
+  }
+
+  if (isRange && isValidAnalyzeDate(data.startDate)) {
+    const startDate = data.startDate!.trim()
+    const endDate = data.endDate?.trim()
+
+    return {
+      isRange: true,
+      date: startDate,
       time: normalizeFormTime(data.time, true),
-      endDate: endDate || startDate,
+      endDate: isValidAnalyzeDate(endDate) ? endDate : startDate,
       endTime: normalizeFormTime(data.endTime, true),
     }
   }
 
-  const start = parseDateTimeShow(data.startDateShow, preserveMidnight)
-  const end = parseDateTimeShow(data.endDateShow, preserveMidnight)
+  if (isRange && startFromShow.date) {
+    return {
+      isRange: true,
+      date: startFromShow.date,
+      time: startFromShow.time,
+      endDate: endFromShow.date || startFromShow.date,
+      endTime: endFromShow.time,
+    }
+  }
+
+  const start = startFromShow.date ? startFromShow : startFromDateTime
 
   return {
-    isRange,
+    isRange: false,
     date: start.date,
     time: start.time,
-    endDate: isRange ? end.date : undefined,
-    endTime: isRange ? end.time : undefined,
+    endDate: undefined,
+    endTime: undefined,
   }
 }
 
@@ -296,7 +342,10 @@ function normalizeBackendTodo(
   const endDate = timeType === 2 ? end.date || date : undefined
   const title = item.title?.trim() || item.content?.trim() || '未命名待办'
   const status = mapBackendStatus(item.status)
-  const completable = resolveCompletable(assigneeId, currentHandlerId, currentUser)
+  const isRejected = item.status === 9
+  const completable = isRejected
+    ? false
+    : resolveCompletable(assigneeId, currentHandlerId, currentUser)
 
   return {
     id,
@@ -314,10 +363,11 @@ function normalizeBackendTodo(
     assigneeId: assigneeId || undefined,
     assigneeName,
     scope: resolveScope(creatorId, assigneeId, currentUser),
-    editable: status !== 'done' && (!creatorId || creatorId === currentUser.id),
+    editable: !isRejected && status !== 'done' && (!creatorId || creatorId === currentUser.id),
     completable,
     backendStatus: item.status,
     receiveStatus: item.receiveStatus ?? undefined,
+    handleDesc: item.handleDesc?.trim() || undefined,
     currentHandlerId: currentHandlerId || undefined,
     handlerIds: item.handlerIds ?? undefined,
     content: item.content ?? undefined,
@@ -480,23 +530,51 @@ export async function loadCurrentUser(options?: { silent?: boolean }): Promise<S
     throw new Error(getResponseMessage(result, '获取当前用户失败'))
   }
 
-  if (!result.user) {
+  const info = result.data && typeof result.data === 'object' ? result.data : result
+  const user = info.user
+
+  if (!user) {
     throw new Error(getResponseMessage(result, '获取当前用户失败'))
   }
 
-  const roles = result.roles ?? []
-  const id = result.user.userName || toId(result.user.userId)
+  const roles = info.roles ?? []
+  const id = user.userName || toId(user.userId)
+  const checkEmail = getOptionalText(user.checkEmail) || getOptionalText(info.checkEmail)
 
   return {
     id,
-    name: result.user.nickName || result.user.userName || id || '未命名用户',
-    avatar: result.user.avatar,
-    department: result.user.department || result.user.deptName,
+    name: user.nickName || user.userName || id || '未命名用户',
+    avatar: user.avatar,
+    department: user.department || user.deptName,
     role: resolveRole(roles),
     roles,
-    permissions: result.permissions ?? [],
-    isSecurityPassword: result.user.isSecurityPassword,
+    permissions: info.permissions ?? [],
+    isSecurityPassword: user.isSecurityPassword,
+    checkEmail,
   }
+}
+
+export async function selectEmailProvider(provider: SmartTodoEmailProvider) {
+  const choice = provider === 'outlook' ? 1 : 2
+  const response = await httpClient.request<SmartTodoResponse>({
+    method: 'POST',
+    url: '/smart-todo/select-email',
+    params: { choice },
+    timeout: SMART_TODO_REQUEST_TIMEOUT,
+    showLoading: false,
+    showError: false,
+  })
+  const result = response.data
+
+  if (typeof result.code === 'number' && result.code !== 200) {
+    throw new Error(getResponseMessage(result, '邮箱类型确认失败'))
+  }
+
+  if (result.success === false) {
+    throw new Error(getResponseMessage(result, '邮箱类型确认失败'))
+  }
+
+  return true
 }
 
 export async function analyzeTodoText(
@@ -740,14 +818,18 @@ export function listTodos(events: CalendarEvent[], currentUser: CalendarUser) {
         scope: event.scope ?? resolveScope(creatorId, assigneeId, currentUser),
         editable:
           event.editable ??
-          (event.status !== 'done' && (!creatorId || creatorId === currentUser.id)),
+          (event.backendStatus !== 9 &&
+            event.status !== 'done' &&
+            (!creatorId || creatorId === currentUser.id)),
         completable:
           event.completable ??
-          resolveCompletable(
-            assigneeId,
-            event.currentHandlerId ?? '',
-            currentUser,
-          ),
+          (event.backendStatus === 9
+            ? false
+            : resolveCompletable(
+                assigneeId,
+                event.currentHandlerId ?? '',
+                currentUser,
+              )),
       }
     })
     .sort(compareEvents)

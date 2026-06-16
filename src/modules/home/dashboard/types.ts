@@ -28,6 +28,7 @@ export interface CalendarEvent {
   completable?: boolean
   backendStatus?: 0 | 3 | 6 | 9 | 99
   receiveStatus?: number
+  handleDesc?: string
   currentHandlerId?: string
   handlerIds?: string
   content?: string

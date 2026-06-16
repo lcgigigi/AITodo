@@ -15,6 +15,7 @@ export interface UserProfile {
   roles?: string[]
   permissions?: string[]
   isSecurityPassword?: 'yes' | 'no'
+  checkEmail?: string | null
 }
 
 export const useUserStore = defineStore('user', {
@@ -33,6 +34,15 @@ export const useUserStore = defineStore('user', {
     setProfile(profile: UserProfile) {
       this.profile = profile
       storage.set(PROFILE_STORAGE_KEY, profile)
+    },
+    setCheckEmail(checkEmail: string) {
+      if (!this.profile) return
+
+      this.profile = {
+        ...this.profile,
+        checkEmail,
+      }
+      storage.set(PROFILE_STORAGE_KEY, this.profile)
     },
     logout() {
       this.token = ''

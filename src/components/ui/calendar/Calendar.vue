@@ -73,7 +73,7 @@ function updatePlaceholder(part: "month" | "year", value: unknown) {
       @update:model-value="updatePlaceholder('month', $event)"
     >
       <SelectTrigger
-        class="h-8 min-w-[74px] rounded-xl border-slate-200 bg-slate-50/80 px-2 text-sm font-bold text-slate-800 shadow-none hover:border-blue-200 hover:bg-white"
+        class="h-8 min-w-[74px] rounded-xl border-slate-200 bg-slate-50/80 px-2 text-sm font-normal text-slate-800 shadow-none hover:border-blue-200 hover:bg-white"
         size="sm"
         aria-label="选择月份"
       >
@@ -100,7 +100,7 @@ function updatePlaceholder(part: "month" | "year", value: unknown) {
       @update:model-value="updatePlaceholder('year', $event)"
     >
       <SelectTrigger
-        class="h-8 min-w-[84px] rounded-xl border-slate-200 bg-slate-50/80 px-2 text-sm font-bold text-slate-800 shadow-none hover:border-blue-200 hover:bg-white"
+        class="h-8 min-w-[84px] rounded-xl border-slate-200 bg-slate-50/80 px-2 text-sm font-normal text-slate-800 shadow-none hover:border-blue-200 hover:bg-white"
         size="sm"
         aria-label="选择年份"
       >

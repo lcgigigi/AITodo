@@ -20,7 +20,7 @@ const forwardedProps = useForwardProps(delegatedProps)
     data-slot="calendar-cell-trigger"
     :class="cn(
       buttonVariants({ variant: 'ghost' }),
-      'size-[var(--cell-size)] rounded-[var(--cell-radius)] p-0 text-[15px] font-semibold text-slate-950 aria-selected:opacity-100 cursor-pointer hover:bg-blue-50 hover:text-blue-700',
+      'size-[var(--cell-size)] rounded-[var(--cell-radius)] p-0 text-[15px] font-normal text-slate-950 aria-selected:opacity-100 cursor-pointer hover:bg-blue-50 hover:text-blue-700',
       '[&[data-today]:not([data-selected])]:bg-slate-100 [&[data-today]:not([data-selected])]:text-slate-950',
       // Selected
       'data-[selected]:bg-blue-500 data-[selected]:text-white data-[selected]:shadow-[0_8px_18px_-12px_rgba(37,99,235,0.9)] data-[selected]:opacity-100 data-[selected]:hover:bg-blue-500 data-[selected]:hover:text-white data-[selected]:focus:bg-blue-500 data-[selected]:focus:text-white',

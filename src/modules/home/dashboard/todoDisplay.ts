@@ -108,6 +108,28 @@ export function formatFormDateTime(
   return `${event.date} ${event.time || '全天'}`
 }
 
+export function isRejectedTodo(event: CalendarEvent) {
+  return event.backendStatus === 9
+}
+
+export function getTodoStatusLabel(event: CalendarEvent) {
+  if (event.status === 'done') return '已完成'
+  if (isRejectedTodo(event)) return '已拒绝'
+  return '待处理'
+}
+
+export function getRejectedTodoMessage(event: CalendarEvent) {
+  if (!isRejectedTodo(event)) return ''
+
+  const assignee = event.assigneeName ?? event.owner
+  const reason = event.handleDesc?.trim()
+
+  if (assignee && reason) return `${assignee} 已拒绝：${reason}`
+  if (assignee) return `${assignee} 已拒绝该待办`
+  if (reason) return `已拒绝：${reason}`
+  return '接收人已拒绝该待办'
+}
+
 export function compareEvents(a: CalendarEvent, b: CalendarEvent) {
   const aRank = isRangeEvent(a) ? 0 : a.time ? 2 : 1
   const bRank = isRangeEvent(b) ? 0 : b.time ? 2 : 1

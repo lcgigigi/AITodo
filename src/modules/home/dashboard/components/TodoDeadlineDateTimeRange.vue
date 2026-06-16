@@ -409,7 +409,6 @@ onBeforeUnmount(() => {
 .deadline-datetime-field > span {
   color: #475569;
   font-size: 13px;
-  font-weight: 820;
 }
 
 .deadline-datetime-anchor {
@@ -422,7 +421,6 @@ onBeforeUnmount(() => {
   padding: 10px 14px 2px;
   color: #64748b;
   font-size: 12px;
-  font-weight: 750;
 }
 
 .todo-datetime-trigger {
@@ -437,7 +435,6 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   font: inherit;
   font-size: 14px;
-  font-weight: 500;
   box-shadow: none;
 }
 
@@ -509,7 +506,6 @@ onBeforeUnmount(() => {
 .todo-datetime-time-label {
   color: #64748b;
   font-size: 12px;
-  font-weight: 850;
   text-align: center;
 }
 
@@ -534,7 +530,6 @@ onBeforeUnmount(() => {
   justify-content: center;
   font: inherit;
   font-size: 13px;
-  font-weight: 780;
   cursor: pointer;
 }
 

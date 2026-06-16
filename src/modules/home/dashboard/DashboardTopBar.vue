@@ -14,7 +14,6 @@ import {
   loadPendingTodos,
   logoutSmartTodo,
   rejectTodo,
-  transferTodos,
 } from '@/modules/home/dashboard/todo.service'
 import { formatEventTime } from '@/modules/home/dashboard/todoDisplay'
 import type { CalendarEvent, CalendarUser } from '@/modules/home/dashboard/types'
@@ -28,7 +27,7 @@ const emit = defineEmits<{
 const router = useRouter()
 const userStore = useUserStore()
 
-type PendingActionMode = 'reject' | 'transfer' | null
+type PendingActionMode = 'reject' | null
 
 const notificationPanelRef = ref<HTMLElement | null>(null)
 const userMenuPanelRef = ref<HTMLElement | null>(null)
@@ -42,7 +41,6 @@ const assignableUsers = ref<CalendarUser[]>([])
 const activeActionId = ref('')
 const activeActionMode = ref<PendingActionMode>(null)
 const rejectReason = ref('')
-const transferAssigneeId = ref('')
 const processingId = ref('')
 
 const currentUser = computed<CalendarUser>(() => ({
@@ -59,10 +57,10 @@ const displayName = computed(() => userStore.profile?.name ?? '刘美华')
 const department = computed(() => userStore.profile?.department ?? '信息技术部')
 const avatarUrl = computed(() => userStore.profile?.avatar ?? girlImage)
 const unreadNotificationCount = computed(() => pendingTodos.value.length)
-const transferCandidates = computed(() => {
-  const users = assignableUsers.value.length ? assignableUsers.value : [currentUser.value]
-  return users.filter((user) => user.id && user.id !== currentUser.value.id)
-})
+
+function isPendingConfirmOnly(todo: CalendarEvent) {
+  return todo.backendStatus === 9
+}
 
 async function refreshAssignableUsers() {
   if (!currentUser.value.id) {
@@ -100,7 +98,6 @@ function resetPendingAction() {
   activeActionId.value = ''
   activeActionMode.value = null
   rejectReason.value = ''
-  transferAssigneeId.value = ''
 }
 
 function pendingSummary(event: CalendarEvent) {
@@ -118,7 +115,6 @@ function togglePendingAction(id: string, mode: Exclude<PendingActionMode, null>)
   activeActionId.value = id
   activeActionMode.value = mode
   rejectReason.value = ''
-  transferAssigneeId.value = transferCandidates.value[0]?.id ?? ''
 }
 
 async function handleAcceptTodo(id: string) {
@@ -144,25 +140,6 @@ async function handleRejectTodo(id: string) {
     emit('calendar-refresh')
   } catch (error) {
     pendingError.value = error instanceof Error ? error.message : '拒绝待办失败'
-  } finally {
-    processingId.value = ''
-  }
-}
-
-async function handleTransferTodo(id: string) {
-  if (!transferAssigneeId.value) {
-    pendingError.value = '请选择转发对象'
-    return
-  }
-
-  processingId.value = id
-  try {
-    await transferTodos(id, transferAssigneeId.value)
-    resetPendingAction()
-    await refreshPendingTodos()
-    emit('calendar-refresh')
-  } catch (error) {
-    pendingError.value = error instanceof Error ? error.message : '转发待办失败'
   } finally {
     processingId.value = ''
   }
@@ -319,37 +296,41 @@ onBeforeUnmount(() => {
                   <span>待接受</span>
 
                   <div class="notification-item__actions">
-                    <button
-                      type="button"
-                      class="action-btn is-accept"
-                      :disabled="processingId === todo.id"
-                      @click="handleAcceptTodo(todo.id)"
-                    >
-                      {{ processingId === todo.id && activeActionMode !== 'reject' && activeActionMode !== 'transfer' ? '处理中…' : '接受' }}
-                    </button>
-                    <button
-                      type="button"
-                      class="action-btn is-reject"
-                      :disabled="processingId === todo.id"
-                      @click="togglePendingAction(todo.id, 'reject')"
-                    >
-                      拒绝
-                    </button>
-                    <button
-                      type="button"
-                      class="action-btn is-transfer"
-                      :disabled="processingId === todo.id || !transferCandidates.length"
-                      @click="togglePendingAction(todo.id, 'transfer')"
-                    >
-                      转发
-                    </button>
-                    <button type="button" class="action-btn is-view" @click="handleOpenTodo(todo)">
-                      查看
-                    </button>
+                    <template v-if="isPendingConfirmOnly(todo)">
+                      <button
+                        type="button"
+                        class="action-btn is-accept"
+                        :disabled="processingId === todo.id"
+                        @click="handleAcceptTodo(todo.id)"
+                      >
+                        {{ processingId === todo.id ? '处理中…' : '确认' }}
+                      </button>
+                    </template>
+                    <template v-else>
+                      <button
+                        type="button"
+                        class="action-btn is-accept"
+                        :disabled="processingId === todo.id"
+                        @click="handleAcceptTodo(todo.id)"
+                      >
+                        {{ processingId === todo.id && activeActionMode !== 'reject' ? '处理中…' : '接受' }}
+                      </button>
+                      <button
+                        type="button"
+                        class="action-btn is-reject"
+                        :disabled="processingId === todo.id"
+                        @click="togglePendingAction(todo.id, 'reject')"
+                      >
+                        拒绝
+                      </button>
+                      <button type="button" class="action-btn is-view" @click="handleOpenTodo(todo)">
+                        查看
+                      </button>
+                    </template>
                   </div>
 
                   <div
-                    v-if="activeActionId === todo.id && activeActionMode === 'reject'"
+                    v-if="!isPendingConfirmOnly(todo) && activeActionId === todo.id && activeActionMode === 'reject'"
                     class="notification-item__form"
                   >
                     <input
@@ -366,42 +347,6 @@ onBeforeUnmount(() => {
                         @click="handleRejectTodo(todo.id)"
                       >
                         确认拒绝
-                      </button>
-                      <button type="button" class="action-btn is-muted" @click="resetPendingAction">
-                        取消
-                      </button>
-                    </div>
-                  </div>
-
-                  <div
-                    v-if="activeActionId === todo.id && activeActionMode === 'transfer'"
-                    class="notification-item__form"
-                  >
-                    <div class="notification-transfer-picker">
-                      <span class="notification-transfer-picker__label">选择转发对象</span>
-                      <div class="notification-transfer-picker__list" role="listbox" aria-label="选择转发对象">
-                        <button
-                          v-for="user in transferCandidates"
-                          :key="user.id"
-                          type="button"
-                          role="option"
-                          class="notification-transfer-option"
-                          :class="{ 'is-active': transferAssigneeId === user.id }"
-                          :aria-selected="transferAssigneeId === user.id"
-                          @click="transferAssigneeId = user.id"
-                        >
-                          {{ user.name }}
-                        </button>
-                      </div>
-                    </div>
-                    <div class="notification-item__form-actions">
-                      <button
-                        type="button"
-                        class="action-btn is-transfer"
-                        :disabled="processingId === todo.id"
-                        @click="handleTransferTodo(todo.id)"
-                      >
-                        确认转发
                       </button>
                       <button type="button" class="action-btn is-muted" @click="resetPendingAction">
                         取消

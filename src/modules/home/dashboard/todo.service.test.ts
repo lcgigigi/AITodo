@@ -17,6 +17,7 @@ import {
   loadTodos,
   loginSmartTodo,
   rejectTodo,
+  selectEmailProvider,
   cancelTodoComplete,
   revokeTodoComplete,
   syncCalendar,
@@ -99,6 +100,35 @@ describe('todo.service real backend adapter', () => {
       expect.any(Object),
     )
     expect(httpClient.get).toHaveBeenCalledWith('/getInfo', expect.any(Object))
+  })
+
+  it('submits the selected email provider choice', async () => {
+    vi.mocked(httpClient.request).mockResolvedValue({
+      data: {
+        code: 200,
+        msg: '操作成功',
+      },
+    })
+
+    await expect(selectEmailProvider('outlook')).resolves.toBe(true)
+    await expect(selectEmailProvider('coremail')).resolves.toBe(true)
+
+    expect(httpClient.request).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        method: 'POST',
+        url: '/smart-todo/select-email',
+        params: { choice: 1 },
+      }),
+    )
+    expect(httpClient.request).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        method: 'POST',
+        url: '/smart-todo/select-email',
+        params: { choice: 2 },
+      }),
+    )
   })
 
   it('wires the 13 smart-todo endpoints and normalizes list data for the page', async () => {
@@ -314,6 +344,39 @@ describe('todo.service real backend adapter', () => {
     expect(parsed.endDate).toBeUndefined()
   })
 
+  it('maps timeType=deadline analyze result with startDate and endDate datetime fields', async () => {
+    vi.mocked(httpClient.request).mockResolvedValueOnce({
+      data: {
+        code: 200,
+        msg: '操作成功',
+        data: {
+          task: '开发官网',
+          timeType: 'deadline',
+          date: '',
+          time: '',
+          startDate: '2026-06-15 08:45',
+          endDate: '2026-06-15 17:15',
+          assigneeId: '',
+          remark: '',
+        },
+      },
+    })
+
+    const parsed = await analyzeTodoText('今天8点45到17点15开发官网', currentUser, assignableUsers, {
+      date: '2026-06-09',
+      title: '',
+    })
+
+    expect(parsed).toMatchObject({
+      mode: 'deadline',
+      date: '2026-06-15',
+      time: '08:45',
+      endDate: '2026-06-15',
+      endTime: '17:15',
+      title: '开发官网',
+    })
+  })
+
   it('maps timeType=2 analyze result to deadline mode with startDateShow and endDateShow', async () => {
     vi.mocked(httpClient.request).mockResolvedValueOnce({
       data: {
@@ -491,5 +554,34 @@ describe('todo.service real backend adapter', () => {
       editable: true,
       completable: true,
     })
+  })
+
+  it('normalizes rejected todos from month-list with read-only permissions', async () => {
+    vi.mocked(httpClient.request).mockResolvedValueOnce(
+      backendResponse([
+        {
+          id: 456,
+          title: '被拒绝的任务',
+          timeType: 1,
+          startDateShow: '2026-06-07 17:00:00',
+          status: 9,
+          assigneeId: '1102081',
+          creatorId: '1102080',
+          creatorName: '李四',
+          handleDesc: '时间冲突',
+        },
+      ]) as never,
+    )
+
+    await expect(loadTodos(currentUser, assignableUsers)).resolves.toMatchObject([
+      {
+        id: '456',
+        backendStatus: 9,
+        handleDesc: '时间冲突',
+        editable: false,
+        completable: false,
+        status: 'todo',
+      },
+    ])
   })
 })

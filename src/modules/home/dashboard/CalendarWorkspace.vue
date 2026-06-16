@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Component } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
+import * as echarts from 'echarts'
 import IconBox from '~icons/lucide/box'
 import IconCalendarDays from '~icons/lucide/calendar-days'
 import IconCalendarRange from '~icons/lucide/calendar-range'
@@ -95,27 +96,44 @@ const presetCreateKey = ref(0)
 const isDayPreviewFormDirty = ref(false)
 const isSyncingCalendar = ref(false)
 const dayPreviewPanelRef = ref<DayPreviewPanelExpose | null>(null)
+const trendChartRef = ref<HTMLElement | null>(null)
 const calendarViewMode = ref<'month' | 'week'>('month')
-const taskMetricMode = ref<'week' | 'month'>('week')
+const taskMetricMode = ref<'week' | 'month'>('month')
 const trendStatMode = ref<'week' | 'month'>('week')
+const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const feedbackStore = useFeedbackStore()
 let clockTimer: ReturnType<typeof setInterval> | undefined
 let todayBubbleTimer: ReturnType<typeof setTimeout> | undefined
 let panelCloseRestoreTimer: ReturnType<typeof setTimeout> | undefined
+let trendChart: echarts.ECharts | undefined
+let trendChartResizeObserver: ResizeObserver | undefined
+let isConsumingDesktopTodoText = false
 
-onMounted(() => {
+const trendChartTextStyle = {
+  color: '#64748b',
+  fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", Arial, sans-serif',
+}
+
+onMounted(async () => {
   clockTimer = setInterval(() => {
     now.value = new Date()
   }, 60_000)
   void initializeDashboardData()
+  await nextTick()
+  renderTrendChart()
+  trendChartResizeObserver = new ResizeObserver(() => {
+    trendChart?.resize()
+  })
+  if (trendChartRef.value) trendChartResizeObserver.observe(trendChartRef.value)
 })
 
 onBeforeUnmount(() => {
   if (clockTimer) clearInterval(clockTimer)
   clearTodayBubbleTimer()
   clearPanelCloseRestoreTimer()
+  disposeTrendChart()
 })
 
 let hasInitializedTodoRange = false
@@ -573,24 +591,6 @@ const monthTrendSeries = computed(() => {
   return rows
 })
 const trendTotal = computed(() => trendSeries.value.reduce((total, item) => total + item.value, 0))
-const trendMaxValue = computed(() => Math.max(...trendSeries.value.map((item) => item.value), 1))
-const trendChartPoints = computed(() => {
-  const series = trendSeries.value
-  const width = 210
-  const height = 56
-  const top = 8
-  const count = Math.max(series.length - 1, 1)
-
-  return series.map((item, index) => {
-    const x = Number(((index / count) * width).toFixed(1))
-    const y = Number((top + (1 - item.value / trendMaxValue.value) * height).toFixed(1))
-    return { ...item, x, y }
-  })
-})
-const trendLinePoints = computed(() =>
-  trendChartPoints.value.map((point) => `${point.x},${point.y}`).join(' '),
-)
-const trendAreaPoints = computed(() => `0,74 ${trendLinePoints.value} 210,74`)
 const trendInsight = computed(() => {
   if (!trendTotal.value) return trendStatMode.value === 'week' ? '本周暂无完成记录' : '本月暂无完成记录'
 
@@ -602,6 +602,84 @@ const trendInsight = computed(() => {
 
   return `峰值 ${peak.label} ${peak.value} 项 · 平均 ${average} 项`
 })
+
+function createTrendChartOption(): echarts.EChartsOption {
+  const series = trendSeries.value
+  const accent = '#7c3aed'
+
+  return {
+    animationDuration: 500,
+    grid: { top: 8, right: 6, bottom: 14, left: 4 },
+    tooltip: {
+      trigger: 'axis',
+      confine: true,
+      formatter: (params: unknown) => {
+        const item = (Array.isArray(params) ? params[0] : params) as { name: string; value: number }
+        return `${item.name}<br/>${Number(item.value)} 项`
+      },
+    },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: series.map((item) => item.label),
+      axisLine: { lineStyle: { color: 'rgba(203, 213, 225, 0.58)' } },
+      axisTick: { show: false },
+      axisLabel: { ...trendChartTextStyle, color: '#94a3b8', fontSize: 9, fontWeight: 850, margin: 4 },
+    },
+    yAxis: {
+      type: 'value',
+      min: 0,
+      splitNumber: 3,
+      axisLabel: { show: false },
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: { lineStyle: { color: 'rgba(203, 213, 225, 0.58)' } },
+    },
+    series: [
+      {
+        name: '完成待办',
+        type: 'line',
+        data: series.map((item) => item.value),
+        smooth: true,
+        symbol: 'circle',
+        symbolSize: 6,
+        lineStyle: { width: 2.5, color: accent },
+        itemStyle: { color: accent, borderColor: '#ffffff', borderWidth: 2 },
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(124, 58, 237, 0.18)' },
+            { offset: 1, color: 'rgba(124, 58, 237, 0.02)' },
+          ]),
+        },
+      },
+    ],
+  }
+}
+
+function renderTrendChart() {
+  const el = trendChartRef.value
+  if (!el) return
+
+  trendChart = echarts.getInstanceByDom(el) ?? echarts.init(el, undefined, { renderer: 'canvas' })
+  trendChart.setOption(createTrendChartOption(), true)
+}
+
+function disposeTrendChart() {
+  trendChartResizeObserver?.disconnect()
+  trendChartResizeObserver = undefined
+  trendChart?.dispose()
+  trendChart = undefined
+}
+
+watch(
+  () => [trendSeries.value, trendStatMode.value, allEvents.value.length] as const,
+  async () => {
+    await nextTick()
+    renderTrendChart()
+  },
+  { deep: true },
+)
+
 const selectedDateLabel = computed(() => {
   const date = new Date(`${selectedDate.value}T12:00:00`)
   const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()]
@@ -699,8 +777,14 @@ function clearPanelCloseRestoreTimer() {
   panelCloseRestoreTimer = undefined
 }
 
-function showToast(message: string) {
-  feedbackStore.success(message)
+function showToast(message: string, type: 'success' | 'error' | 'info' = 'success') {
+  if (type === 'error') {
+    feedbackStore.error(message)
+  } else if (type === 'info') {
+    feedbackStore.info(message)
+  } else {
+    feedbackStore.success(message)
+  }
 }
 
 async function initializeDashboardData() {
@@ -723,6 +807,8 @@ async function initializeDashboardData() {
     await refreshAssignableUsers()
     await refreshTodos()
     hasInitializedTodoRange = true
+    await nextTick()
+    consumeDesktopTodoText()
   } catch (error) {
     const message = error instanceof Error ? error.message : '后台接口连接失败'
 
@@ -736,6 +822,35 @@ async function initializeDashboardData() {
   } finally {
     isDashboardLoading.value = false
   }
+}
+
+function getDesktopTodoTextQuery() {
+  const value = route.query.desktopTodoText
+  const text = Array.isArray(value) ? value[0] : value
+  return typeof text === 'string' ? text.trim() : ''
+}
+
+function clearDesktopTodoTextQuery() {
+  const query = { ...route.query }
+  delete query.desktopTodoText
+
+  void router.replace({
+    path: route.path,
+    query,
+    hash: route.hash,
+  })
+}
+
+function consumeDesktopTodoText() {
+  if (isConsumingDesktopTodoText || !hasInitializedTodoRange) return
+
+  const prompt = getDesktopTodoTextQuery()
+  if (!prompt) return
+
+  isConsumingDesktopTodoText = true
+  quickCreateTodo(prompt, todayDate.value)
+  clearDesktopTodoTextQuery()
+  isConsumingDesktopTodoText = false
 }
 
 async function refreshAssignableUsers() {
@@ -776,6 +891,14 @@ watch(todoLoadRangeKey, () => {
   if (!hasInitializedTodoRange) return
   void refreshTodos()
 })
+
+watch(
+  () => route.query.desktopTodoText,
+  async () => {
+    await nextTick()
+    consumeDesktopTodoText()
+  },
+)
 
 function confirmDiscardPreviewChanges(onConfirm?: () => void) {
   if (!isDayPreviewFormDirty.value) return true
@@ -1072,38 +1195,31 @@ function openAgentList(agentKey?: string) {
         <div class="quick-metrics">
           <article
             v-if="todayMetric"
-            class="metric-card"
+            class="metric-card metric-card-today"
             :class="[`metric-card-${todayMetric.tone}`, `metric-card-${todayMetric.variant}`]"
           >
-            <header class="metric-card-head today-card-head">
+            <header class="today-card-head">
               <span class="metric-icon">
                 <component :is="todayMetric.icon" />
               </span>
-              <div class="today-card-headline">
-                <span class="today-card-title">{{ todayMetric.label }}</span>
-                <strong class="today-pending-count">
-                  <em>{{ todayMetric.pending }}</em
-                  >项待处理
-                </strong>
+              <div class="today-card-title-block">
+                <div class="today-card-title-line">
+                  <span>{{ todayMetric.label }}</span>
+                  <strong>{{ todayMetric.value }}<em>项</em></strong>
+                </div>
+                <p class="today-card-subline">
+                  待处理 {{ todayMetric.pending }} · 已完成 {{ todayMetric.completed }}
+                </p>
               </div>
             </header>
 
-            <div class="today-card-body">
-              <p class="today-meta">
-                <span>共 {{ todayMetric.value }} 项</span>
-                <span>已完成 {{ todayMetric.completed }}</span>
-              </p>
-              <div class="today-next-event">
-                <template v-if="nextTodayEvent">
-                  <span class="today-next-label">下一项</span>
-                  <span class="today-next-time">{{ formatEventTime(nextTodayEvent) }}</span>
-                  <span class="today-next-title">{{ nextTodayEvent.title }}</span>
-                </template>
-                <span v-else class="today-next-empty">今天暂无待处理事项</span>
-              </div>
-              <div class="today-progress-track">
-                <span :style="{ width: `${todayMetric.progress}%` }"></span>
-              </div>
+            <div class="today-card-focus">
+              <template v-if="nextTodayEvent">
+                <span class="today-focus-kicker">下一项</span>
+                <time>{{ formatEventTime(nextTodayEvent) }}</time>
+                <p>{{ nextTodayEvent.title }}</p>
+              </template>
+              <p v-else class="today-focus-empty">今天暂无待处理事项</p>
             </div>
           </article>
 
@@ -1174,8 +1290,11 @@ function openAgentList(agentKey?: string) {
                 <IconTrendingUp />
               </span>
               <div class="trend-title">
-                <span>趋势</span>
-                <strong>{{ trendTotal }}<em>项</em></strong>
+                <div class="trend-title-line">
+                  <span>趋势</span>
+                  <strong>{{ trendTotal }}<em>项</em></strong>
+                </div>
+                <p class="trend-insight">{{ trendInsight }}</p>
               </div>
               <div class="trend-switch" aria-label="统计周期">
                 <button
@@ -1195,27 +1314,7 @@ function openAgentList(agentKey?: string) {
               </div>
             </header>
 
-            <p class="trend-insight">{{ trendInsight }}</p>
-            <svg
-              class="trend-chart"
-              viewBox="0 0 210 82"
-              preserveAspectRatio="none"
-              aria-hidden="true"
-            >
-              <line v-for="y in [18, 42, 66]" :key="y" x1="0" :y1="y" x2="210" :y2="y" />
-              <polygon :points="trendAreaPoints" />
-              <polyline :points="trendLinePoints" />
-              <circle
-                v-for="point in trendChartPoints"
-                :key="`${point.label}-${point.x}`"
-                :cx="point.x"
-                :cy="point.y"
-                r="3"
-              />
-            </svg>
-            <div class="trend-labels">
-              <span v-for="point in trendChartPoints" :key="point.label">{{ point.label }}</span>
-            </div>
+            <div ref="trendChartRef" class="trend-chart" aria-hidden="true"></div>
           </article>
         </div>
       </section>
@@ -1947,118 +2046,119 @@ p {
 .metric-card-today {
   display: flex;
   flex-direction: column;
+  gap: 10px;
+  padding: 12px 10px 10px;
 }
 
-.today-card-headline {
+.today-card-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+}
+
+.today-card-title-block {
   min-width: 0;
   flex: 1 1 auto;
+  height: 30px;
   display: flex;
-  align-items: baseline;
+  flex-direction: column;
   justify-content: space-between;
-  gap: 8px;
 }
 
-.today-card-title {
+.today-card-title-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  line-height: 1;
+}
+
+.today-card-title-line > span {
+  overflow: hidden;
+  color: #334155;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.today-card-title-line strong {
+  margin: 0;
+  flex: 0 0 auto;
+  color: #0f172a;
+  font-size: 17px;
+  line-height: 1;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.today-card-title-line strong em {
+  margin-left: 2px;
+  color: var(--metric-accent);
+  font-style: normal;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.today-card-subline {
+  margin: 0;
+  overflow: hidden;
+  color: #94a3b8;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.today-card-focus {
+  min-width: 0;
+  min-height: 58px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(239, 246, 255, 0.72);
+  border: 1px solid rgba(147, 197, 253, 0.28);
+}
+
+.today-focus-kicker {
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.today-card-focus time {
+  color: var(--metric-accent);
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.today-card-focus p {
+  margin: 0;
   overflow: hidden;
   color: #334155;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
-  font-weight: 900;
-  line-height: 1.1;
+  font-weight: 600;
+  line-height: 1.35;
 }
 
-.today-pending-count {
+.today-focus-empty {
   margin: 0;
-  flex: 0 0 auto;
-  color: #0f172a;
+  color: #94a3b8;
   font-size: 13px;
-  line-height: 1;
-  font-weight: 950;
-  white-space: nowrap;
-}
-
-.today-pending-count em {
-  margin-right: 2px;
-  color: var(--metric-accent);
-  font-style: normal;
-  font-size: 24px;
-  font-weight: 950;
-}
-
-.today-card-body {
-  margin-top: auto;
-  padding-top: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.today-meta {
-  margin: 0;
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  color: #94a3b8;
-  font-size: 10px;
-  font-weight: 800;
-}
-
-.today-progress-track {
-  height: 5px;
-  border-radius: 999px;
-  background: rgba(226, 232, 240, 0.88);
-  overflow: hidden;
-}
-
-.today-progress-track span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--metric-accent), #60a5fa);
-  transition: width 0.28s ease;
-}
-
-.today-next-event {
-  min-width: 0;
-  min-height: 36px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 10px;
-  border-radius: 10px;
-  background: rgba(239, 246, 255, 0.72);
-  border: 1px solid rgba(147, 197, 253, 0.28);
-}
-
-.today-next-label {
-  flex: 0 0 auto;
-  color: #94a3b8;
-  font-size: 10px;
-  font-weight: 850;
-}
-
-.today-next-time {
-  flex: 0 0 auto;
-  color: var(--metric-accent);
-  font-size: 11px;
-  font-weight: 950;
-}
-
-.today-next-title {
-  min-width: 0;
-  overflow: hidden;
-  color: #475569;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  font-weight: 850;
-}
-
-.today-next-empty {
-  color: #94a3b8;
-  font-size: 10px;
-  font-weight: 800;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
 }
 
 .week-progress {
@@ -2166,21 +2266,54 @@ p {
 }
 
 .trend-metric-card {
-  padding: 12px 10px 9px;
+  padding: 12px 10px 10px;
+  display: flex;
+  flex-direction: column;
 }
 
 .trend-card-head {
   position: relative;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: flex-start;
   gap: 7px;
-  min-height: 37px;
+  min-height: 30px;
+  padding-right: 56px;
 }
 
 .trend-title {
   min-width: 0;
   flex: 1 1 auto;
+  height: 30px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.trend-title-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  line-height: 1;
+}
+
+.trend-title-line > span {
+  color: #334155;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.trend-title-line strong {
+  margin-top: 0;
+  display: inline;
+  color: #0f172a;
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 950;
+  white-space: nowrap;
 }
 
 .trend-title strong {
@@ -2226,53 +2359,22 @@ p {
 }
 
 .trend-insight {
-  margin-top: 7px;
+  margin: 0;
   overflow: hidden;
   color: #64748b;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 10px;
   font-weight: 850;
+  line-height: 1;
 }
 
 .trend-chart {
+  flex: 1 1 auto;
   width: 100%;
-  height: 52px;
-  margin-top: 5px;
-  overflow: visible;
-  display: block;
-}
-
-.trend-chart line {
-  stroke: rgba(203, 213, 225, 0.58);
-  stroke-width: 1;
-}
-
-.trend-chart polygon {
-  fill: rgba(124, 58, 237, 0.1);
-}
-
-.trend-chart polyline {
-  fill: none;
-  stroke: var(--metric-accent);
-  stroke-width: 3;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.trend-chart circle {
-  fill: #ffffff;
-  stroke: var(--metric-accent);
-  stroke-width: 2;
-}
-
-.trend-labels {
-  margin-top: -7px;
-  display: flex;
-  justify-content: space-between;
-  color: #94a3b8;
-  font-size: 9px;
-  font-weight: 850;
+  min-height: 96px;
+  height: 96px;
+  margin-top: auto;
 }
 
 .agent-panel {

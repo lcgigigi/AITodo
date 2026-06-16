@@ -1,23 +1,36 @@
 import { defineStore } from 'pinia'
 
-export type FeedbackType = 'success' | 'error' | 'info'
+export type FeedbackType = 'success' | 'error' | 'info' | 'warning'
 
-const TOAST_DURATION = 2800
-const ERROR_TOAST_MAX_LENGTH = 80
+export interface FeedbackToast {
+  id: number
+  type: FeedbackType
+  message: string
+  duration: number
+}
 
-function formatToastMessage(message: string, type: FeedbackType) {
+const DEFAULT_TOAST_DURATION = 3600
+const ERROR_TOAST_DURATION = 5200
+const TOAST_MAX_LENGTH = 160
+
+let toastId = 0
+let toastTimer: ReturnType<typeof setTimeout> | null = null
+
+function formatToastMessage(message: string) {
   const text = message.trim()
   if (!text) return ''
-  if (type !== 'error' || text.length <= ERROR_TOAST_MAX_LENGTH) return text
-  return `${text.slice(0, ERROR_TOAST_MAX_LENGTH)}…`
+  if (text.length <= TOAST_MAX_LENGTH) return text
+  return `${text.slice(0, TOAST_MAX_LENGTH)}...`
+}
+
+function getToastDuration(type: FeedbackType) {
+  return type === 'error' ? ERROR_TOAST_DURATION : DEFAULT_TOAST_DURATION
 }
 
 export const useFeedbackStore = defineStore('feedback', {
   state: () => ({
     loadingCount: 0,
-    toastMessage: '',
-    toastType: 'info' as FeedbackType,
-    toastTimer: null as ReturnType<typeof setTimeout> | null,
+    currentToast: null as FeedbackToast | null,
   }),
   getters: {
     isLoading: (state) => state.loadingCount > 0,
@@ -29,22 +42,38 @@ export const useFeedbackStore = defineStore('feedback', {
     endLoading() {
       this.loadingCount = Math.max(0, this.loadingCount - 1)
     },
-    clearToastTimer() {
-      if (!this.toastTimer) return
-      clearTimeout(this.toastTimer)
-      this.toastTimer = null
-    },
     showToast(message: string, type: FeedbackType = 'info') {
-      const text = formatToastMessage(message, type)
+      const text = formatToastMessage(message)
       if (!text) return
 
       this.clearToastTimer()
-      this.toastMessage = text
-      this.toastType = type
-      this.toastTimer = setTimeout(() => {
-        this.toastMessage = ''
-        this.toastTimer = null
-      }, TOAST_DURATION)
+
+      const duration = getToastDuration(type)
+      const toast: FeedbackToast = {
+        id: ++toastId,
+        type,
+        message: text,
+        duration,
+      }
+
+      this.currentToast = toast
+
+      toastTimer = setTimeout(() => {
+        this.dismissToast(toast.id)
+      }, duration)
+    },
+    clearToastTimer() {
+      if (!toastTimer) return
+      clearTimeout(toastTimer)
+      toastTimer = null
+    },
+    dismissToast(id?: number) {
+      if (id !== undefined && this.currentToast?.id !== id) return
+      this.clearToastTimer()
+      this.currentToast = null
+    },
+    clearToasts() {
+      this.dismissToast()
     },
     success(message: string) {
       this.showToast(message, 'success')
@@ -54,6 +83,9 @@ export const useFeedbackStore = defineStore('feedback', {
     },
     info(message: string) {
       this.showToast(message, 'info')
+    },
+    warning(message: string) {
+      this.showToast(message, 'warning')
     },
   },
 })

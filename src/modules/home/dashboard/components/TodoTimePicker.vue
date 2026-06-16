@@ -203,7 +203,6 @@ watch(open, (isOpen) => {
   justify-content: space-between;
   font: inherit;
   font-size: 14px;
-  font-weight: 500;
   box-shadow: none;
 }
 
@@ -260,7 +259,6 @@ watch(open, (isOpen) => {
 .todo-time-label {
   color: #64748b;
   font-size: 12px;
-  font-weight: 850;
   text-align: center;
 }
 
@@ -285,7 +283,6 @@ watch(open, (isOpen) => {
   justify-content: center;
   font: inherit;
   font-size: 13px;
-  font-weight: 780;
   cursor: pointer;
 }
 

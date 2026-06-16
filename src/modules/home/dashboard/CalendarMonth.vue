@@ -5,7 +5,7 @@ import IconChevronRight from '~icons/lucide/chevron-right'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { CalendarDay, CalendarEvent } from './types'
-import { formatEventTime, formatMonthEventTime, isAllDayEvent, isRangeEvent } from './todoDisplay'
+import { formatEventTime, formatMonthEventTime, getTodoStatusLabel, isAllDayEvent, isRangeEvent, isRejectedTodo } from './todoDisplay'
 
 type CalendarViewMode = 'month' | 'week'
 type MonthRangeDisplayMode = 'daily' | 'bar'
@@ -433,10 +433,11 @@ function quickCreateFromHeader() {
               :class="[
                 `type-${event.type}`,
                 `status-${event.status}`,
-                { 'is-range': monthRangeDisplayMode === 'daily' && isRangeEvent(event) },
+                { 'is-range': monthRangeDisplayMode === 'daily' && isRangeEvent(event), 'is-rejected': isRejectedTodo(event) },
               ]"
-              :aria-label="`${formatEventTime(event)} ${event.title}`"
+              :aria-label="`${formatEventTime(event)} ${event.title}${isRejectedTodo(event) ? ' 已拒绝' : ''}`"
             >
+              <em v-if="isRejectedTodo(event)" class="month-event-reject">{{ getTodoStatusLabel(event) }}</em>
               <i></i>
               <time v-if="!isRangeEvent(event)">{{ formatMonthEventTime(event) }}</time>
               <b>{{ event.title }}</b>
@@ -470,11 +471,15 @@ function quickCreateFromHeader() {
               v-for="event in todayEvents"
               :key="event.id"
               class="today-bubble-item"
+              :class="{ 'is-rejected': isRejectedTodo(event) }"
               type="button"
               @click="emit('select', todayDate)"
             >
               <time>{{ formatEventTime(event) }}</time>
-              <span>{{ event.title }}</span>
+              <span>
+                {{ event.title }}
+                <em v-if="isRejectedTodo(event)"> · 已拒绝</em>
+              </span>
             </button>
             <div v-if="!todayEvents.length" class="today-bubble-empty">
               <p>今日暂无待办</p>
@@ -499,6 +504,7 @@ function quickCreateFromHeader() {
           :class="[
             `type-${segment.event.type}`,
             `status-${segment.event.status}`,
+            { 'is-rejected': isRejectedTodo(segment.event) },
             {
               'is-range-start': segment.isStart,
               'is-range-end': segment.isEnd,
@@ -1028,6 +1034,7 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: 5px;
+  overflow: hidden;
   transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
 }
 
@@ -1056,6 +1063,7 @@ h2 {
 
 .day-cell.has-today-bubble {
   z-index: 40;
+  overflow: visible;
 }
 
 .day-cell.has-today-bubble:hover {
@@ -1234,7 +1242,11 @@ h2 {
 }
 
 .event-stack {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   min-height: 0;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1254,12 +1266,13 @@ h2 {
 }
 
 .month-event {
+  position: relative;
   min-height: 30px;
   width: 100%;
   box-sizing: border-box;
   border: 1px solid rgba(226, 232, 240, 0.78);
   background: rgba(255, 255, 255, 0.74);
-  padding: 3px 5px;
+  padding: 3px 5px 3px 14px;
   display: inline-flex;
   align-items: flex-start;
   flex-wrap: wrap;
@@ -1269,11 +1282,15 @@ h2 {
 }
 
 .month-event i {
+  position: absolute;
+  top: 50%;
+  left: 6px;
   width: 4px;
   height: 4px;
-  margin-top: 4px;
+  margin-top: 0;
   border-radius: 999px;
   background: currentColor;
+  transform: translateY(-50%);
   flex: 0 0 auto;
 }
 
@@ -1288,9 +1305,9 @@ h2 {
 }
 
 .month-event b {
-  flex: 0 0 calc(100% - 8px);
+  flex: 0 0 100%;
   min-width: 0;
-  margin-left: 8px;
+  margin-left: 0;
   overflow: hidden;
   color: #334155;
   text-overflow: ellipsis;
@@ -1306,7 +1323,7 @@ h2 {
   border-color: rgba(226, 232, 240, 0.88);
   background: rgba(255, 255, 255, 0.74);
   color: #94a3b8;
-  padding: 4px 7px;
+  padding: 4px 7px 4px 16px;
   align-items: center;
   flex-wrap: nowrap;
   gap: 5px;
@@ -1336,6 +1353,43 @@ h2 {
 .month-event.status-done b {
   color: #64748b;
   text-decoration: line-through;
+}
+
+.month-event.is-rejected {
+  position: relative;
+  border-color: rgba(254, 202, 202, 0.92);
+  background: rgba(254, 242, 242, 0.88);
+  color: #b91c1c;
+  padding-right: 34px;
+}
+
+.month-event.is-rejected i {
+  align-self: center;
+  margin-top: 0;
+  background: #ef4444;
+}
+
+.month-event.is-rejected b {
+  margin-left: 0;
+  flex: 0 0 100%;
+  padding-right: 0;
+  color: #991b1b;
+}
+
+.month-event.is-rejected .month-event-reject {
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  z-index: 1;
+  border-radius: 999px;
+  background: rgba(254, 226, 226, 0.96);
+  color: #b91c1c;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 900;
+  line-height: 1;
+  padding: 2px 5px;
+  pointer-events: none;
 }
 
 .month-range-layer {
@@ -1401,6 +1455,14 @@ h2 {
 
 .month-range-bar.status-done {
   opacity: 0.64;
+}
+
+.month-range-bar.is-rejected {
+  background: linear-gradient(90deg, rgba(254, 226, 226, 0.98), rgba(254, 242, 242, 0.96));
+  color: #b91c1c;
+  box-shadow:
+    inset 0 0 0 1px rgba(239, 68, 68, 0.12),
+    0 8px 16px -18px rgba(185, 28, 28, 0.32);
 }
 
 .more-count {
@@ -1557,8 +1619,13 @@ h2 {
   border-radius: 999px;
   background: rgba(241, 245, 249, 0.82);
   color: #64748b;
-  font: inherit;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: Arial, Helvetica, sans-serif;
   font-size: 20px;
+  font-weight: 700;
   line-height: 1;
   cursor: pointer;
   transition:
@@ -1614,6 +1681,24 @@ h2 {
 
 .today-bubble-item:hover {
   background: rgba(239, 246, 255, 0.7);
+}
+
+.today-bubble-item.is-rejected {
+  background: rgba(254, 242, 242, 0.56);
+}
+
+.today-bubble-item.is-rejected:hover {
+  background: rgba(254, 226, 226, 0.72);
+}
+
+.today-bubble-item.is-rejected::before {
+  background: #ef4444;
+}
+
+.today-bubble-item span em {
+  color: #b91c1c;
+  font-style: normal;
+  font-weight: 900;
 }
 
 .today-bubble-item::before {

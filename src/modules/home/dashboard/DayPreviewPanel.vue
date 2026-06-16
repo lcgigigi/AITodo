@@ -29,7 +29,10 @@ import EventScheduleTime from './components/EventScheduleTime.vue'
 import {
   addDays,
   formatFormDateTime,
+  getRejectedTodoMessage,
+  getTodoStatusLabel,
   isRangeEvent,
+  isRejectedTodo,
   parseDate,
   ymd,
 } from './todoDisplay'
@@ -57,7 +60,7 @@ const emit = defineEmits<{
   updateStatus: [id: string, status: CalendarEventStatus]
   deleteTodo: [id: string]
   dirtyChange: [dirty: boolean]
-  notify: [message: string]
+  notify: [message: string, type?: 'success' | 'error' | 'info']
   close: []
 }>()
 
@@ -90,8 +93,13 @@ const specialText: Record<CalendarSpecialDay['type'], string> = {
   'solar-term': '节气',
 }
 
-const pendingCount = computed(() => props.events.filter((event) => event.status !== 'done').length)
-const doneCount = computed(() => props.events.length - pendingCount.value)
+const pendingCount = computed(() =>
+  props.events.filter((event) => event.status !== 'done' && !isRejectedTodo(event)).length,
+)
+const rejectedCount = computed(() => props.events.filter((event) => isRejectedTodo(event)).length)
+const doneCount = computed(() =>
+  props.events.filter((event) => event.status === 'done' && !isRejectedTodo(event)).length,
+)
 const isFormMode = computed(() => panelMode.value !== 'list')
 const isViewMode = computed(() => panelMode.value === 'view')
 const canEditForm = computed(() => panelMode.value === 'create' || panelMode.value === 'edit')
@@ -424,6 +432,7 @@ async function parseTodoText() {
     emit(
       'notify',
       error instanceof Error ? error.message : 'AI 解析待办失败，请稍后重试',
+      'error'
     )
   } finally {
     isParsing.value = false
@@ -586,12 +595,11 @@ function toggleStatus(event: CalendarEvent) {
 }
 
 function shouldShowEventMeta(event: CalendarEvent) {
-  return Boolean(event.source)
+  return Boolean(event.source) || isRejectedTodo(event)
 }
 
 function statusText(event: CalendarEvent) {
-  if (event.status === 'done') return '已完成'
-  return '待处理'
+  return getTodoStatusLabel(event)
 }
 
 defineExpose({
@@ -631,7 +639,10 @@ defineExpose({
       <div class="summary-grid" aria-label="当天待办概览">
         <span class="summary-card summary-total">
           <strong>{{ events.length }}</strong>
-          待办总数
+          <span class="summary-label">
+            待办总数
+            <small v-if="rejectedCount">含 {{ rejectedCount }} 项已拒绝</small>
+          </span>
         </span>
         <span class="summary-card summary-pending">
           <strong>{{ pendingCount }}</strong>
@@ -663,6 +674,7 @@ defineExpose({
             `type-${event.type}`,
             `status-${event.status}`,
             event.scope ? `scope-${event.scope}` : '',
+            { 'is-rejected': isRejectedTodo(event) },
           ]"
           tabindex="0"
           @click="openEventDetail(event)"
@@ -687,6 +699,7 @@ defineExpose({
                     class="event-status"
                     :class="{
                       'is-done': event.status === 'done',
+                      'is-rejected': isRejectedTodo(event),
                     }"
                   >
                     {{ statusText(event) }}
@@ -723,6 +736,9 @@ defineExpose({
               </div>
             </div>
             <div v-if="shouldShowEventMeta(event)" class="event-note">
+              <p v-if="isRejectedTodo(event)" class="event-reject-note">
+                {{ getRejectedTodoMessage(event) }}
+              </p>
               <p v-if="event.source">备注：{{ event.source }}</p>
             </div>
           </div>
@@ -1084,6 +1100,21 @@ defineExpose({
   font-weight: 950;
 }
 
+.summary-label {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.summary-card small {
+  color: #b91c1c;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+
 .summary-total,
 .summary-pending,
 .summary-done {
@@ -1342,6 +1373,14 @@ defineExpose({
   filter: grayscale(0.28);
 }
 
+.timeline-item.is-rejected {
+  background: linear-gradient(90deg, rgba(254, 242, 242, 0.82), rgba(255, 255, 255, 0));
+}
+
+.timeline-item.is-rejected h3 {
+  color: #991b1b;
+}
+
 h3 {
   margin: 0;
   color: #1f2937;
@@ -1353,6 +1392,7 @@ h3 {
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 p {
@@ -1374,6 +1414,12 @@ p {
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 1;
+  line-clamp: 1;
+}
+
+.event-reject-note {
+  color: #b91c1c;
+  font-weight: 850;
 }
 
 .event-title-row {
@@ -1407,6 +1453,11 @@ p {
 .event-status.is-done {
   background: #dcfce7;
   color: #166534;
+}
+
+.event-status.is-rejected {
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
 .item-actions {
