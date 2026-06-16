@@ -270,7 +270,12 @@ onBeforeUnmount(() => {
                 <strong>待接受待办</strong>
                 <span>待处理 {{ unreadNotificationCount }}</span>
               </div>
-              <button type="button" aria-label="关闭消息通知" title="关闭消息通知" @click="closeNotificationPanel">
+              <button
+                type="button"
+                aria-label="关闭消息通知"
+                title="关闭消息通知"
+                @click="closeNotificationPanel"
+              >
                 <IconX />
               </button>
             </header>
@@ -313,7 +318,11 @@ onBeforeUnmount(() => {
                         :disabled="processingId === todo.id"
                         @click="handleAcceptTodo(todo.id)"
                       >
-                        {{ processingId === todo.id && activeActionMode !== 'reject' ? '处理中…' : '接受' }}
+                        {{
+                          processingId === todo.id && activeActionMode !== 'reject'
+                            ? '处理中…'
+                            : '接受'
+                        }}
                       </button>
                       <button
                         type="button"
@@ -323,14 +332,22 @@ onBeforeUnmount(() => {
                       >
                         拒绝
                       </button>
-                      <button type="button" class="action-btn is-view" @click="handleOpenTodo(todo)">
+                      <button
+                        type="button"
+                        class="action-btn is-view"
+                        @click="handleOpenTodo(todo)"
+                      >
                         查看
                       </button>
                     </template>
                   </div>
 
                   <div
-                    v-if="!isPendingConfirmOnly(todo) && activeActionId === todo.id && activeActionMode === 'reject'"
+                    v-if="
+                      !isPendingConfirmOnly(todo) &&
+                      activeActionId === todo.id &&
+                      activeActionMode === 'reject'
+                    "
                     class="notification-item__form"
                   >
                     <input
@@ -418,9 +435,10 @@ onBeforeUnmount(() => {
   min-height: 60px;
   box-sizing: border-box;
   padding: 9px 22px;
-  border: 0;
-  background: rgba(255, 255, 255, 0.42);
-  backdrop-filter: blur(18px);
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  backdrop-filter: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -476,17 +494,15 @@ onBeforeUnmount(() => {
 
 .topbar-actions {
   min-width: 0;
-  border: 0;
+  border: none;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.36);
+  background: transparent;
   padding: 4px;
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
   gap: 4px;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.58),
-    0 12px 28px -28px rgba(15, 23, 42, 0.3);
+  box-shadow: none;
 }
 
 .icon-button,

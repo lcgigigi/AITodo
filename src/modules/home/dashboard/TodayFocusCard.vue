@@ -13,8 +13,14 @@ defineProps<{
       <h2>{{ eventCount > doneCount ? '保持推进节奏' : '节奏稳定' }}</h2>
     </div>
     <div class="focus-metrics">
-      <span><strong>{{ eventCount }}</strong>项安排</span>
-      <span><strong>{{ doneCount }}</strong>项完成</span>
+      <span
+        ><strong>{{ eventCount }}</strong
+        >项安排</span
+      >
+      <span
+        ><strong>{{ doneCount }}</strong
+        >项完成</span
+      >
     </div>
     <div class="suggestion">
       <span>推荐入口</span>

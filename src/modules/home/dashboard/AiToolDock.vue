@@ -83,7 +83,10 @@ const emit = defineEmits<{
   cursor: pointer;
   position: relative;
   overflow: hidden;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease;
 }
 
 .tool-card::before {
@@ -151,11 +154,26 @@ const emit = defineEmits<{
   z-index: 1;
 }
 
-.tone-blue { color: #2563eb; background: #eff6ff; }
-.tone-green { color: #059669; background: #ecfdf5; }
-.tone-violet { color: #7c3aed; background: #f5f3ff; }
-.tone-amber { color: #d97706; background: #fffbeb; }
-.tone-rose { color: #e11d48; background: #fff1f2; }
+.tone-blue {
+  color: #2563eb;
+  background: #eff6ff;
+}
+.tone-green {
+  color: #059669;
+  background: #ecfdf5;
+}
+.tone-violet {
+  color: #7c3aed;
+  background: #f5f3ff;
+}
+.tone-amber {
+  color: #d97706;
+  background: #fffbeb;
+}
+.tone-rose {
+  color: #e11d48;
+  background: #fff1f2;
+}
 
 @media (max-width: 760px) {
   .tool-grid {

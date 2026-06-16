@@ -2,13 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import TodoAssigneeSelect from './components/TodoAssigneeSelect.vue'
 import { Textarea } from '@/components/ui/textarea'
 import TodoDatePicker from './components/TodoDatePicker.vue'
 import TodoTimePicker from './components/TodoTimePicker.vue'
@@ -115,19 +109,36 @@ async function parseTodoText() {
     ...todoForm.value,
     ...parsed,
     mode:
-      parsed.mode ??
-      (parsed.endDate && parsed.endDate !== parsed.date ? 'deadline' : 'scheduled'),
+      parsed.mode ?? (parsed.endDate && parsed.endDate !== parsed.date ? 'deadline' : 'scheduled'),
     endDate: parsed.endDate ?? parsed.date ?? todoForm.value.endDate,
     time: parsed.time ?? todoForm.value.time,
   }
   isParsing.value = false
 }
 
-function selectAssignee(id: string) {
-  const assignee = props.assignableUsers.find((user) => user.id === id) ?? props.currentUser
-  todoForm.value.assigneeId = assignee.id
-  todoForm.value.assigneeName = assignee.name
-  todoForm.value.owner = assignee.name
+function parseAssigneeIds(value: string) {
+  if (!value) return []
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function selectAssignees(ids: string[]) {
+  const selected = ids
+    .map((id) => props.assignableUsers.find((user) => user.id === id))
+    .filter((user): user is CalendarUser => Boolean(user))
+
+  if (selected.length === 0) {
+    todoForm.value.assigneeId = props.currentUser.id
+    todoForm.value.assigneeName = props.currentUser.name
+    todoForm.value.owner = props.currentUser.name
+    return
+  }
+
+  todoForm.value.assigneeId = selected.map((user) => user.id).join(',')
+  todoForm.value.assigneeName = selected.map((user) => user.name).join('、')
+  todoForm.value.owner = todoForm.value.assigneeName
 }
 
 function submitTodo() {
@@ -200,12 +211,7 @@ function submitTodo() {
             </label>
             <label class="field field-full">
               <span>待办内容</span>
-              <Textarea
-                v-if="!canEditDialog"
-                v-model="todoForm.title"
-                rows="3"
-                readonly
-              />
+              <Textarea v-if="!canEditDialog" v-model="todoForm.title" rows="3" readonly />
               <Input
                 v-else
                 v-model="todoForm.title"
@@ -216,29 +222,16 @@ function submitTodo() {
             </label>
             <label class="field">
               <span>负责人</span>
-              <Select
-                :model-value="todoForm.assigneeId"
+              <TodoAssigneeSelect
+                :model-value="parseAssigneeIds(todoForm.assigneeId)"
+                :users="assignableUsers"
                 :disabled="!canEditDialog"
-                @update:model-value="selectAssignee(String($event))"
-              >
-                <SelectTrigger class="soft-select-trigger" aria-label="选择负责人">
-                  <SelectValue placeholder="选择负责人" />
-                </SelectTrigger>
-                <SelectContent position="popper">
-                  <SelectItem v-for="user in assignableUsers" :key="user.id" :value="user.id">
-                    {{ user.name }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+                @update:model-value="selectAssignees"
+              />
             </label>
             <label class="field">
               <span>备注</span>
-              <Textarea
-                v-if="!canEditDialog"
-                v-model="todoForm.source"
-                rows="3"
-                readonly
-              />
+              <Textarea v-if="!canEditDialog" v-model="todoForm.source" rows="3" readonly />
               <Input v-else v-model="todoForm.source" type="text" placeholder="备注或来源" />
             </label>
           </div>
@@ -418,37 +411,6 @@ function submitTodo() {
   color: #111827;
   font-size: 13px;
   font-weight: 500;
-}
-
-.soft-select-trigger {
-  width: 100%;
-  min-width: 0;
-  height: 36px;
-  border-color: #dfe8f3;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #111827;
-  padding: 0 10px;
-  justify-content: space-between;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  box-shadow: none;
-}
-
-.soft-select-trigger:hover,
-.soft-select-trigger[aria-expanded='true'] {
-  border-color: #111827;
-  background: #ffffff;
-  color: #111827;
-  box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.07);
-}
-
-.soft-select-trigger:disabled {
-  background: #f8fafc;
-  color: #475569;
-  cursor: default;
-  opacity: 1;
 }
 
 .field textarea {

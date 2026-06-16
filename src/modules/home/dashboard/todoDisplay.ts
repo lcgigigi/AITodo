@@ -92,7 +92,8 @@ export function formatEventTime(event: CalendarEvent, allDayText = '全天') {
 }
 
 export function formatMonthEventTime(event: CalendarEvent) {
-  if (isRangeEvent(event)) return `${formatShortDate(event.date)}-${formatShortDate(event.endDate ?? event.date)}`
+  if (isRangeEvent(event))
+    return `${formatShortDate(event.date)}-${formatShortDate(event.endDate ?? event.date)}`
   return event.time || '·'
 }
 
@@ -121,13 +122,9 @@ export function getTodoStatusLabel(event: CalendarEvent) {
 export function getRejectedTodoMessage(event: CalendarEvent) {
   if (!isRejectedTodo(event)) return ''
 
-  const assignee = event.assigneeName ?? event.owner
   const reason = event.handleDesc?.trim()
-
-  if (assignee && reason) return `${assignee} 已拒绝：${reason}`
-  if (assignee) return `${assignee} 已拒绝该待办`
-  if (reason) return `已拒绝：${reason}`
-  return '接收人已拒绝该待办'
+  if (reason) return `拒绝理由：${reason}`
+  return ''
 }
 
 export function compareEvents(a: CalendarEvent, b: CalendarEvent) {

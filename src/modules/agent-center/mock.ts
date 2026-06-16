@@ -58,7 +58,7 @@ export const categories: CategoryItem[] = [
   { key: 'content', label: '内容创作', count: 1, icon: '✎' },
   { key: 'dev', label: '研发辅助', count: 1, icon: '⌘' },
   { key: 'meeting', label: '会议效率', count: 1, icon: '◉' },
-  { key: 'interview', label: '面试招聘', count: 1, icon: '◎' }
+  { key: 'interview', label: '面试招聘', count: 1, icon: '◎' },
 ]
 
 export const agents: AgentItem[] = [
@@ -199,7 +199,7 @@ export const agents: AgentItem[] = [
     status: '运行中',
     useUrl: '',
     detailUrl: '',
-  }
+  },
 ]
 
 export const tokenOverview = {
@@ -215,8 +215,8 @@ export const tokenOverview = {
     { name: '内容创作', percent: 18, color: '#7b61ff' },
     { name: '数据分析', percent: 16, color: '#f6b73c' },
     { name: '面试招聘', percent: 13, color: '#f06aa6' },
-    { name: '研发辅助', percent: 5, color: '#465782' }
-  ]
+    { name: '研发辅助', percent: 5, color: '#465782' },
+  ],
 }
 
 export const tokenRanking: RankItem[] = [
@@ -225,7 +225,7 @@ export const tokenRanking: RankItem[] = [
   { name: 'PPT创作', value: 86530 },
   { name: '图文分析', value: 72640 },
   { name: '面试中心', value: 58930 },
-  { name: '代码助手', value: 24780 }
+  { name: '代码助手', value: 24780 },
 ]
 
 export const pointsRanking: RankItem[] = [
@@ -234,7 +234,7 @@ export const pointsRanking: RankItem[] = [
   { name: 'PPT创作', value: 8650 },
   { name: '图文分析', value: 7260 },
   { name: '面试中心', value: 5890 },
-  { name: '代码助手', value: 2478 }
+  { name: '代码助手', value: 2478 },
 ]
 
 export const trendData: TrendItem[] = [
@@ -244,13 +244,48 @@ export const trendData: TrendItem[] = [
   { date: '05-19', value: 45620 },
   { date: '05-20', value: 52930 },
   { date: '05-21', value: 48610 },
-  { date: '05-22', value: 20320 }
+  { date: '05-22', value: 20320 },
 ]
 
 export const summaryStats: SummaryItem[] = [
-  { label: '智能体总数', value: '6', unit: '个', rate: 9.1, icon: '▣', sparkline: [10, 12, 11, 14, 13, 18, 17, 22, 20, 23] },
-  { label: '本月调用次数', value: '1,547', unit: '次', rate: 12.6, icon: '↗', sparkline: [8, 10, 12, 11, 15, 18, 16, 24, 19, 26] },
-  { label: '累计 Token', value: '4,675,400', unit: '', rate: 18.3, icon: '☁', sparkline: [18, 22, 21, 25, 27, 31, 29, 36, 33, 41] },
-  { label: '活跃用户数', value: '428', unit: '人', rate: 8.7, icon: '👥', sparkline: [9, 11, 10, 13, 15, 14, 17, 19, 18, 22] },
-  { label: '积分总池', value: '46,328', unit: '分', rate: 14.2, icon: '★', sparkline: [13, 14, 16, 18, 17, 22, 20, 26, 24, 29] }
+  {
+    label: '智能体总数',
+    value: '6',
+    unit: '个',
+    rate: 9.1,
+    icon: '▣',
+    sparkline: [10, 12, 11, 14, 13, 18, 17, 22, 20, 23],
+  },
+  {
+    label: '本月调用次数',
+    value: '1,547',
+    unit: '次',
+    rate: 12.6,
+    icon: '↗',
+    sparkline: [8, 10, 12, 11, 15, 18, 16, 24, 19, 26],
+  },
+  {
+    label: '累计 Token',
+    value: '4,675,400',
+    unit: '',
+    rate: 18.3,
+    icon: '☁',
+    sparkline: [18, 22, 21, 25, 27, 31, 29, 36, 33, 41],
+  },
+  {
+    label: '活跃用户数',
+    value: '428',
+    unit: '人',
+    rate: 8.7,
+    icon: '👥',
+    sparkline: [9, 11, 10, 13, 15, 14, 17, 19, 18, 22],
+  },
+  {
+    label: '积分总池',
+    value: '46,328',
+    unit: '分',
+    rate: 14.2,
+    icon: '★',
+    sparkline: [13, 14, 16, 18, 17, 22, 20, 26, 24, 29],
+  },
 ]

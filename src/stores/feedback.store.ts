@@ -67,6 +67,18 @@ export const useFeedbackStore = defineStore('feedback', {
       clearTimeout(toastTimer)
       toastTimer = null
     },
+    pauseToastTimer() {
+      this.clearToastTimer()
+    },
+    resumeToastTimer() {
+      const toast = this.currentToast
+      if (!toast) return
+
+      this.clearToastTimer()
+      toastTimer = setTimeout(() => {
+        this.dismissToast(toast.id)
+      }, toast.duration)
+    },
     dismissToast(id?: number) {
       if (id !== undefined && this.currentToast?.id !== id) return
       this.clearToastTimer()

@@ -2,10 +2,20 @@
 import { computed, ref } from 'vue'
 import IconChevronLeft from '~icons/lucide/chevron-left'
 import IconChevronRight from '~icons/lucide/chevron-right'
+import IconX from '~icons/lucide/x'
+import IconSparkles from '~icons/lucide/sparkles'
+import IconCoffee from '~icons/lucide/coffee'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { CalendarDay, CalendarEvent } from './types'
-import { formatEventTime, formatMonthEventTime, getTodoStatusLabel, isAllDayEvent, isRangeEvent, isRejectedTodo } from './todoDisplay'
+import {
+  formatEventTime,
+  formatMonthEventTime,
+  getTodoStatusLabel,
+  isAllDayEvent,
+  isRangeEvent,
+  isRejectedTodo,
+} from './todoDisplay'
 
 type CalendarViewMode = 'month' | 'week'
 type MonthRangeDisplayMode = 'daily' | 'bar'
@@ -55,7 +65,9 @@ const weekdays = ['一', '二', '三', '四', '五', '六', '日']
 const dateWeekdays = ['日', '一', '二', '三', '四', '五', '六']
 const timelineEventLimit = 1
 const monthEventLimit = 2
-const displayLabel = computed(() => (props.viewMode === 'week' ? props.weekLabel : props.monthLabel))
+const displayLabel = computed(() =>
+  props.viewMode === 'week' ? props.weekLabel : props.monthLabel,
+)
 const periodActionLabel = computed(() => (props.viewMode === 'week' ? '周' : '月'))
 const weekTimelineDays = computed(() => props.days)
 const todayQuickInput = ref('')
@@ -74,15 +86,17 @@ const timelineSlots = computed<TimelineSlot[]>(() => {
     }
   }
 
-  return [...hours].sort((a, b) => a - b).reduce<TimelineSlot[]>((slots, hour, index, sortedHours) => {
-    const previous = sortedHours[index - 1]
-    if (index > 0 && hour - previous > 1) {
-      slots.push({ key: `gap-${previous}-${hour}`, label: '...', isGap: true })
-    }
+  return [...hours]
+    .sort((a, b) => a - b)
+    .reduce<TimelineSlot[]>((slots, hour, index, sortedHours) => {
+      const previous = sortedHours[index - 1]
+      if (index > 0 && hour - previous > 1) {
+        slots.push({ key: `gap-${previous}-${hour}`, label: '...', isGap: true })
+      }
 
-    slots.push({ key: String(hour), label: `${String(hour).padStart(2, '0')}:00`, hour })
-    return slots
-  }, [])
+      slots.push({ key: String(hour), label: `${String(hour).padStart(2, '0')}:00`, hour })
+      return slots
+    }, [])
 })
 
 const monthRangeSegments = computed<MonthRangeSegment[]>(() => {
@@ -275,7 +289,6 @@ function quickCreateFromHeader() {
           <Input v-model="headerQuickInput" type="text" placeholder="一句话创建待办..." />
           <Button v-if="hasHeaderQuickInput" type="submit">AI解析</Button>
         </form>
-     
       </div>
       <div class="calendar-controls">
         <button
@@ -312,10 +325,18 @@ function quickCreateFromHeader() {
           </button>
         </div>
         <div class="month-actions" :aria-label="`${periodActionLabel}切换`">
-          <button type="button" :aria-label="`上一${periodActionLabel}`" @click="emit('previousPeriod')">
+          <button
+            type="button"
+            :aria-label="`上一${periodActionLabel}`"
+            @click="emit('previousPeriod')"
+          >
             <IconChevronLeft aria-hidden="true" />
           </button>
-          <button type="button" :aria-label="`下一${periodActionLabel}`" @click="emit('nextPeriod')">
+          <button
+            type="button"
+            :aria-label="`下一${periodActionLabel}`"
+            @click="emit('nextPeriod')"
+          >
             <IconChevronRight aria-hidden="true" />
           </button>
         </div>
@@ -433,11 +454,16 @@ function quickCreateFromHeader() {
               :class="[
                 `type-${event.type}`,
                 `status-${event.status}`,
-                { 'is-range': monthRangeDisplayMode === 'daily' && isRangeEvent(event), 'is-rejected': isRejectedTodo(event) },
+                {
+                  'is-range': monthRangeDisplayMode === 'daily' && isRangeEvent(event),
+                  'is-rejected': isRejectedTodo(event),
+                },
               ]"
               :aria-label="`${formatEventTime(event)} ${event.title}${isRejectedTodo(event) ? ' 已拒绝' : ''}`"
             >
-              <em v-if="isRejectedTodo(event)" class="month-event-reject">{{ getTodoStatusLabel(event) }}</em>
+              <em v-if="isRejectedTodo(event)" class="month-event-reject">{{
+                getTodoStatusLabel(event)
+              }}</em>
               <i></i>
               <time v-if="!isRangeEvent(event)">{{ formatMonthEventTime(event) }}</time>
               <b>{{ event.title }}</b>
@@ -460,11 +486,13 @@ function quickCreateFromHeader() {
           @pointerdown.stop
         >
           <header>
-            <div>
+            <div class="today-bubble-title">
               <strong>今日待办</strong>
               <span>{{ todayDate.split('-').join('/') }}</span>
             </div>
-            <button type="button" aria-label="关闭今日待办气泡" @click="emit('closeTodayBubble')">×</button>
+            <button type="button" aria-label="关闭今日待办气泡" @click="emit('closeTodayBubble')">
+              <IconX class="w-4 h-4" />
+            </button>
           </header>
           <div class="today-bubble-list">
             <button
@@ -475,14 +503,19 @@ function quickCreateFromHeader() {
               type="button"
               @click="emit('select', todayDate)"
             >
-              <time>{{ formatEventTime(event) }}</time>
-              <span>
-                {{ event.title }}
-                <em v-if="isRejectedTodo(event)"> · 已拒绝</em>
-              </span>
+              <div class="today-bubble-item-content">
+                <time>{{ formatEventTime(event) }}</time>
+                <span>
+                  {{ event.title }}
+                  <em v-if="isRejectedTodo(event)"> · 已拒绝</em>
+                </span>
+              </div>
             </button>
             <div v-if="!todayEvents.length" class="today-bubble-empty">
-              <p>今日暂无待办</p>
+              <div class="empty-icon-wrapper">
+                <IconCoffee class="w-6 h-6" />
+              </div>
+              <p>今日暂无待办，<br />喝杯咖啡休息一下吧~</p>
             </div>
           </div>
           <form
@@ -490,8 +523,13 @@ function quickCreateFromHeader() {
             :class="{ 'has-value': hasTodayQuickInput }"
             @submit.prevent="quickCreateToday"
           >
-            <Input v-model="todayQuickInput" type="text" placeholder="一句话创建待办..." />
-            <Button v-if="hasTodayQuickInput" type="submit">AI解析</Button>
+            <div class="input-wrapper">
+              <Input v-model="todayQuickInput" type="text" placeholder="一句话创建待办..." />
+              <Button v-if="hasTodayQuickInput" type="submit" class="ai-submit-btn">
+                <IconSparkles class="w-3 h-3 mr-1" />
+                AI解析
+              </Button>
+            </div>
           </form>
         </section>
       </div>
@@ -729,7 +767,10 @@ h2 {
   font-size: 12px;
   font-weight: 900;
   cursor: pointer;
-  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
 .view-switch button.active {
@@ -758,7 +799,10 @@ h2 {
   font: inherit;
   line-height: 0;
   cursor: pointer;
-  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease;
 }
 
 .month-actions button svg {
@@ -1005,10 +1049,18 @@ h2 {
   flex: 0 0 auto;
 }
 
-.timeline-event.type-meeting { color: #2563eb; }
-.timeline-event.type-task { color: #059669; }
-.timeline-event.type-approval { color: #d97706; }
-.timeline-event.type-ai { color: #7c3aed; }
+.timeline-event.type-meeting {
+  color: #2563eb;
+}
+.timeline-event.type-task {
+  color: #059669;
+}
+.timeline-event.type-approval {
+  color: #d97706;
+}
+.timeline-event.type-ai {
+  color: #7c3aed;
+}
 
 .month-grid {
   position: relative;
@@ -1035,7 +1087,11 @@ h2 {
   flex-direction: column;
   gap: 5px;
   overflow: hidden;
-  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease;
 }
 
 .day-cell-main {
@@ -1105,10 +1161,8 @@ h2 {
 }
 
 .day-cell.is-muted .month-event {
-  border-color: rgba(226, 232, 240, 0.44);
-  background: rgba(255, 255, 255, 0.42);
+  background: transparent;
   color: #94a3b8;
-  box-shadow: none;
 }
 
 .day-cell.is-muted .month-event b,
@@ -1261,89 +1315,81 @@ h2 {
 .month-event,
 .more-count {
   max-width: 100%;
-  border-radius: 999px;
+  border-radius: 4px;
   overflow: hidden;
 }
 
 .month-event {
   position: relative;
-  min-height: 30px;
   width: 100%;
   box-sizing: border-box;
-  border: 1px solid rgba(226, 232, 240, 0.78);
-  background: rgba(255, 255, 255, 0.74);
-  padding: 3px 5px 3px 14px;
-  display: inline-flex;
+  background: transparent;
+  padding: 4px 4px 4px 12px;
+  display: flex;
+  flex-direction: column;
   align-items: flex-start;
-  flex-wrap: wrap;
-  gap: 2px 4px;
+  gap: 2px;
   min-width: 0;
-  box-shadow: 0 8px 15px -15px rgba(15, 23, 42, 0.28);
+  transition: background 0.15s ease;
+}
+
+.month-event:hover {
+  background: rgba(15, 23, 42, 0.04);
 }
 
 .month-event i {
   position: absolute;
-  top: 50%;
-  left: 6px;
-  width: 4px;
-  height: 4px;
+  top: 7px;
+  left: 2px;
+  width: 6px;
+  height: 6px;
   margin-top: 0;
-  border-radius: 999px;
+  border-radius: 50%;
   background: currentColor;
-  transform: translateY(-50%);
+  transform: none;
   flex: 0 0 auto;
 }
 
 .month-event time {
   color: currentColor;
-  font-size: 9px;
-  font-weight: 950;
-  line-height: 1;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.1;
+  opacity: 0.85;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
   order: 1;
 }
 
 .month-event b {
-  flex: 0 0 100%;
+  width: 100%;
   min-width: 0;
-  margin-left: 0;
   overflow: hidden;
   color: #334155;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 9px;
-  font-weight: 850;
-  line-height: 1;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
   order: 2;
 }
 
 .month-event.is-range {
   min-height: 24px;
-  border-color: rgba(226, 232, 240, 0.88);
-  background: rgba(255, 255, 255, 0.74);
-  color: #94a3b8;
-  padding: 4px 7px 4px 16px;
-  align-items: center;
-  flex-wrap: nowrap;
-  gap: 5px;
-  box-shadow: none;
+  background: rgba(239, 246, 255, 0.6);
+  color: #64748b;
+  padding: 4px 4px 4px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .month-event.is-range i {
-  width: 4px;
-  height: 4px;
-  margin-top: 0;
+  top: 7px;
 }
 
 .month-event.is-range b {
-  flex: 1 1 auto;
-  margin-left: 0;
   color: #475569;
-  font-size: 9px;
-  font-weight: 850;
-  line-height: 1;
-  order: 0;
 }
 
 .month-event.status-done {
@@ -1357,38 +1403,32 @@ h2 {
 
 .month-event.is-rejected {
   position: relative;
-  border-color: rgba(254, 202, 202, 0.92);
-  background: rgba(254, 242, 242, 0.88);
+  background: rgba(254, 242, 242, 0.6);
   color: #b91c1c;
-  padding-right: 34px;
+  padding-right: 38px;
 }
 
 .month-event.is-rejected i {
-  align-self: center;
-  margin-top: 0;
   background: #ef4444;
 }
 
 .month-event.is-rejected b {
-  margin-left: 0;
-  flex: 0 0 100%;
-  padding-right: 0;
   color: #991b1b;
 }
 
 .month-event.is-rejected .month-event-reject {
   position: absolute;
-  top: 3px;
-  right: 5px;
+  top: 4px;
+  right: 4px;
   z-index: 1;
-  border-radius: 999px;
+  border-radius: 4px;
   background: rgba(254, 226, 226, 0.96);
   color: #b91c1c;
-  font-size: 8px;
+  font-size: 9px;
   font-style: normal;
-  font-weight: 900;
+  font-weight: 800;
   line-height: 1;
-  padding: 2px 5px;
+  padding: 2px 4px;
   pointer-events: none;
 }
 
@@ -1483,50 +1523,86 @@ h2 {
   white-space: nowrap;
 }
 
-.type-meeting { color: #1d4ed8; }
-.type-task { color: #047857; }
-.type-approval { color: #b45309; }
-.type-ai { color: #6d28d9; }
+.type-meeting {
+  color: #1d4ed8;
+}
+.type-task {
+  color: #047857;
+}
+.type-approval {
+  color: #b45309;
+}
+.type-ai {
+  color: #6d28d9;
+}
 
-.month-event.type-meeting { color: #2563eb; }
-.month-event.type-task { color: #059669; }
-.month-event.type-approval { color: #d97706; }
-.month-event.type-ai { color: #7c3aed; }
+.month-event.type-meeting {
+  color: #2563eb;
+}
+.month-event.type-task {
+  color: #059669;
+}
+.month-event.type-approval {
+  color: #d97706;
+}
+.month-event.type-ai {
+  color: #7c3aed;
+}
 
 .today-bubble {
   position: absolute;
   z-index: 30;
   top: -8px;
   left: calc(100% + 10px);
-  width: 280px;
-  max-height: min(400px, calc(100vh - 150px));
+  width: 300px;
+  max-height: min(420px, calc(100vh - 150px));
   box-sizing: border-box;
-  border: 1px solid rgba(203, 213, 225, 0.9);
-  border-radius: 18px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(249, 250, 251, 0.96)),
-    #ffffff;
+  border: 1px solid rgba(59, 130, 246, 0.15);
+  border-radius: 20px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.95) 100%);
   box-shadow:
-    0 0 0 10px rgba(148, 163, 184, 0.05),
-    0 0 34px 8px rgba(100, 116, 139, 0.14),
-    0 34px 72px -34px rgba(15, 23, 42, 0.34),
-    0 18px 32px -24px rgba(15, 23, 42, 0.24),
-    0 2px 6px rgba(15, 23, 42, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.98),
-    inset 0 -1px 0 rgba(226, 232, 240, 0.52);
-  padding: 14px 14px 12px;
+    0 0 0 1px rgba(255, 255, 255, 0.5) inset,
+    0 10px 40px -10px rgba(37, 99, 235, 0.15),
+    0 24px 64px -24px rgba(15, 23, 42, 0.2);
+  padding: 18px;
   display: flex;
   flex-direction: column;
-  gap: 11px;
+  gap: 16px;
   cursor: default;
-  backdrop-filter: blur(14px);
+  backdrop-filter: blur(20px) saturate(160%);
   isolation: isolate;
   overflow: visible;
+  animation: bubble-pop-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  transform-origin: left center;
+}
+
+@keyframes bubble-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateX(0);
+  }
 }
 
 .day-cell.is-bubble-left .today-bubble {
   right: calc(100% + 10px);
   left: auto;
+  transform-origin: right center;
+  animation-name: bubble-pop-in-left;
+}
+
+@keyframes bubble-pop-in-left {
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateX(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateX(0);
+  }
 }
 
 .day-cell.is-bubble-up .today-bubble {
@@ -1534,48 +1610,36 @@ h2 {
   bottom: -8px;
 }
 
+/* Elegant CSS triangle arrow using rotated square */
 .today-bubble::before {
+  content: '';
   position: absolute;
-  top: 31px;
+  top: 32px;
   left: -6px;
   width: 12px;
   height: 12px;
-  border-left: 1px solid rgba(203, 213, 225, 0.86);
-  border-bottom: 1px solid rgba(203, 213, 225, 0.86);
-  border-radius: 3px 0 0 0;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(249, 250, 251, 0.96));
-  content: '';
+  background: #ffffff;
+  border-left: 1px solid rgba(59, 130, 246, 0.15);
+  border-bottom: 1px solid rgba(59, 130, 246, 0.15);
+  border-radius: 2px 0 0 0;
   transform: rotate(45deg);
-  z-index: 1;
-  box-shadow: -5px 5px 12px -12px rgba(15, 23, 42, 0.4);
+  z-index: 10;
 }
 
 .day-cell.is-bubble-up .today-bubble::before {
   top: auto;
-  bottom: 31px;
-  border-radius: 0 0 0 3px;
-  box-shadow: -5px 5px 12px -12px rgba(15, 23, 42, 0.4);
-}
-
-.today-bubble::after {
-  position: absolute;
-  inset: -14px;
-  z-index: -1;
-  border-radius: 26px;
-  background:
-    radial-gradient(circle at 32% 32%, rgba(100, 116, 139, 0.12), transparent 58%),
-    radial-gradient(circle at 70% 74%, rgba(148, 163, 184, 0.1), transparent 62%);
-  content: '';
-  pointer-events: none;
+  bottom: 32px;
 }
 
 .day-cell.is-bubble-left .today-bubble::before {
-  right: -6px;
   left: auto;
-  border: 0;
-  border-top: 1px solid rgba(203, 213, 225, 0.86);
-  border-right: 1px solid rgba(203, 213, 225, 0.86);
-  border-radius: 0 3px 0 0;
+  right: -6px;
+  border-left: none;
+  border-bottom: none;
+  border-right: 1px solid rgba(59, 130, 246, 0.15);
+  border-top: 1px solid rgba(59, 130, 246, 0.15);
+  border-radius: 0 2px 0 0;
+  background: #f8fafc;
 }
 
 .today-bubble header {
@@ -1586,171 +1650,217 @@ h2 {
   gap: 12px;
 }
 
-.today-bubble header div {
-  min-width: 0;
-  display: grid;
-  gap: 7px;
+.today-bubble-title {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
-.today-bubble header strong {
+.today-bubble-title strong {
   color: #0f172a;
-  font-size: 17px;
-  line-height: 1.1;
+  font-size: 18px;
+  line-height: 1.2;
   font-weight: 900;
+  letter-spacing: -0.3px;
+  background: linear-gradient(135deg, #0f172a 0%, #334155 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
-.today-bubble header span {
+.today-bubble-title span {
   width: fit-content;
-  min-height: 21px;
+  height: 24px;
   border-radius: 999px;
-  background: rgba(241, 245, 249, 0.92);
-  color: #475569;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(167, 139, 250, 0.1));
+  color: #3b82f6;
   padding: 0 10px;
   display: inline-flex;
   align-items: center;
-  font-size: 13px;
-  font-weight: 900;
+  font-size: 12px;
+  font-weight: 800;
+  border: 1px solid rgba(59, 130, 246, 0.2);
 }
 
 .today-bubble header button {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border: 0;
   border-radius: 999px;
-  background: rgba(241, 245, 249, 0.82);
+  background: rgba(226, 232, 240, 0.6);
   color: #64748b;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-family: Arial, Helvetica, sans-serif;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
-  line-height: 1;
   cursor: pointer;
-  transition:
-    background 0.18s ease,
-    color 0.18s ease,
-    transform 0.18s ease;
+  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .today-bubble header button:hover {
-  background: #e5e7eb;
-  color: #111827;
-  transform: translateY(-1px);
+  background: #fecaca;
+  color: #ef4444;
+  transform: scale(1.15) rotate(90deg);
 }
 
 .today-bubble-list {
-  min-height: 84px;
+  min-height: 100px;
   flex: 1 1 auto;
   max-height: none;
-  overflow: auto;
-  display: grid;
-  align-content: start;
-  gap: 0;
-  border: 1px solid rgba(226, 232, 240, 0.68);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.62);
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-radius: 12px;
   overscroll-behavior: contain;
+  padding: 2px;
+}
+
+.today-bubble-list::-webkit-scrollbar {
+  width: 4px;
+}
+.today-bubble-list::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 4px;
 }
 
 .today-bubble-item {
   position: relative;
   min-width: 0;
-  border: 0;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.58);
-  border-radius: 0;
-  background: transparent;
-  color: #334155;
-  padding: 10px 11px 10px 25px;
-  display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
+  border: 1px solid rgba(226, 232, 240, 0.6);
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 10px 12px 10px 32px;
+  display: flex;
   gap: 10px;
-  align-items: center;
+  align-items: flex-start;
   text-align: left;
-  font: inherit;
   cursor: pointer;
-  transition:
-    background 0.18s ease,
-    color 0.18s ease;
-}
-
-.today-bubble-item:last-child {
-  border-bottom: 0;
+  box-shadow: 0 2px 8px -4px rgba(100, 116, 139, 0.1);
+  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .today-bubble-item:hover {
-  background: rgba(239, 246, 255, 0.7);
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  box-shadow: 0 6px 16px -6px rgba(59, 130, 246, 0.2);
 }
 
 .today-bubble-item.is-rejected {
-  background: rgba(254, 242, 242, 0.56);
+  background: rgba(254, 242, 242, 0.6);
+  border-color: rgba(252, 165, 165, 0.4);
 }
 
 .today-bubble-item.is-rejected:hover {
-  background: rgba(254, 226, 226, 0.72);
+  background: rgba(254, 226, 226, 0.8);
+  border-color: rgba(248, 113, 113, 0.6);
 }
 
 .today-bubble-item.is-rejected::before {
   background: #ef4444;
-}
-
-.today-bubble-item span em {
-  color: #b91c1c;
-  font-style: normal;
-  font-weight: 900;
+  box-shadow: 0 0 8px 1px rgba(239, 68, 68, 0.4);
 }
 
 .today-bubble-item::before {
   position: absolute;
   left: 12px;
   top: 50%;
-  width: 5px;
-  height: 5px;
+  width: 8px;
+  height: 8px;
   border-radius: 999px;
-  background: #94a3b8;
+  background: #3b82f6;
   content: '';
   transform: translateY(-50%);
+  box-shadow: 0 0 8px 2px rgba(59, 130, 246, 0.3);
+  transition: all 0.2s ease;
 }
 
-.today-bubble-item time {
-  color: #475569;
-  font-size: 11px;
-  font-weight: 950;
-  font-variant-numeric: tabular-nums;
+.today-bubble-item:hover::before {
+  transform: translateY(-50%) scale(1.2);
+  box-shadow: 0 0 10px 3px rgba(59, 130, 246, 0.4);
 }
 
-.today-bubble-item span {
+.today-bubble-item-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   min-width: 0;
+}
+
+.today-bubble-item-content time {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+.today-bubble-item-content span {
+  color: #1e293b;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  font-weight: 900;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.today-bubble-item-content span em {
+  color: #ef4444;
+  font-style: normal;
+  font-weight: 800;
+  font-size: 11px;
+  background: rgba(254, 226, 226, 0.8);
+  padding: 2px 6px;
+  border-radius: 6px;
+  margin-left: 4px;
 }
 
 .today-bubble-empty {
   margin: 0;
-  min-height: 74px;
-  border: 1px dashed rgba(147, 197, 253, 0.62);
-  border-radius: 14px;
-  background:
-    linear-gradient(135deg, rgba(239, 246, 255, 0.72), rgba(255, 255, 255, 0.52)),
-    #ffffff;
-  color: #64748b;
-  padding: 0 14px;
-  display: grid;
-  place-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 850;
+  flex: 1;
+  min-height: 84px;
+  border: 1.5px dashed rgba(147, 197, 253, 0.8);
+  border-radius: 12px;
+  background: rgba(239, 246, 255, 0.4);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 20px;
   text-align: center;
+  transition: all 0.2s ease;
+}
+
+.today-bubble-empty:hover {
+  background: rgba(239, 246, 255, 0.8);
+  border-color: #60a5fa;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px -4px rgba(59, 130, 246, 0.15);
+}
+
+.empty-icon-wrapper {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: #eff6ff;
+  color: #60a5fa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .today-bubble-empty p {
   margin: 0;
-  max-width: 210px;
+  color: #3b82f6;
+  font-size: 13px;
   line-height: 1.45;
+  font-weight: 800;
 }
 
 .today-quick-create {
@@ -1759,57 +1869,67 @@ h2 {
   min-height: 42px;
 }
 
+.input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
 .today-quick-create input {
   width: 100%;
   height: 42px;
   box-sizing: border-box;
-  border: 1px solid rgba(203, 213, 225, 0.72);
-  border-radius: 999px;
-  background: #ffffff;
+  border: 1px solid rgba(203, 213, 225, 0.8);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.9);
   padding: 0 16px;
-  color: #111827;
-  font: inherit;
-  font-size: 12px;
+  color: #0f172a;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
   outline: none;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92);
-  transition:
-    border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    padding 0.18s ease;
+  box-shadow: 0 2px 10px -4px rgba(100, 116, 139, 0.1);
+  transition: all 0.2s ease;
+}
+
+.today-quick-create input::placeholder {
+  color: #94a3b8;
+  font-weight: 500;
 }
 
 .today-quick-create input:focus {
-  border-color: rgba(96, 165, 250, 0.9);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  background: #ffffff;
+  border-color: #3b82f6;
+  box-shadow:
+    0 4px 14px -4px rgba(59, 130, 246, 0.2),
+    0 0 0 3px rgba(59, 130, 246, 0.15);
 }
 
 .today-quick-create.has-value input {
-  padding-right: 82px;
+  padding-right: 90px;
 }
 
-.today-quick-create button {
+.ai-submit-btn {
   position: absolute;
-  top: 5px;
-  right: 5px;
+  right: 6px;
   height: 32px;
-  border: 0;
-  border-radius: 999px;
-  background: #2563eb;
-  color: #ffffff;
   padding: 0 12px;
-  font: inherit;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+  color: white;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 600;
+  border: none;
+  display: flex;
+  align-items: center;
   cursor: pointer;
-  box-shadow: 0 10px 20px -16px rgba(37, 99, 235, 0.86);
-  transition:
-    background 0.18s ease,
-    transform 0.18s ease;
+  box-shadow: 0 4px 12px -4px rgba(59, 130, 246, 0.5);
+  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-.today-quick-create button:hover {
-  background: #1d4ed8;
-  transform: translateY(-1px);
+.ai-submit-btn:hover {
+  transform: translateY(-2px) scale(1.05);
+  box-shadow: 0 6px 16px -4px rgba(59, 130, 246, 0.6);
 }
 
 @media (max-width: 1180px) {
@@ -1890,13 +2010,15 @@ h2 {
 
   .month-event {
     min-height: 20px;
-    padding: 0 5px;
+    padding: 2px 4px 2px 10px;
+    gap: 1px;
   }
 
   .month-event i {
+    top: 5px;
+    left: 2px;
     width: 4px;
     height: 4px;
   }
-
 }
 </style>

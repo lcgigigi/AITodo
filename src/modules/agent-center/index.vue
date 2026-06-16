@@ -177,7 +177,11 @@
                 <SelectValue placeholder="统计周期" />
               </SelectTrigger>
               <SelectContent position="popper">
-                <SelectItem v-for="option in periodOptions" :key="option.value" :value="option.value">
+                <SelectItem
+                  v-for="option in periodOptions"
+                  :key="option.value"
+                  :value="option.value"
+                >
                   {{ option.label }}
                 </SelectItem>
               </SelectContent>
@@ -288,7 +292,10 @@
       >
         <header class="drawer-head">
           <div>
-            <span>{{ selectedAgent.categoryName }} · {{ permissionText(selectedAgent.permissionState) }}</span>
+            <span
+              >{{ selectedAgent.categoryName }} ·
+              {{ permissionText(selectedAgent.permissionState) }}</span
+            >
             <h2>{{ selectedAgent.name }}</h2>
             <p>{{ selectedAgent.desc }}</p>
           </div>
@@ -312,9 +319,7 @@
 
         <section v-if="agentActionMode === 'use'" class="mock-use-panel">
           <h3>模拟使用入口</h3>
-          <p>
-            当前前端使用 mock 数据模拟能力入口。真实接口接入后，这里会跳转到对应智能体工作流。
-          </p>
+          <p>当前前端使用 mock 数据模拟能力入口。真实接口接入后，这里会跳转到对应智能体工作流。</p>
           <button type="button" @click="agentActionMode = 'detail'">查看能力详情</button>
         </section>
 
@@ -499,7 +504,9 @@ function locateAgentFromQuery(agentKey?: string) {
   const normalizedKey = agentKey?.trim()
   if (!normalizedKey) return
 
-  const agent = agents.find((item) => item.key === normalizedKey || item.routeQuery === normalizedKey)
+  const agent = agents.find(
+    (item) => item.key === normalizedKey || item.routeQuery === normalizedKey,
+  )
   if (!agent) return
 
   selectedAgent.value = agent

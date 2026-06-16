@@ -5,14 +5,8 @@ import IconCalendarPlus from '~icons/lucide/calendar-plus'
 import IconX from '~icons/lucide/x'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import AppRive from '@/shared/components/animation/AppRive.vue'
+import TodoAssigneeSelect from './components/TodoAssigneeSelect.vue'
 import TodoDatePicker from './components/TodoDatePicker.vue'
 import TodoDeadlineDateTimeRange from './components/TodoDeadlineDateTimeRange.vue'
 import TodoTimePicker from './components/TodoTimePicker.vue'
@@ -65,7 +59,14 @@ const emit = defineEmits<{
 }>()
 
 type PanelMode = 'list' | 'create' | 'edit' | 'view'
-type ParsedHighlightField = 'date' | 'time' | 'endDate' | 'endTime' | 'title' | 'source' | 'assignee'
+type ParsedHighlightField =
+  | 'date'
+  | 'time'
+  | 'endDate'
+  | 'endTime'
+  | 'title'
+  | 'source'
+  | 'assignee'
 
 const scheduledTimePresets = [
   { label: '中午12点', value: '12:00' },
@@ -83,7 +84,7 @@ const highlightedFields = ref<Set<ParsedHighlightField>>(new Set())
 const todoForm = ref<CalendarTodoForm>(createEmptyForm(props.date))
 const initialFormSnapshot = ref(formSnapshot(todoForm.value))
 const discardWarningVisible = ref(false)
-const deleteWarningVisible = ref(false)
+const pendingDeleteId = ref('')
 let pendingDiscardAction: (() => void) | undefined
 let highlightTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -93,12 +94,12 @@ const specialText: Record<CalendarSpecialDay['type'], string> = {
   'solar-term': '节气',
 }
 
-const pendingCount = computed(() =>
-  props.events.filter((event) => event.status !== 'done' && !isRejectedTodo(event)).length,
+const pendingCount = computed(
+  () => props.events.filter((event) => event.status !== 'done' && !isRejectedTodo(event)).length,
 )
 const rejectedCount = computed(() => props.events.filter((event) => isRejectedTodo(event)).length)
-const doneCount = computed(() =>
-  props.events.filter((event) => event.status === 'done' && !isRejectedTodo(event)).length,
+const doneCount = computed(
+  () => props.events.filter((event) => event.status === 'done' && !isRejectedTodo(event)).length,
 )
 const isFormMode = computed(() => panelMode.value !== 'list')
 const isViewMode = computed(() => panelMode.value === 'view')
@@ -261,7 +262,11 @@ function hideDiscardWarning() {
 }
 
 function hideDeleteWarning() {
-  deleteWarningVisible.value = false
+  pendingDeleteId.value = ''
+}
+
+function canDeleteEvent(event: CalendarEvent) {
+  return Boolean(event.editable)
 }
 
 function showDiscardWarning(onConfirm?: () => void) {
@@ -429,11 +434,7 @@ async function parseTodoText() {
     todoForm.value = nextForm
     triggerParsedHighlights(previousForm, nextForm)
   } catch (error) {
-    emit(
-      'notify',
-      error instanceof Error ? error.message : 'AI 解析待办失败，请稍后重试',
-      'error'
-    )
+    emit('notify', error instanceof Error ? error.message : 'AI 解析待办失败，请稍后重试', 'error')
   } finally {
     isParsing.value = false
   }
@@ -532,11 +533,29 @@ function syncDateRange() {
   }
 }
 
-function selectAssignee(id: string) {
-  const assignee = props.assignableUsers.find((user) => user.id === id) ?? props.currentUser
-  todoForm.value.assigneeId = assignee.id
-  todoForm.value.assigneeName = assignee.name
-  todoForm.value.owner = assignee.name
+function parseAssigneeIds(value: string) {
+  if (!value) return []
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function selectAssignees(ids: string[]) {
+  const selected = ids
+    .map((id) => props.assignableUsers.find((user) => user.id === id))
+    .filter((user): user is CalendarUser => Boolean(user))
+
+  if (selected.length === 0) {
+    todoForm.value.assigneeId = props.currentUser.id
+    todoForm.value.assigneeName = props.currentUser.name
+    todoForm.value.owner = props.currentUser.name
+    return
+  }
+
+  todoForm.value.assigneeId = selected.map((user) => user.id).join(',')
+  todoForm.value.assigneeName = selected.map((user) => user.name).join('、')
+  todoForm.value.owner = todoForm.value.assigneeName
 }
 
 function submitTodo() {
@@ -574,19 +593,18 @@ function submitTodo() {
   resetFormState()
 }
 
-function requestDeleteTodo() {
-  if (panelMode.value !== 'edit' || !editingId.value || isParsing.value) return
+function requestDeleteTodo(event: CalendarEvent) {
+  if (!canDeleteEvent(event)) return
   hideDiscardWarning()
-  deleteWarningVisible.value = true
+  pendingDeleteId.value = event.id
 }
 
 function confirmDeleteWarning() {
-  const id = editingId.value
+  const id = pendingDeleteId.value
   hideDeleteWarning()
   if (!id) return
 
   emit('deleteTodo', id)
-  resetFormState()
 }
 
 function toggleStatus(event: CalendarEvent) {
@@ -595,7 +613,7 @@ function toggleStatus(event: CalendarEvent) {
 }
 
 function shouldShowEventMeta(event: CalendarEvent) {
-  return Boolean(event.source) || isRejectedTodo(event)
+  return Boolean(event.source) || (isRejectedTodo(event) && Boolean(getRejectedTodoMessage(event)))
 }
 
 function statusText(event: CalendarEvent) {
@@ -675,6 +693,7 @@ defineExpose({
             `status-${event.status}`,
             event.scope ? `scope-${event.scope}` : '',
             { 'is-rejected': isRejectedTodo(event) },
+            { 'is-deleting': pendingDeleteId === event.id },
           ]"
           tabindex="0"
           @click="openEventDetail(event)"
@@ -706,41 +725,58 @@ defineExpose({
                   </span>
                 </div>
               </div>
-              <div class="item-actions">
-                <button
-                  v-if="event.completable"
-                  class="status-toggle"
-                  type="button"
-                  :class="{ 'is-done': event.status === 'done' }"
-                  @click.stop="toggleStatus(event)"
-                >
-                  <span aria-hidden="true">{{ event.status === 'done' ? '✓' : '' }}</span>
-                  {{ event.status === 'done' ? '撤销' : '完成' }}
-                </button>
-                <button
-                  v-if="shouldOpenViewForm(event)"
-                  class="edit-action is-view"
-                  type="button"
-                  @click.stop="openViewForm(event)"
-                >
-                  查看
-                </button>
-                <button
-                  v-else
-                  class="edit-action"
-                  type="button"
-                  @click.stop="openEditForm(event)"
-                >
-                  编辑
-                </button>
-              </div>
             </div>
             <div v-if="shouldShowEventMeta(event)" class="event-note">
-              <p v-if="isRejectedTodo(event)" class="event-reject-note">
+              <p
+                v-if="isRejectedTodo(event) && getRejectedTodoMessage(event)"
+                class="event-reject-note"
+              >
                 {{ getRejectedTodoMessage(event) }}
               </p>
               <p v-if="event.source">备注：{{ event.source }}</p>
             </div>
+          </div>
+          <div class="item-actions">
+            <template v-if="pendingDeleteId === event.id">
+              <span class="delete-confirm-text">确定删除？</span>
+              <button class="edit-action" type="button" @click.stop="hideDeleteWarning">
+                取消
+              </button>
+              <button class="delete-action" type="button" @click.stop="confirmDeleteWarning">
+                确认
+              </button>
+            </template>
+            <template v-else>
+              <button
+                v-if="event.completable"
+                class="status-toggle"
+                type="button"
+                :class="{ 'is-done': event.status === 'done' }"
+                @click.stop="toggleStatus(event)"
+              >
+                <span aria-hidden="true">{{ event.status === 'done' ? '✓' : '' }}</span>
+                {{ event.status === 'done' ? '撤销' : '完成' }}
+              </button>
+              <button
+                v-if="shouldOpenViewForm(event)"
+                class="edit-action is-view"
+                type="button"
+                @click.stop="openViewForm(event)"
+              >
+                查看
+              </button>
+              <button v-else class="edit-action" type="button" @click.stop="openEditForm(event)">
+                编辑
+              </button>
+              <button
+                v-if="canDeleteEvent(event)"
+                class="delete-action"
+                type="button"
+                @click.stop="requestDeleteTodo(event)"
+              >
+                删除
+              </button>
+            </template>
           </div>
         </article>
       </div>
@@ -767,21 +803,6 @@ defineExpose({
             <button type="button" @click="hideDiscardWarning">继续编辑</button>
             <button class="discard-confirm" type="button" @click="confirmDiscardWarning">
               放弃修改
-            </button>
-          </div>
-        </div>
-      </Transition>
-
-      <Transition name="discard-warning">
-        <div v-if="deleteWarningVisible" class="inline-discard-warning" role="alert">
-          <div>
-            <strong>确定删除这个待办吗？</strong>
-            <p>删除后无法恢复，请确认是否继续。</p>
-          </div>
-          <div class="discard-warning-actions">
-            <button type="button" @click="hideDeleteWarning">继续编辑</button>
-            <button class="discard-confirm" type="button" @click="confirmDeleteWarning">
-              确认删除
             </button>
           </div>
         </div>
@@ -934,34 +955,28 @@ defineExpose({
             </button>
           </div>
           <div v-if="isDeadlineMode" class="quick-range-row field-full" aria-label="快捷时间">
-            <button type="button" :disabled="isFormReadonly" @click="applyQuickRange('today')">今天</button>
-            <button type="button" :disabled="isFormReadonly" @click="applyQuickRange('week')">本周内</button>
-            <button type="button" :disabled="isFormReadonly" @click="applyQuickRange('nextWeek')">下周前</button>
-            <button type="button" :disabled="isFormReadonly" @click="applyQuickRange('month')">本月内</button>
+            <button type="button" :disabled="isFormReadonly" @click="applyQuickRange('today')">
+              今天
+            </button>
+            <button type="button" :disabled="isFormReadonly" @click="applyQuickRange('week')">
+              本周内
+            </button>
+            <button type="button" :disabled="isFormReadonly" @click="applyQuickRange('nextWeek')">
+              下周前
+            </button>
+            <button type="button" :disabled="isFormReadonly" @click="applyQuickRange('month')">
+              本月内
+            </button>
           </div>
           <label v-if="canChooseAssignee" class="field field-full">
             <span>负责人</span>
-            <Select
-              :model-value="todoForm.assigneeId"
+            <TodoAssigneeSelect
+              :model-value="parseAssigneeIds(todoForm.assigneeId)"
+              :users="assignableUsers"
               :disabled="isFormReadonly"
-              @update:model-value="selectAssignee(String($event))"
-            >
-              <SelectTrigger
-                :class="[
-                  'soft-select-trigger',
-                  { 'is-ai-highlighted': isAiHighlighted('assignee') },
-                ]"
-                :disabled="isFormReadonly"
-                aria-label="选择负责人"
-              >
-                <SelectValue placeholder="选择负责人" />
-              </SelectTrigger>
-              <SelectContent position="popper" class="todo-select-content">
-                <SelectItem v-for="user in assignableUsers" :key="user.id" :value="user.id">
-                  {{ user.name }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+              :highlighted="isAiHighlighted('assignee')"
+              @update:model-value="selectAssignees"
+            />
           </label>
           <label class="field field-full">
             <span>待办内容</span>
@@ -994,15 +1009,6 @@ defineExpose({
           <Button type="button" @click="requestCancelForm">返回</Button>
         </template>
         <template v-else>
-          <Button
-            v-if="panelMode === 'edit'"
-            class="delete-btn"
-            type="button"
-            :disabled="isParsing"
-            @click="requestDeleteTodo"
-          >
-            删除
-          </Button>
           <Button type="button" :disabled="isParsing" @click="requestCancelForm">取消</Button>
           <Button type="submit" :disabled="!canSubmit || isParsing">保存</Button>
         </template>
@@ -1277,6 +1283,7 @@ defineExpose({
 
 .timeline-item {
   position: relative;
+  z-index: 0;
   min-width: 0;
   box-sizing: border-box;
   border: 1px solid transparent;
@@ -1292,17 +1299,16 @@ defineExpose({
     box-shadow 0.18s ease;
 }
 
-.timeline-item + .timeline-item {
-  border-top-color: rgba(226, 232, 240, 0.66);
-}
-
-.timeline-item:hover {
-  border-color: rgba(191, 219, 254, 0.68);
+.timeline-item:hover,
+.timeline-item.is-deleting {
+  z-index: 1;
+  border: 1px solid rgba(191, 219, 254, 0.68);
   background: rgba(248, 250, 252, 0.52);
   box-shadow: 0 14px 26px -28px rgba(15, 23, 42, 0.34);
 }
 
 .timeline-item:focus-visible {
+  z-index: 1;
   outline: 2px solid rgba(79, 124, 255, 0.3);
   outline-offset: 4px;
 }
@@ -1352,10 +1358,6 @@ defineExpose({
   background: linear-gradient(90deg, rgba(236, 254, 255, 0.72), rgba(255, 255, 255, 0));
 }
 
-.timeline-item.scope-assigned_by_me + .timeline-item {
-  border-top: 0;
-}
-
 .timeline-item.status-done .event-body::before {
   opacity: 0.34;
 }
@@ -1373,8 +1375,30 @@ defineExpose({
   filter: grayscale(0.28);
 }
 
+.timeline-item.status-done:hover .item-actions,
+.timeline-item.status-done:focus-within .item-actions,
+.timeline-item.status-done.is-deleting .item-actions {
+  background: linear-gradient(
+    to right,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.9) 25px,
+    rgba(255, 255, 255, 1) 40px
+  );
+}
+
 .timeline-item.is-rejected {
   background: linear-gradient(90deg, rgba(254, 242, 242, 0.82), rgba(255, 255, 255, 0));
+}
+
+.timeline-item.is-rejected:hover .item-actions,
+.timeline-item.is-rejected:focus-within .item-actions,
+.timeline-item.is-rejected.is-deleting .item-actions {
+  background: linear-gradient(
+    to right,
+    rgba(254, 242, 242, 0) 0%,
+    rgba(254, 242, 242, 0.9) 25px,
+    rgba(254, 242, 242, 1) 40px
+  );
 }
 
 .timeline-item.is-rejected h3 {
@@ -1425,9 +1449,10 @@ p {
 .event-title-row {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 1fr;
   gap: 10px;
   align-items: center;
+  position: relative;
 }
 
 .event-title-block {
@@ -1463,9 +1488,49 @@ p {
 .item-actions {
   display: flex;
   gap: 8px;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  align-items: center;
+
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  padding: 6px 8px 6px 40px;
+  border-radius: 0 14px 14px 0;
+  z-index: 10;
+
+  /* 添加一个从左到右过渡的渐变背景，作为底部文本的遮罩 */
+  background: linear-gradient(
+    to right,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.9) 25px,
+    rgba(255, 255, 255, 1) 40px
+  );
+
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-8px);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.timeline-item:hover .item-actions,
+.timeline-item:focus-within .item-actions,
+.timeline-item.is-deleting .item-actions {
+  background: linear-gradient(
+    to right,
+    rgba(248, 250, 252, 0) 0%,
+    rgba(248, 250, 252, 0.9) 25px,
+    rgba(248, 250, 252, 1) 40px
+  );
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(0);
+}
+
+.delete-confirm-text {
+  font-size: 13px;
+  font-weight: 800;
+  color: #be123c;
+  margin-right: 2px;
 }
 
 .status-toggle {
@@ -1495,6 +1560,16 @@ p {
 .edit-action {
   background: rgba(255, 255, 255, 0.62) !important;
   color: #64748b !important;
+}
+
+.delete-action {
+  background: rgba(255, 241, 242, 0.82) !important;
+  color: #be123c !important;
+}
+
+.delete-action:hover {
+  background: #fee2e2 !important;
+  color: #991b1b !important;
 }
 
 .type-meeting .event-body::before {
@@ -2049,34 +2124,6 @@ p {
     box-shadow 0.18s ease;
 }
 
-.soft-select-trigger {
-  width: 100%;
-  min-width: 0;
-  height: 40px;
-  border-color: #dfe8f3;
-  border-radius: 10px;
-  background: #ffffff;
-  color: #111827;
-  padding: 0 12px;
-  justify-content: space-between;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 500;
-  box-shadow: none;
-}
-
-.soft-select-trigger:hover,
-.soft-select-trigger[aria-expanded='true'] {
-  border-color: #111827;
-  background: #ffffff;
-  color: #111827;
-  box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.07);
-}
-
-.soft-select-trigger.is-ai-highlighted :deep([data-slot='select-value']) {
-  animation: ai-value-highlight 0.55s ease-in-out 2;
-}
-
 .soft-picker:focus {
   border-color: #111827;
   box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.07);
@@ -2259,8 +2306,7 @@ p {
   .ai-rive-fallback *,
   .ai-status-steps span,
   .field input.is-ai-highlighted,
-  .field select.is-ai-highlighted,
-  .soft-select-trigger.is-ai-highlighted :deep([data-slot='select-value']) {
+  .field select.is-ai-highlighted {
     animation: none;
   }
 }
@@ -2278,19 +2324,6 @@ p {
   font-size: 13px;
 }
 
-.form-actions .delete-btn {
-  margin-right: auto;
-  border-color: rgba(220, 38, 38, 0.18);
-  background: #fff1f2;
-  color: #be123c;
-}
-
-.form-actions .delete-btn:hover {
-  border-color: rgba(220, 38, 38, 0.28);
-  background: #fee2e2;
-  color: #991b1b;
-}
-
 @media (max-width: 760px) {
   .preview-head {
     gap: 10px;
@@ -2303,10 +2336,6 @@ p {
   .event-title-row {
     grid-template-columns: 1fr;
     align-items: flex-start;
-  }
-
-  .item-actions {
-    justify-content: flex-start;
   }
 
   .summary-grid,

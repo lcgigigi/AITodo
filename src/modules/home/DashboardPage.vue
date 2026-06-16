@@ -87,11 +87,11 @@ async function confirmEmailProvider() {
 
   try {
     // 模拟网络请求延迟，让按钮有短暂的 loading 状态
-    await new Promise(resolve => setTimeout(resolve, 300))
-    
+    await new Promise((resolve) => setTimeout(resolve, 300))
+
     // TODO: 真实接口尚未接通，暂时注释掉
     // await submitEmailProvider(selectedEmailProvider.value)
-    
+
     userStore.setCheckEmail(selectedEmailProvider.value)
     feedbackStore.success('邮箱类型已确认')
   } catch (error) {
@@ -129,9 +129,7 @@ async function confirmEmailProvider() {
             </div>
             <p class="email-provider-kicker">Mail Sync Setup</p>
             <h2 id="email-provider-title">选择你的邮箱入口</h2>
-            <p class="email-provider-desc">
-              选好之后，工作台会按对应邮箱系统同步日程与待办提醒。
-            </p>
+            <p class="email-provider-desc">选好之后，工作台会按对应邮箱系统同步日程与待办提醒。</p>
           </header>
 
           <div class="email-provider-options" role="radiogroup" aria-label="邮箱类型">
@@ -188,7 +186,13 @@ async function confirmEmailProvider() {
   overflow: hidden;
   background: #e6edf5;
   color: #111827;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    'Inter',
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
 }
 
 .dashboard-shell {
@@ -199,9 +203,7 @@ async function confirmEmailProvider() {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background:
-    radial-gradient(circle at 10% 0%, rgba(254, 243, 199, 0.86), transparent 30%),
-    linear-gradient(135deg, #fbfcff 0%, #f4f7fb 48%, #eef6f3 100%);
+  background: linear-gradient(135deg, #fbfcff 0%, #f4f7fb 48%, #eef6f3 100%);
 }
 
 .dashboard-content {
@@ -282,7 +284,7 @@ async function confirmEmailProvider() {
   border-radius: 18px;
   background: linear-gradient(135deg, #e0f2fe, #ccfbf1);
   color: #0369a1;
-  box-shadow: 
+  box-shadow:
     0 8px 16px -6px rgba(14, 116, 144, 0.15),
     0 0 0 1px rgba(255, 255, 255, 0.5) inset;
 }
@@ -476,7 +478,10 @@ async function confirmEmailProvider() {
   border: none;
   outline: none;
   -webkit-tap-highlight-color: transparent;
-  transition: background-color 250ms ease, transform 250ms ease, box-shadow 250ms ease;
+  transition:
+    background-color 250ms ease,
+    transform 250ms ease,
+    box-shadow 250ms ease;
 }
 
 .email-confirm-button:hover:not(:disabled) {

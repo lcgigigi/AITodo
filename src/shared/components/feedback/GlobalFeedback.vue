@@ -11,7 +11,7 @@ import type { FeedbackType } from '@/stores/feedback.store'
 import { useFeedbackStore } from '@/stores/feedback.store'
 
 const feedbackStore = useFeedbackStore()
-const { isLoading, toasts } = storeToRefs(feedbackStore)
+const { isLoading, currentToast } = storeToRefs(feedbackStore)
 
 const toastMeta: Record<FeedbackType, { title: string; icon: Component }> = {
   success: {
@@ -42,42 +42,43 @@ const toastMeta: Record<FeedbackType, { title: string; icon: Component }> = {
         </div>
       </Transition>
 
-      <TransitionGroup
-        name="global-toast"
-        tag="div"
+      <div
         class="global-toast-region"
         aria-live="polite"
         aria-relevant="additions text"
       >
-        <article
-          v-for="toast in toasts"
-          :key="toast.id"
-          class="global-toast"
-          :class="`is-${toast.type}`"
-          :style="{ '--toast-duration': `${toast.duration}ms` }"
-          :role="toast.type === 'error' ? 'alert' : 'status'"
-        >
-          <span class="global-toast__icon" aria-hidden="true">
-            <component :is="toastMeta[toast.type].icon" />
-          </span>
-          <span class="global-toast__content">
-            <strong>{{ toastMeta[toast.type].title }}</strong>
-            <span v-if="toast.message" class="global-toast__divider" aria-hidden="true"></span>
-            <span v-if="toast.message" class="global-toast__message">{{ toast.message }}</span>
-          </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            class="global-toast__close"
-            aria-label="关闭提示"
-            @click="feedbackStore.dismissToast(toast.id)"
+        <Transition name="global-toast" mode="out-in">
+          <article
+            v-if="currentToast"
+            :key="currentToast.id"
+            class="global-toast"
+            :class="`is-${currentToast.type}`"
+            :role="currentToast.type === 'error' ? 'alert' : 'status'"
+            @mouseenter="feedbackStore.pauseToastTimer()"
+            @mouseleave="feedbackStore.resumeToastTimer()"
           >
-            <IconX />
-          </Button>
-          <span class="global-toast__progress" aria-hidden="true" />
-        </article>
-      </TransitionGroup>
+            <span class="global-toast__icon" aria-hidden="true">
+              <component :is="toastMeta[currentToast.type].icon" />
+            </span>
+            <span class="global-toast__content">
+              <strong>{{ toastMeta[currentToast.type].title }}</strong>
+              <span v-if="currentToast.message" class="global-toast__divider" aria-hidden="true"></span>
+              <span v-if="currentToast.message" class="global-toast__message">{{ currentToast.message }}</span>
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              class="global-toast__close"
+              aria-label="关闭提示"
+              @click="feedbackStore.dismissToast(currentToast.id)"
+            >
+              <IconX />
+            </Button>
+            <span class="global-toast__progress" aria-hidden="true" />
+          </article>
+        </Transition>
+      </div>
     </div>
   </Teleport>
 </template>
@@ -235,11 +236,17 @@ const toastMeta: Record<FeedbackType, { title: string; icon: Component }> = {
   position: absolute;
   bottom: 0;
   left: 0;
+  right: 0;
   height: 2px;
-  background: linear-gradient(90deg, transparent 0%, var(--toast-accent) 70%, #fff 100%);
-  transform-origin: left center;
-  animation: global-toast-progress var(--toast-duration) linear forwards;
-  box-shadow: 0 0 10px 1px var(--toast-glow);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--toast-accent) 35%,
+    color-mix(in srgb, var(--toast-accent) 80%, #fff) 50%,
+    var(--toast-accent) 65%,
+    transparent 100%
+  );
+  animation: global-toast-breathe 2.4s ease-in-out infinite;
 }
 
 .global-toast.is-info {
@@ -269,8 +276,7 @@ const toastMeta: Record<FeedbackType, { title: string; icon: Component }> = {
 }
 
 .global-toast-enter-active,
-.global-toast-leave-active,
-.global-toast-move {
+.global-toast-leave-active {
   transition:
     opacity 0.25s ease,
     transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -286,24 +292,39 @@ const toastMeta: Record<FeedbackType, { title: string; icon: Component }> = {
   transform: translateY(-16px) scale(0.95);
 }
 
-.global-toast-leave-active {
-  position: absolute;
-}
-
 @keyframes global-loading-slide {
-  0% { transform: translateX(-120%); }
-  100% { transform: translateX(320%); }
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
 }
 
-@keyframes global-toast-progress {
-  from { transform: scaleX(1); }
-  to { transform: scaleX(0); }
+@keyframes global-toast-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+    box-shadow: 0 0 4px 0 var(--toast-glow);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 12px 2px var(--toast-glow);
+  }
 }
 
 @keyframes toast-icon-pop {
-  0% { transform: scale(0.5) rotate(-15deg); opacity: 0; }
-  50% { transform: scale(1.15) rotate(5deg); }
-  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+  0% {
+    transform: scale(0.5) rotate(-15deg);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.15) rotate(5deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
 }
 
 @media (max-width: 640px) {
@@ -331,8 +352,7 @@ const toastMeta: Record<FeedbackType, { title: string; icon: Component }> = {
   .global-loading-fade-enter-active,
   .global-loading-fade-leave-active,
   .global-toast-enter-active,
-  .global-toast-leave-active,
-  .global-toast-move {
+  .global-toast-leave-active {
     transition: none;
   }
 }

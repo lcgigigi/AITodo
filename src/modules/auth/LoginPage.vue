@@ -50,7 +50,9 @@ const redirectTarget = computed(() => {
     ? route.query.redirect[0]
     : route.query.redirect
 
-  return redirect?.startsWith('/') && !redirect.startsWith('//') ? redirect : routeConfig.defaultRoute
+  return redirect?.startsWith('/') && !redirect.startsWith('//')
+    ? redirect
+    : routeConfig.defaultRoute
 })
 
 const canSubmit = computed(
@@ -221,70 +223,65 @@ onUnmounted(() => {
           :class="{ 'is-shaking': shakeForm, 'is-loading': isLoading }"
           @submit.prevent="submitLogin"
         >
-        <label class="field-group field-enter" style="--i: 0">
-          <span>账号</span>
-          <span class="field-shell">
-            <IconUserRound class="field-icon" aria-hidden="true" />
-            <input
-              v-model="form.username"
-              class="field-input"
-              name="username"
-              type="text"
-              autocomplete="username"
-              placeholder="输入账号"
-              :disabled="isLoading"
-            />
-          </span>
-        </label>
+          <label class="field-group field-enter" style="--i: 0">
+            <span>账号</span>
+            <span class="field-shell">
+              <IconUserRound class="field-icon" aria-hidden="true" />
+              <input
+                v-model="form.username"
+                class="field-input"
+                name="username"
+                type="text"
+                autocomplete="username"
+                placeholder="输入账号"
+                :disabled="isLoading"
+              />
+            </span>
+          </label>
 
-        <label class="field-group field-enter" style="--i: 1">
-          <span>密码</span>
-          <span class="field-shell">
-            <IconLockKeyhole class="field-icon" aria-hidden="true" />
-            <input
-              v-model="form.password"
-              class="field-input"
-              name="password"
-              :type="isPasswordVisible ? 'text' : 'password'"
-              autocomplete="current-password"
-              placeholder="输入密码"
-              :disabled="isLoading"
-            />
-            <Button
-              class="ghost-icon"
-              type="button"
-              :aria-label="isPasswordVisible ? '隐藏密码' : '显示密码'"
-              :disabled="isLoading"
-              @click="isPasswordVisible = !isPasswordVisible"
-            >
-              <IconEyeOff v-if="isPasswordVisible" />
-              <IconEye v-else />
-            </Button>
-          </span>
-        </label>
+          <label class="field-group field-enter" style="--i: 1">
+            <span>密码</span>
+            <span class="field-shell">
+              <IconLockKeyhole class="field-icon" aria-hidden="true" />
+              <input
+                v-model="form.password"
+                class="field-input"
+                name="password"
+                :type="isPasswordVisible ? 'text' : 'password'"
+                autocomplete="current-password"
+                placeholder="输入密码"
+                :disabled="isLoading"
+              />
+              <Button
+                class="ghost-icon"
+                type="button"
+                :aria-label="isPasswordVisible ? '隐藏密码' : '显示密码'"
+                :disabled="isLoading"
+                @click="isPasswordVisible = !isPasswordVisible"
+              >
+                <IconEyeOff v-if="isPasswordVisible" />
+                <IconEye v-else />
+              </Button>
+            </span>
+          </label>
 
-        <p
-          v-if="errorMessage"
-          class="form-error field-enter"
-          style="--i: 2"
-          role="alert"
-        >
-          {{ errorMessage }}
-        </p>
+          <p v-if="errorMessage" class="form-error field-enter" style="--i: 2" role="alert">
+            {{ errorMessage }}
+          </p>
 
-        <Button
-          class="submit-button field-enter"
-          style="--i: 3"
-          type="submit"
-          :disabled="!canSubmit"
-        >
-          <span class="submit-label">{{ isLoading ? '正在连接' : '进入工作台' }}</span>
-          <span class="submit-icon" aria-hidden="true">
-            <span v-if="isLoading" class="loading-ring"></span>
-            <IconArrowRight v-else />
-          </span>
-          <span class="submit-shimmer" aria-hidden="true"></span>
-        </Button>
+          <Button
+            class="submit-button field-enter"
+            style="--i: 3"
+            type="submit"
+            :disabled="!canSubmit"
+          >
+            <span class="submit-label">{{ isLoading ? '正在连接' : '进入工作台' }}</span>
+            <span class="submit-icon" aria-hidden="true">
+              <span v-if="isLoading" class="loading-ring"></span>
+              <IconArrowRight v-else />
+            </span>
+            <span class="submit-shimmer" aria-hidden="true"></span>
+          </Button>
         </form>
       </section>
     </div>
@@ -312,7 +309,9 @@ onUnmounted(() => {
     BlinkMacSystemFont,
     'Segoe UI',
     sans-serif;
-  transition: opacity 0.48s ease, transform 0.48s ease;
+  transition:
+    opacity 0.48s ease,
+    transform 0.48s ease;
   transform-origin: center center;
 }
 
@@ -353,8 +352,7 @@ onUnmounted(() => {
   position: absolute;
   inset: 0;
   z-index: -2;
-  background:
-    linear-gradient(
+  background: linear-gradient(
       90deg,
       rgba(248, 251, 255, 0.96) 0%,
       rgba(248, 251, 255, 0.78) 38%,
@@ -441,7 +439,9 @@ onUnmounted(() => {
   justify-content: center;
   box-shadow: 0 14px 38px -26px rgba(15, 23, 42, 0.54);
   overflow: hidden;
-  transition: transform 0.28s ease, box-shadow 0.28s ease;
+  transition:
+    transform 0.28s ease,
+    box-shadow 0.28s ease;
 }
 
 .brand-lockup:hover .brand-mark {
@@ -555,8 +555,7 @@ onUnmounted(() => {
   padding: 42px 38px 38px;
   border: 1px solid rgba(255, 255, 255, 0.82);
   border-radius: 26px;
-  background:
-    linear-gradient(155deg, rgba(255, 255, 255, 0.92) 0%, rgba(255, 255, 255, 0.78) 100%);
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.92) 0%, rgba(255, 255, 255, 0.78) 100%);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.95),
     0 1px 2px rgba(15, 23, 42, 0.04),
@@ -565,7 +564,9 @@ onUnmounted(() => {
   backdrop-filter: blur(22px) saturate(1.2);
   overflow: hidden;
   transform-style: preserve-3d;
-  transition: transform 0.28s ease-out, box-shadow 0.28s ease-out;
+  transition:
+    transform 0.28s ease-out,
+    box-shadow 0.28s ease-out;
 }
 
 .login-float-card:hover {
@@ -723,7 +724,9 @@ onUnmounted(() => {
   width: 19px;
   height: 19px;
   flex: 0 0 auto;
-  transition: color 0.22s ease, transform 0.22s ease;
+  transition:
+    color 0.22s ease,
+    transform 0.22s ease;
 }
 
 .field-input {
@@ -777,7 +780,10 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease,
+    transform 0.2s ease;
 }
 
 .ghost-icon:hover:not(:disabled),
@@ -913,7 +919,8 @@ onUnmounted(() => {
     transform: scale(1.06) translate3d(calc(-1.5% + var(--mx) * 0.35), calc(var(--my) * 0.35), 0);
   }
   to {
-    transform: scale(1.1) translate3d(calc(1.5% + var(--mx) * 0.35), calc(-1% + var(--my) * 0.35), 0);
+    transform: scale(1.1)
+      translate3d(calc(1.5% + var(--mx) * 0.35), calc(-1% + var(--my) * 0.35), 0);
   }
 }
 

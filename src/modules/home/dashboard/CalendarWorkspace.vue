@@ -560,9 +560,15 @@ const dashboardMetrics = computed<DashboardMetric[]>(() => [
     heatCells: monthHeatCells.value,
   },
 ])
-const todayMetric = computed(() => dashboardMetrics.value.find((metric) => metric.variant === 'today'))
-const weekMetric = computed(() => dashboardMetrics.value.find((metric) => metric.variant === 'week'))
-const monthMetric = computed(() => dashboardMetrics.value.find((metric) => metric.variant === 'month'))
+const todayMetric = computed(() =>
+  dashboardMetrics.value.find((metric) => metric.variant === 'today'),
+)
+const weekMetric = computed(() =>
+  dashboardMetrics.value.find((metric) => metric.variant === 'week'),
+)
+const monthMetric = computed(() =>
+  dashboardMetrics.value.find((metric) => metric.variant === 'month'),
+)
 const periodMetric = computed(() =>
   taskMetricMode.value === 'week' ? weekMetric.value : monthMetric.value,
 )
@@ -592,7 +598,8 @@ const monthTrendSeries = computed(() => {
 })
 const trendTotal = computed(() => trendSeries.value.reduce((total, item) => total + item.value, 0))
 const trendInsight = computed(() => {
-  if (!trendTotal.value) return trendStatMode.value === 'week' ? '本周暂无完成记录' : '本月暂无完成记录'
+  if (!trendTotal.value)
+    return trendStatMode.value === 'week' ? '本周暂无完成记录' : '本月暂无完成记录'
 
   const peak = trendSeries.value.reduce(
     (currentPeak, item) => (item.value > currentPeak.value ? item : currentPeak),
@@ -624,7 +631,13 @@ function createTrendChartOption(): echarts.EChartsOption {
       data: series.map((item) => item.label),
       axisLine: { lineStyle: { color: 'rgba(203, 213, 225, 0.58)' } },
       axisTick: { show: false },
-      axisLabel: { ...trendChartTextStyle, color: '#94a3b8', fontSize: 9, fontWeight: 850, margin: 4 },
+      axisLabel: {
+        ...trendChartTextStyle,
+        color: '#94a3b8',
+        fontSize: 9,
+        fontWeight: 850,
+        margin: 4,
+      },
     },
     yAxis: {
       type: 'value',
@@ -1612,8 +1625,6 @@ p {
   pointer-events: none;
 }
 
-
-
 .campus-visual::after {
   z-index: 3;
   inset: auto -10% -46px;
@@ -1883,8 +1894,7 @@ p {
   z-index: 0;
   pointer-events: none;
   content: '';
-  background:
-    linear-gradient(135deg, var(--metric-soft), transparent 42%),
+  background: linear-gradient(135deg, var(--metric-soft), transparent 42%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.2), transparent 58%);
   opacity: 0.72;
 }

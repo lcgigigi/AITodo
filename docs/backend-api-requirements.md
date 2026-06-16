@@ -4,40 +4,40 @@
 
 ## 1. 前端 mock 数据统计
 
-| 模块 | 文件 | 当前数据量 | 后端承接建议 |
-| --- | --- | ---: | --- |
-| 日历用户与待办 | `src/modules/home/dashboard/todoMock.ts` | 用户 2 个，待办 42 条 | 必须接口化 |
-| 首页工具入口与个人积分 | `src/modules/home/dashboard/CalendarWorkspace.vue` | 工具入口 8 个，个人统计 3 项 | 建议接口化，工具入口可配置化 |
-| 节假日/节气 | `src/modules/home/dashboard/CalendarWorkspace.vue` | 日期 63 条，其中假期 33、调休 6、节气 24 | 建议接口化或由后端定期生成 |
-| 智能体统计大屏 | `src/modules/agent-center/mock.ts` | 分类 7 个，智能体 6 个，概览指标 5 项，趋势 7 点，榜单各 6 条 | 必须接口化 |
-| 旧版智能体目录 | `src/modules/agent-center-old/mock.ts` | 视角 2 个，Agent 7 个，Skill 6 个 | 当前路由未启用，可作为能力目录接口参考 |
-| 用户登录态 | `src/stores/user.store.ts` | `mock-token`、`mock-user` | 必须接入真实登录态 |
+| 模块                   | 文件                                               |                                                    当前数据量 | 后端承接建议                           |
+| ---------------------- | -------------------------------------------------- | ------------------------------------------------------------: | -------------------------------------- |
+| 日历用户与待办         | `src/modules/home/dashboard/todoMock.ts`           |                                         用户 2 个，待办 42 条 | 必须接口化                             |
+| 首页工具入口与个人积分 | `src/modules/home/dashboard/CalendarWorkspace.vue` |                                  工具入口 8 个，个人统计 3 项 | 建议接口化，工具入口可配置化           |
+| 节假日/节气            | `src/modules/home/dashboard/CalendarWorkspace.vue` |                      日期 63 条，其中假期 33、调休 6、节气 24 | 建议接口化或由后端定期生成             |
+| 智能体统计大屏         | `src/modules/agent-center/mock.ts`                 | 分类 7 个，智能体 6 个，概览指标 5 项，趋势 7 点，榜单各 6 条 | 必须接口化                             |
+| 旧版智能体目录         | `src/modules/agent-center-old/mock.ts`             |                             视角 2 个，Agent 7 个，Skill 6 个 | 当前路由未启用，可作为能力目录接口参考 |
+| 用户登录态             | `src/stores/user.store.ts`                         |                                     `mock-token`、`mock-user` | 必须接入真实登录态                     |
 
 日历待办 mock 明细：
 
-| 指标 | 数量 |
-| --- | ---: |
-| 总待办 | 42 |
+| 指标                          |            数量 |
+| ----------------------------- | --------------: |
+| 总待办                        |              42 |
 | 类型：任务 / 会议 / 审批 / AI | 12 / 12 / 9 / 9 |
-| 状态：待办 / 已完成 | 39 / 3 |
-| 紧急任务 | 4 |
-| 跨日期任务 | 7 |
-| 有具体时间 / 无具体时间 | 34 / 8 |
-| 指派给员工 / 指派给领导 | 16 / 26 |
-| 员工创建 / 领导创建 | 5 / 37 |
+| 状态：待办 / 已完成           |          39 / 3 |
+| 紧急任务                      |               4 |
+| 跨日期任务                    |               7 |
+| 有具体时间 / 无具体时间       |          34 / 8 |
+| 指派给员工 / 指派给领导       |         16 / 26 |
+| 员工创建 / 领导创建           |          5 / 37 |
 
 智能体中心 mock 明细：
 
-| 指标 | 数量 |
-| --- | ---: |
-| 新版统计页智能体 | 6 |
-| 新版统计页分类 | 7，含“全部智能体” |
-| Token 分类占比 | 6 |
-| Token 排名 / 积分排名 | 各 6 |
-| Token 趋势点 | 7 |
-| 旧版目录 Agent | 7，状态 online 3、beta 2、maintenance 1、draft 1 |
-| 旧版目录 Skill | 6，状态 ready 3、beta 2、maintenance 1 |
-| 权限状态 | Agent：available 3、locked 2、admin-only 2；Skill：available 3、locked 2、admin-only 1 |
+| 指标                  |                                                                                   数量 |
+| --------------------- | -------------------------------------------------------------------------------------: |
+| 新版统计页智能体      |                                                                                      6 |
+| 新版统计页分类        |                                                                      7，含“全部智能体” |
+| Token 分类占比        |                                                                                      6 |
+| Token 排名 / 积分排名 |                                                                                   各 6 |
+| Token 趋势点          |                                                                                      7 |
+| 旧版目录 Agent        |                                       7，状态 online 3、beta 2、maintenance 1、draft 1 |
+| 旧版目录 Skill        |                                                 6，状态 ready 3、beta 2、maintenance 1 |
+| 权限状态              | Agent：available 3、locked 2、admin-only 2；Skill：available 3、locked 2、admin-only 1 |
 
 ## 2. 通用约定
 
@@ -85,16 +85,16 @@
 
 字段：
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| id | string | 用户 ID |
-| name | string | 用户名 |
-| avatar | string | 头像 URL，可为空 |
-| role | `leader` \| `employee` \| `admin` | 当前角色 |
-| department | string | 部门 |
-| leaderId | string \| null | 员工直属领导 |
-| teamMemberIds | string[] | 领导可指派成员 |
-| permissions | string[] | 前端路由和能力按钮权限 |
+| 字段          | 类型                              | 说明                   |
+| ------------- | --------------------------------- | ---------------------- |
+| id            | string                            | 用户 ID                |
+| name          | string                            | 用户名                 |
+| avatar        | string                            | 头像 URL，可为空       |
+| role          | `leader` \| `employee` \| `admin` | 当前角色               |
+| department    | string                            | 部门                   |
+| leaderId      | string \| null                    | 员工直属领导           |
+| teamMemberIds | string[]                          | 领导可指派成员         |
+| permissions   | string[]                          | 前端路由和能力按钮权限 |
 
 ### 3.2 获取可指派用户
 
@@ -201,22 +201,22 @@
 
 字段：
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| id | string | 待办 ID |
-| date | string | 开始日期 |
-| endDate | string \| null | 结束日期，跨日期任务使用 |
-| time | string \| null | 具体时间，无时间时为空 |
-| title | string | 标题 |
-| type | `task` \| `meeting` \| `approval` \| `ai` | 待办类型 |
-| owner | string | 展示负责人，建议等于 `assigneeName` |
-| status | `todo` \| `done` | 完成状态 |
-| source | string \| null | 来源，如会议纪要、智能 PPT、自建待办 |
-| creatorId / creatorName | string | 创建人 |
-| assigneeId / assigneeName | string | 负责人 |
-| scope | `self` \| `assigned_by_me` \| `assigned_to_me` | 后端按当前用户计算 |
-| editable | boolean | 当前用户是否可编辑 |
-| completable | boolean | 当前用户是否可更新完成状态 |
+| 字段                      | 类型                                           | 说明                                 |
+| ------------------------- | ---------------------------------------------- | ------------------------------------ |
+| id                        | string                                         | 待办 ID                              |
+| date                      | string                                         | 开始日期                             |
+| endDate                   | string \| null                                 | 结束日期，跨日期任务使用             |
+| time                      | string \| null                                 | 具体时间，无时间时为空               |
+| title                     | string                                         | 标题                                 |
+| type                      | `task` \| `meeting` \| `approval` \| `ai`      | 待办类型                             |
+| owner                     | string                                         | 展示负责人，建议等于 `assigneeName`  |
+| status                    | `todo` \| `done`                               | 完成状态                             |
+| source                    | string \| null                                 | 来源，如会议纪要、智能 PPT、自建待办 |
+| creatorId / creatorName   | string                                         | 创建人                               |
+| assigneeId / assigneeName | string                                         | 负责人                               |
+| scope                     | `self` \| `assigned_by_me` \| `assigned_to_me` | 后端按当前用户计算                   |
+| editable                  | boolean                                        | 当前用户是否可编辑                   |
+| completable               | boolean                                        | 当前用户是否可更新完成状态           |
 
 权限规则：
 
@@ -365,12 +365,12 @@
 
 排序枚举：
 
-| sort | 说明 |
-| --- | --- |
-| default | 默认排序 |
-| tokenDesc | Token 从高到低 |
+| sort       | 说明             |
+| ---------- | ---------------- |
+| default    | 默认排序         |
+| tokenDesc  | Token 从高到低   |
 | pointsDesc | 积分贡献从高到低 |
-| callsDesc | 调用次数从高到低 |
+| callsDesc  | 调用次数从高到低 |
 
 ### 6.3 获取 Token 使用概览
 
@@ -388,9 +388,7 @@
   "average": 77923,
   "remaining": 1532460,
   "quotaUsed": 23,
-  "categoryPercent": [
-    { "name": "知识问答", "percent": 27, "color": "#2f68ff" }
-  ]
+  "categoryPercent": [{ "name": "知识问答", "percent": 27, "color": "#2f68ff" }]
 }
 ```
 
@@ -402,18 +400,16 @@
 
 参数：
 
-| 参数 | 类型 | 说明 |
-| --- | --- | --- |
+| 参数   | 类型                           | 说明     |
+| ------ | ------------------------------ | -------- |
 | metric | `token` \| `points` \| `calls` | 榜单指标 |
-| period | `today` \| `week` \| `month` | 统计周期 |
-| limit | number | 返回数量 |
+| period | `today` \| `week` \| `month`   | 统计周期 |
+| limit  | number                         | 返回数量 |
 
 响应：
 
 ```json
-[
-  { "agentId": 1, "name": "力宝百问", "value": 128450 }
-]
+[{ "agentId": 1, "name": "力宝百问", "value": 128450 }]
 ```
 
 ### 6.5 获取 Token 趋势
@@ -470,11 +466,11 @@
 
 枚举：
 
-| 字段 | 可选值 |
-| --- | --- |
-| level | `L1`、`L2`、`L3`、`L4` |
-| status | `online`、`beta`、`maintenance`、`draft` |
-| permissionState | `available`、`locked`、`admin-only` |
+| 字段            | 可选值                                   |
+| --------------- | ---------------------------------------- |
+| level           | `L1`、`L2`、`L3`、`L4`                   |
+| status          | `online`、`beta`、`maintenance`、`draft` |
+| permissionState | `available`、`locked`、`admin-only`      |
 
 ### 7.2 查询 Skill 目录
 
@@ -516,12 +512,8 @@
 
 ```json
 {
-  "categories": [
-    { "name": "知识服务", "count": 1 }
-  ],
-  "levels": [
-    { "level": "L1", "count": 2, "description": "问答/单点工具型，用户明确指令后执行。" }
-  ],
+  "categories": [{ "name": "知识服务", "count": 1 }],
+  "levels": [{ "level": "L1", "count": 2, "description": "问答/单点工具型，用户明确指令后执行。" }],
   "overview": [
     { "key": "availableAgents", "label": "可用 Agent", "value": 3 },
     { "key": "availableSkills", "label": "可用 Skills", "value": 3 },
@@ -533,32 +525,32 @@
 
 ## 8. 建议开发优先级
 
-| 优先级 | 接口 | 原因 |
-| --- | --- | --- |
-| P0 | `GET /api/users/me`、`GET /api/users/assignable` | 所有权限、角色、待办派发依赖 |
-| P0 | `GET /api/todos`、`POST /api/todos`、`PUT /api/todos/{id}`、`PATCH /api/todos/{id}/status` | 首页核心可交互能力 |
-| P0 | `POST /api/todos/ai-parse` | 前端已有 AI 快捷创建入口 |
-| P1 | `GET /api/calendar/special-days` | 当前硬编码 2026 年数据，跨年后会失效 |
-| P1 | `GET /api/workbench/tools`、`GET /api/workbench/profile-stats` | 首页个人区和工具区动态化 |
-| P1 | `/api/agent-center/*` 统计接口 | 当前 `/agents` 页面完全依赖 mock 数据 |
-| P2 | `/api/agents`、`/api/skills`、`/api/agent-catalog/facets` | 旧版目录未启用，但适合作为后续管理后台基础 |
+| 优先级 | 接口                                                                                       | 原因                                       |
+| ------ | ------------------------------------------------------------------------------------------ | ------------------------------------------ |
+| P0     | `GET /api/users/me`、`GET /api/users/assignable`                                           | 所有权限、角色、待办派发依赖               |
+| P0     | `GET /api/todos`、`POST /api/todos`、`PUT /api/todos/{id}`、`PATCH /api/todos/{id}/status` | 首页核心可交互能力                         |
+| P0     | `POST /api/todos/ai-parse`                                                                 | 前端已有 AI 快捷创建入口                   |
+| P1     | `GET /api/calendar/special-days`                                                           | 当前硬编码 2026 年数据，跨年后会失效       |
+| P1     | `GET /api/workbench/tools`、`GET /api/workbench/profile-stats`                             | 首页个人区和工具区动态化                   |
+| P1     | `/api/agent-center/*` 统计接口                                                             | 当前 `/agents` 页面完全依赖 mock 数据      |
+| P2     | `/api/agents`、`/api/skills`、`/api/agent-catalog/facets`                                  | 旧版目录未启用，但适合作为后续管理后台基础 |
 
 ## 9. 前端替换点
 
-| 当前位置 | 需要替换为 |
-| --- | --- |
-| `mockUsers` | `GET /api/users/me`、`GET /api/users/assignable` |
-| `mockInitialTodos`、`listTodos` | `GET /api/todos` |
-| `createTodo` | `POST /api/todos` |
-| `updateTodo` | `PUT /api/todos/{id}` |
-| `updateTodoStatus` | `PATCH /api/todos/{id}/status` |
-| `parseTodoText` | `POST /api/todos/ai-parse` |
-| `specialDays` | `GET /api/calendar/special-days` |
-| `campusTools` | `GET /api/workbench/tools` |
-| `pointStats` | `GET /api/workbench/profile-stats` |
-| `summaryStats` | `GET /api/agent-center/summary` |
-| `agents`、`categories` | `GET /api/agent-center/agents` |
-| `tokenOverview` | `GET /api/agent-center/token-overview` |
-| `tokenRanking`、`pointsRanking` | `GET /api/agent-center/rankings` |
-| `trendData` | `GET /api/agent-center/token-trend` |
-| `mockAgents`、`mockSkills` | `GET /api/agents`、`GET /api/skills` |
+| 当前位置                        | 需要替换为                                       |
+| ------------------------------- | ------------------------------------------------ |
+| `mockUsers`                     | `GET /api/users/me`、`GET /api/users/assignable` |
+| `mockInitialTodos`、`listTodos` | `GET /api/todos`                                 |
+| `createTodo`                    | `POST /api/todos`                                |
+| `updateTodo`                    | `PUT /api/todos/{id}`                            |
+| `updateTodoStatus`              | `PATCH /api/todos/{id}/status`                   |
+| `parseTodoText`                 | `POST /api/todos/ai-parse`                       |
+| `specialDays`                   | `GET /api/calendar/special-days`                 |
+| `campusTools`                   | `GET /api/workbench/tools`                       |
+| `pointStats`                    | `GET /api/workbench/profile-stats`               |
+| `summaryStats`                  | `GET /api/agent-center/summary`                  |
+| `agents`、`categories`          | `GET /api/agent-center/agents`                   |
+| `tokenOverview`                 | `GET /api/agent-center/token-overview`           |
+| `tokenRanking`、`pointsRanking` | `GET /api/agent-center/rankings`                 |
+| `trendData`                     | `GET /api/agent-center/token-trend`              |
+| `mockAgents`、`mockSkills`      | `GET /api/agents`、`GET /api/skills`             |

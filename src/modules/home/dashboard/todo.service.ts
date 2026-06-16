@@ -243,10 +243,7 @@ function normalizeAnalyzeSchedule(data: SmartTodoAnalyzeData) {
   if (isValidAnalyzeDate(data.date)) {
     return {
       isRange,
-      date:
-        isRange && startFromDateTime.date
-          ? startFromDateTime.date
-          : data.date!.trim(),
+      date: isRange && startFromDateTime.date ? startFromDateTime.date : data.date!.trim(),
       time: normalizeFormTime(data.time, preserveMidnight),
       endDate: isRange ? endFromDateTime.date || endFromShow.date : undefined,
       endTime: isRange ? endFromDateTime.time || endFromShow.time : undefined,
@@ -333,7 +330,10 @@ function normalizeBackendTodo(
   const assignee = userMap.get(assigneeId)
   const creator = userMap.get(creatorId)
   const assigneeName = assignee?.name || assigneeId || '未指定'
-  const creatorName = item.creatorName?.trim() || creator?.name || (creatorId === currentUser.id ? currentUser.name : '')
+  const creatorName =
+    item.creatorName?.trim() ||
+    creator?.name ||
+    (creatorId === currentUser.id ? currentUser.name : '')
   const timeType = item.timeType === 2 ? 2 : 1
   const preserveMidnight = timeType === 2
   const start = parseDateTimeShow(item.startDateShow, preserveMidnight)
@@ -505,20 +505,18 @@ export async function loginSmartTodo(credentials: SmartTodoLoginCredentials = {}
 }
 
 export async function logoutSmartTodo() {
-  const response = await httpClient.post<SmartTodoResponse>(
-    '/logout',
-    undefined,
-    {
-      timeout: SMART_TODO_REQUEST_TIMEOUT,
-    },
-  )
+  const response = await httpClient.post<SmartTodoResponse>('/logout', undefined, {
+    timeout: SMART_TODO_REQUEST_TIMEOUT,
+  })
 
   if (typeof response.data.code === 'number' && response.data.code !== 200) {
     throw new Error(getResponseMessage(response.data, '退出登录失败'))
   }
 }
 
-export async function loadCurrentUser(options?: { silent?: boolean }): Promise<SmartTodoCurrentUser> {
+export async function loadCurrentUser(options?: {
+  silent?: boolean
+}): Promise<SmartTodoCurrentUser> {
   const response = await httpClient.get<SmartTodoInfoResponse>('/getInfo', {
     timeout: SMART_TODO_REQUEST_TIMEOUT,
     showLoading: false,
@@ -744,11 +742,7 @@ export async function deleteTodo(id: string) {
   )
 }
 
-export async function completeTodo(
-  id: string,
-  currentUser: CalendarUser,
-  handleDesc = '已完成',
-) {
+export async function completeTodo(id: string, currentUser: CalendarUser, handleDesc = '已完成') {
   return requestSmartTodoData<boolean>(
     {
       method: 'POST',
@@ -825,11 +819,7 @@ export function listTodos(events: CalendarEvent[], currentUser: CalendarUser) {
           event.completable ??
           (event.backendStatus === 9
             ? false
-            : resolveCompletable(
-                assigneeId,
-                event.currentHandlerId ?? '',
-                currentUser,
-              )),
+            : resolveCompletable(assigneeId, event.currentHandlerId ?? '', currentUser)),
       }
     })
     .sort(compareEvents)

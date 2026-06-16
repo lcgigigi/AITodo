@@ -18,10 +18,7 @@ function getBusinessErrorMessage(result: BusinessErrorPayload) {
   return getErrorMessage(code, '请求失败')
 }
 
-function rejectBusinessError(
-  config: InternalAxiosRequestConfig,
-  result: BusinessErrorPayload,
-) {
+function rejectBusinessError(config: InternalAxiosRequestConfig, result: BusinessErrorPayload) {
   const message = getBusinessErrorMessage(result)
   notifyRequestError(config, message)
   return Promise.reject(new Error(message))
@@ -49,11 +46,7 @@ export function setupInterceptors(instance: AxiosInstance) {
           return rejectBusinessError(response.config, result)
         }
 
-        if (
-          'code' in result &&
-          typeof result.code === 'number' &&
-          result.code !== 200
-        ) {
+        if ('code' in result && typeof result.code === 'number' && result.code !== 200) {
           return rejectBusinessError(response.config, result)
         }
       }

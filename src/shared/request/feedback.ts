@@ -23,7 +23,10 @@ export function releaseRequestLoading(config?: InternalAxiosRequestConfig) {
   useFeedbackStore().endLoading()
 }
 
-export function notifyRequestError(config: InternalAxiosRequestConfig | undefined, message: string) {
+export function notifyRequestError(
+  config: InternalAxiosRequestConfig | undefined,
+  message: string,
+) {
   if (!config || !resolveShowError(config)) return
   useFeedbackStore().error(message)
 }

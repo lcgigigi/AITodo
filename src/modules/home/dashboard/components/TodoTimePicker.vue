@@ -41,7 +41,9 @@ const hourTouched = ref(false)
 const minuteTouched = ref(false)
 const externalClass = computed(() => attrs.class as HTMLAttributes['class'])
 const baseHourOptions = Array.from({ length: 17 }, (_, index) => String(index + 7).padStart(2, '0'))
-const baseMinuteOptions = Array.from({ length: 12 }, (_, index) => String(index * 5).padStart(2, '0'))
+const baseMinuteOptions = Array.from({ length: 12 }, (_, index) =>
+  String(index * 5).padStart(2, '0'),
+)
 
 const parsedTime = computed(() => parseTime(props.modelValue))
 const hourOptions = computed(() => {
@@ -54,7 +56,9 @@ const minuteOptions = computed(() => {
   const currentMinute = parsedTime.value?.minute
   if (!currentMinute || baseMinuteOptions.includes(currentMinute)) return baseMinuteOptions
 
-  return [...baseMinuteOptions, currentMinute].sort((first, second) => Number(first) - Number(second))
+  return [...baseMinuteOptions, currentMinute].sort(
+    (first, second) => Number(first) - Number(second),
+  )
 })
 
 const displayValue = computed(() => (parsedTime.value ? props.modelValue : props.placeholder))
@@ -101,7 +105,8 @@ function tryClosePopover() {
 
 function syncPopoverWidth() {
   const trigger = rootRef.value?.querySelector('button')
-  const width = trigger?.getBoundingClientRect().width ?? rootRef.value?.getBoundingClientRect().width
+  const width =
+    trigger?.getBoundingClientRect().width ?? rootRef.value?.getBoundingClientRect().width
   if (!width) return
 
   popoverWidth.value = `${Math.round(width)}px`
@@ -127,13 +132,7 @@ watch(open, (isOpen) => {
           variant="outline"
           :disabled="disabled"
           :aria-label="ariaLabel"
-          :class="
-            cn(
-              'todo-time-trigger',
-              highlighted && 'is-ai-highlighted',
-              externalClass,
-            )
-          "
+          :class="cn('todo-time-trigger', highlighted && 'is-ai-highlighted', externalClass)"
         >
           <span class="todo-picker-value" :class="{ 'is-placeholder': !parsedTime }">
             {{ displayValue }}

@@ -77,10 +77,10 @@ function shouldKeepDatePopoverOpen(event: { target?: EventTarget | null }) {
   if (!(target instanceof Element)) return false
 
   return Boolean(
-    target.closest('[data-slot="select-content"]')
-    || target.closest('[data-slot="select-item"]')
-    || target.closest('[data-slot="select-trigger"]')
-    || target.closest('[data-slot="select-viewport"]'),
+    target.closest('[data-slot="select-content"]') ||
+      target.closest('[data-slot="select-item"]') ||
+      target.closest('[data-slot="select-trigger"]') ||
+      target.closest('[data-slot="select-viewport"]'),
   )
 }
 
@@ -98,13 +98,7 @@ function onDatePopoverOutside(event: { target?: EventTarget | null; preventDefau
         variant="outline"
         :disabled="disabled"
         :aria-label="ariaLabel"
-        :class="
-          cn(
-            'todo-date-trigger',
-            highlighted && 'is-ai-highlighted',
-            externalClass,
-          )
-        "
+        :class="cn('todo-date-trigger', highlighted && 'is-ai-highlighted', externalClass)"
       >
         <span class="todo-picker-value" :class="{ 'is-placeholder': !modelValue }">
           {{ displayValue }}

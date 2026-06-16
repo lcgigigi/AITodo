@@ -362,10 +362,15 @@ describe('todo.service real backend adapter', () => {
       },
     })
 
-    const parsed = await analyzeTodoText('今天8点45到17点15开发官网', currentUser, assignableUsers, {
-      date: '2026-06-09',
-      title: '',
-    })
+    const parsed = await analyzeTodoText(
+      '今天8点45到17点15开发官网',
+      currentUser,
+      assignableUsers,
+      {
+        date: '2026-06-09',
+        title: '',
+      },
+    )
 
     expect(parsed).toMatchObject({
       mode: 'deadline',

@@ -56,7 +56,9 @@ const hourTouched = ref(false)
 const minuteTouched = ref(false)
 const externalClass = computed(() => attrs.class as HTMLAttributes['class'])
 const baseHourOptions = Array.from({ length: 17 }, (_, index) => String(index + 7).padStart(2, '0'))
-const baseMinuteOptions = Array.from({ length: 12 }, (_, index) => String(index * 5).padStart(2, '0'))
+const baseMinuteOptions = Array.from({ length: 12 }, (_, index) =>
+  String(index * 5).padStart(2, '0'),
+)
 
 const activeDate = computed({
   get: () => (activeField.value === 'start' ? props.startDate : props.endDate),
@@ -93,7 +95,9 @@ const minuteOptions = computed(() => {
   const currentMinute = parsedTime.value?.minute
   if (!currentMinute || baseMinuteOptions.includes(currentMinute)) return baseMinuteOptions
 
-  return [...baseMinuteOptions, currentMinute].sort((first, second) => Number(first) - Number(second))
+  return [...baseMinuteOptions, currentMinute].sort(
+    (first, second) => Number(first) - Number(second),
+  )
 })
 
 const selectedDate = computed<DateValue | undefined>({
@@ -103,8 +107,12 @@ const selectedDate = computed<DateValue | undefined>({
   },
 })
 
-const startDisplayValue = computed(() => formatDisplayValue(props.startDate, props.startTime, '选择开始时间'))
-const endDisplayValue = computed(() => formatDisplayValue(props.endDate, props.endTime, '选择截止时间'))
+const startDisplayValue = computed(() =>
+  formatDisplayValue(props.startDate, props.startTime, '选择开始时间'),
+)
+const endDisplayValue = computed(() =>
+  formatDisplayValue(props.endDate, props.endTime, '选择截止时间'),
+)
 const activeFieldLabel = computed(() => (activeField.value === 'start' ? '开始时间' : '截止时间'))
 
 function formatDisplayValue(date: string, time: string, placeholder: string) {
@@ -180,9 +188,10 @@ function tryClosePopover() {
 }
 
 function syncPopoverWidth() {
-  const width = gridRef.value?.getBoundingClientRect().width
-    ?? rootRef.value?.getBoundingClientRect().width
-    ?? anchorRef.value?.getBoundingClientRect().width
+  const width =
+    gridRef.value?.getBoundingClientRect().width ??
+    rootRef.value?.getBoundingClientRect().width ??
+    anchorRef.value?.getBoundingClientRect().width
   if (!width) return
 
   popoverWidth.value = `${Math.round(width)}px`
@@ -204,11 +213,11 @@ function shouldKeepPopoverOpen(event: { target?: EventTarget | null }) {
   if (!(target instanceof Element)) return false
 
   return Boolean(
-    target.closest('.todo-datetime-trigger')
-    || target.closest('[data-slot="select-content"]')
-    || target.closest('[data-slot="select-item"]')
-    || target.closest('[data-slot="select-trigger"]')
-    || target.closest('[data-slot="select-viewport"]'),
+    target.closest('.todo-datetime-trigger') ||
+      target.closest('[data-slot="select-content"]') ||
+      target.closest('[data-slot="select-item"]') ||
+      target.closest('[data-slot="select-trigger"]') ||
+      target.closest('[data-slot="select-viewport"]'),
   )
 }
 
@@ -333,9 +342,7 @@ onBeforeUnmount(() => {
         @pointer-down-outside="onPopoverOutside"
         @interact-outside="onPopoverOutside"
       >
-        <div class="deadline-datetime-popover-head">
-          正在设置{{ activeFieldLabel }}
-        </div>
+        <div class="deadline-datetime-popover-head">正在设置{{ activeFieldLabel }}</div>
         <div class="todo-datetime-panel">
           <div class="todo-datetime-calendar">
             <Calendar
@@ -602,58 +609,87 @@ onBeforeUnmount(() => {
   --cell-radius: 10px;
 }
 
-[data-slot='popover-content'].todo-datetime-popover .todo-datetime-calendar [data-slot='calendar'] .mt-3 {
+[data-slot='popover-content'].todo-datetime-popover
+  .todo-datetime-calendar
+  [data-slot='calendar']
+  .mt-3 {
   margin-top: 8px !important;
 }
 
-[data-slot='popover-content'].todo-datetime-popover .todo-datetime-calendar [data-slot='calendar-grid-row'].mt-1 {
+[data-slot='popover-content'].todo-datetime-popover
+  .todo-datetime-calendar
+  [data-slot='calendar-grid-row'].mt-1 {
   margin-top: 2px !important;
 }
 
-[data-slot='popover-content'].todo-datetime-popover .todo-datetime-calendar [data-slot='calendar-grid'] {
+[data-slot='popover-content'].todo-datetime-popover
+  .todo-datetime-calendar
+  [data-slot='calendar-grid'] {
   width: 100% !important;
 }
 
-[data-slot='popover-content'].todo-datetime-popover .todo-datetime-calendar [data-slot='calendar-grid-row'] {
+[data-slot='popover-content'].todo-datetime-popover
+  .todo-datetime-calendar
+  [data-slot='calendar-grid-row'] {
   width: 100% !important;
   justify-content: space-between;
 }
 
-[data-slot='popover-content'].todo-datetime-popover .todo-datetime-calendar [data-slot='calendar-cell'] {
+[data-slot='popover-content'].todo-datetime-popover
+  .todo-datetime-calendar
+  [data-slot='calendar-cell'] {
   width: var(--cell-size) !important;
   height: var(--cell-size) !important;
   flex: 0 0 var(--cell-size);
 }
 
-[data-slot='popover-content'].todo-datetime-popover .todo-datetime-calendar [data-slot='calendar-cell']:has([data-selected]) {
+[data-slot='popover-content'].todo-datetime-popover
+  .todo-datetime-calendar
+  [data-slot='calendar-cell']:has([data-selected]) {
   background: transparent !important;
 }
 
-[data-slot='popover-content'].todo-datetime-popover .todo-datetime-calendar [data-slot='calendar-cell-trigger'] {
+[data-slot='popover-content'].todo-datetime-popover
+  .todo-datetime-calendar
+  [data-slot='calendar-cell-trigger'] {
   width: 100% !important;
   height: 100% !important;
   border-radius: var(--cell-radius) !important;
 }
 
-[data-slot='popover-content'].todo-datetime-popover .todo-datetime-calendar [data-slot='calendar-cell-trigger'][data-selected] {
+[data-slot='popover-content'].todo-datetime-popover
+  .todo-datetime-calendar
+  [data-slot='calendar-cell-trigger'][data-selected] {
   background-color: #3b82f6 !important;
   color: #ffffff !important;
   box-shadow: 0 8px 18px -12px rgba(37, 99, 235, 0.9);
 }
 
-[data-slot='popover-content'].todo-datetime-popover .todo-datetime-calendar [data-slot='calendar-cell-trigger'][data-selected]:hover,
-[data-slot='popover-content'].todo-datetime-popover .todo-datetime-calendar [data-slot='calendar-cell-trigger'][data-selected]:focus,
-[data-slot='popover-content'].todo-datetime-popover .todo-datetime-calendar [data-slot='calendar-cell-trigger'][data-selected]:focus-visible {
+[data-slot='popover-content'].todo-datetime-popover
+  .todo-datetime-calendar
+  [data-slot='calendar-cell-trigger'][data-selected]:hover,
+[data-slot='popover-content'].todo-datetime-popover
+  .todo-datetime-calendar
+  [data-slot='calendar-cell-trigger'][data-selected]:focus,
+[data-slot='popover-content'].todo-datetime-popover
+  .todo-datetime-calendar
+  [data-slot='calendar-cell-trigger'][data-selected]:focus-visible {
   background-color: #3b82f6 !important;
   color: #ffffff !important;
   box-shadow: 0 8px 18px -12px rgba(37, 99, 235, 0.9);
 }
 
-[data-slot='popover-content'].todo-datetime-popover .todo-datetime-calendar [data-slot='calendar-header'] nav {
+[data-slot='popover-content'].todo-datetime-popover
+  .todo-datetime-calendar
+  [data-slot='calendar-header']
+  nav {
   z-index: 30;
 }
 
-[data-slot='popover-content'].todo-datetime-popover .todo-datetime-calendar [data-slot='calendar-header'] .relative.z-20.flex {
+[data-slot='popover-content'].todo-datetime-popover
+  .todo-datetime-calendar
+  [data-slot='calendar-header']
+  .relative.z-20.flex {
   width: auto;
   max-width: calc(100% - 4.5rem);
   gap: 8px;
