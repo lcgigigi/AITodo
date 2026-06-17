@@ -186,7 +186,7 @@ const campusTools: CampusTool[] = [
     icon: IconBox,
     tone: 'violet',
     position: 'workshop',
-    simulated: true,
+    agentKey: 'agent-workshop',
   },
   {
     name: '查看更多',
@@ -397,13 +397,6 @@ const visibleCalendarDays = computed(() =>
   calendarViewMode.value === 'week' ? weekDays.value : days.value,
 )
 const isTodoOperating = computed(() => isDayPreviewOpen.value)
-const shouldShowTodayBubble = computed(
-  () =>
-    calendarViewMode.value === 'month' &&
-    isTodayBubbleVisible.value &&
-    !isTodayBubbleManualClosed.value &&
-    !isTodoOperating.value,
-)
 const selectedEvents = computed(() => eventMap.value.get(selectedDate.value) ?? [])
 const selectedSpecialDays = computed(() => specialDayMap.value.get(selectedDate.value) ?? [])
 const todayEvents = computed(() => eventMap.value.get(todayDate.value) ?? [])
@@ -1090,7 +1083,7 @@ function openCampusTool(tool: CampusTool) {
 
 function openAgentList(agentKey?: string) {
   router.push({
-    name: 'AgentList',
+    name: 'AgentCenter',
     query: agentKey ? { agent: agentKey } : undefined,
   })
 }
@@ -1373,6 +1366,71 @@ function openAgentList(agentKey?: string) {
         </aside>
       </Transition>
 
+      <section class="right-blank-panel today-todo-panel" aria-label="今日概览与待办">
+        <div class="today-overview-section">
+          <h2 class="overview-title">今日工作概览</h2>
+          <div class="overview-summary">
+            <div class="summary-card pending-card">
+              <div class="shape shape-tr"></div>
+              <div class="shape shape-bl"></div>
+              <strong>{{ todayPendingEvents.length }}</strong>
+              <span class="label">待处理</span>
+            </div>
+            <div class="summary-card completed-card">
+              <div class="shape shape-tl"></div>
+              <div class="shape shape-br"></div>
+              <strong>{{ todayCompletedCount }}</strong>
+              <span class="label">已完成</span>
+            </div>
+            <div class="summary-card total-card">
+              <div class="shape shape-tr"></div>
+              <div class="shape shape-bl"></div>
+              <strong>{{ todayEvents.length }}</strong>
+              <span class="label">总计</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="today-list-section">
+          <header class="list-head">
+            <div class="list-title-group">
+              <h3 class="list-title">今日待办</h3>
+              <span class="list-count">{{ todayEvents.length }}</span>
+            </div>
+            <button type="button" class="btn-view-all" @click.stop="toggleDayPreview(todayDate)">
+              查看全部
+            </button>
+          </header>
+
+          <div v-if="todayEvents.length" class="new-todo-list">
+            <button
+              v-for="event in todayEvents"
+              :key="event.id"
+              type="button"
+              class="new-todo-item"
+              :class="{ 'is-done': event.status === 'done' }"
+              @click.stop="toggleDayPreview(todayDate)"
+            >
+              <div class="item-left">
+                <span class="status-dot" :class="event.status === 'done' ? 'dot-green' : 'dot-blue'"></span>
+                <time class="item-time">{{ formatEventTime(event) }}</time>
+                <span class="item-title">{{ event.title }}</span>
+              </div>
+              <span class="item-tag" :class="event.status === 'done' ? 'tag-gray' : 'tag-blue'">
+                {{ event.status === 'done' ? '已完成' : '待处理' }}
+              </span>
+            </button>
+          </div>
+          
+          <div v-else class="new-todo-empty">
+            <div class="empty-icon-wrapper">
+              <IconBox class="empty-icon" />
+            </div>
+            <span class="empty-text">今日暂无待办</span>
+          </div>
+        </div>
+      </section>
+
       <div class="panel calendar-panel">
         <CalendarMonth
           v-model:view-mode="calendarViewMode"
@@ -1382,7 +1440,7 @@ function openAgentList(agentKey?: string) {
           :week-label="weekLabel"
           :today-date="todayDate"
           :today-events="todayEvents"
-          :show-today-bubble="shouldShowTodayBubble"
+          :show-today-bubble="false"
           :is-syncing-calendar="isSyncingCalendar"
           @select="toggleDayPreview"
           @calendar-interaction="hideTodayBubbleTemporarily"
@@ -1407,7 +1465,7 @@ function openAgentList(agentKey?: string) {
   box-sizing: border-box;
   padding: 5px;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(20, minmax(0, 1fr));
   grid-template-rows: minmax(370px, 1.5fr) minmax(240px, 1fr);
   gap: 8px 18px;
   overflow: hidden;
@@ -1419,7 +1477,7 @@ function openAgentList(agentKey?: string) {
   top: 22px;
   left: 22px;
   bottom: 22px;
-  width: calc((100% - 62px) / 2);
+  width: calc(65% - 29px);
   border-radius: 24px;
   background: rgba(248, 250, 252, 0.22);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
@@ -1446,18 +1504,353 @@ function openAgentList(agentKey?: string) {
 
 .left-column {
   position: relative;
-  grid-column: 3 / 5;
+  grid-column: 14 / 21;
   grid-row: 1 / 3;
   min-height: 0;
 }
 
 .calendar-panel {
   min-height: 0;
+  flex: 6 1 0;
+}
+
+.right-blank-panel {
+  min-height: 0;
+  flex: 4 1 0;
+}
+
+.today-todo-panel {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  gap: 12px;
+}
+
+.today-overview-section {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(226, 232, 240, 0.82);
+  border-radius: 16px;
+  padding: 10px 14px;
+  box-shadow: 0 4px 24px -12px rgba(15, 23, 42, 0.06);
+  flex: 0 0 auto;
+}
+
+.overview-title {
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 850;
+  margin-bottom: 8px;
+}
+
+.overview-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.summary-card {
+  position: relative;
+  border-radius: 14px;
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  gap: 2px;
+  transition: transform 0.2s ease;
+}
+
+.summary-card:hover {
+  transform: translateY(-2px);
+}
+
+.summary-card strong {
+  font-size: 28px;
+  line-height: 1;
+  font-weight: 950;
+  position: relative;
+  z-index: 1;
+}
+
+.summary-card .label {
+  font-size: 12px;
+  font-weight: 800;
+  color: #94a3b8;
+  position: relative;
+  z-index: 1;
+}
+
+.summary-card .shape {
+  position: absolute;
+  border-radius: 50%;
+  z-index: 0;
+}
+
+.pending-card {
+  background: #fdfaf6;
+}
+.pending-card strong {
+  color: #d97736;
+}
+.pending-card .shape-tr {
+  top: -18px;
+  right: -16px;
+  width: 52px;
+  height: 52px;
+  background: #f5ece5;
+}
+.pending-card .shape-bl {
+  bottom: -12px;
+  left: -12px;
+  width: 36px;
+  height: 36px;
+  background: #f2e4da;
+}
+
+.completed-card {
+  background: #f8faff;
+}
+.completed-card strong {
+  color: #0f172a;
+}
+.completed-card .shape-tl {
+  top: -12px;
+  left: -12px;
+  width: 44px;
+  height: 44px;
+  background: #f0e6fa;
+}
+.completed-card .shape-br {
+  bottom: 8px;
+  right: 8px;
+  width: 16px;
+  height: 16px;
+  background: #f7ebfd;
+}
+
+.total-card {
+  background: #f4fdf8;
+}
+.total-card strong {
+  color: #059669;
+}
+.total-card .shape-tr {
+  top: -10px;
+  right: -10px;
+  width: 40px;
+  height: 40px;
+  background: #dcfce7;
+}
+.total-card .shape-bl {
+  bottom: -18px;
+  left: 14px;
+  width: 30px;
+  height: 30px;
+  background: #ccfbf1;
+}
+
+.today-list-section {
   flex: 1 1 auto;
+  min-height: 200px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(226, 232, 240, 0.82);
+  border-radius: 16px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 24px -12px rgba(15, 23, 42, 0.06);
+}
+
+.list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  flex: 0 0 auto;
+}
+
+.list-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.list-title {
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 850;
+}
+
+.list-count {
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.btn-view-all {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.2s;
+}
+
+.btn-view-all:hover {
+  color: #2563eb;
+}
+
+.new-todo-list {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 4px;
+}
+
+.new-todo-list::-webkit-scrollbar {
+  width: 4px;
+}
+.new-todo-list::-webkit-scrollbar-thumb {
+  background: rgba(203, 213, 225, 0.6);
+  border-radius: 4px;
+}
+
+.new-todo-item {
+  width: 100%;
+  min-height: 44px;
+  border: none;
+  border-radius: 12px;
+  background: #f4f7fd; /* 极浅的蓝紫色/蓝色背景 */
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.2s;
+}
+
+.new-todo-item:hover {
+  background: #eef2fa; /* 悬浮时轻微加深 */
+  transform: translateY(-1px);
+}
+
+.new-todo-item.is-done {
+  background: #f4fdf8; /* 已完成使用极浅的薄荷绿背景 */
+  opacity: 0.8;
+}
+
+.new-todo-item.is-done:hover {
+  background: #eafbf1;
+}
+
+.item-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.dot-blue { background: #3b82f6; }
+.dot-green { background: #10b981; }
+
+.item-time {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.item-title {
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.item-tag {
+  font-size: 11px;
+  font-weight: 850;
+  padding: 4px 10px;
+  border-radius: 6px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.tag-blue {
+  background: #e6effd; /* 与卡片底色呼应的标签底色 */
+  color: #2563eb;
+}
+
+.tag-gray {
+  background: #e3f5eb; /* 与已完成卡片底色呼应的标签底色 */
+  color: #059669;
+}
+
+.new-todo-item.is-done .item-title,
+.new-todo-item.is-done .item-time {
+  color: #64748b;
+  text-decoration: line-through;
+}
+
+.new-todo-empty {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #94a3b8;
+  min-height: 120px;
+}
+
+.empty-icon-wrapper {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: #f8fafc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #cbd5e1;
+}
+
+.empty-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.empty-text {
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .calendar-panel,
-.agent-panel {
+.agent-panel,
+.right-blank-panel {
   overflow: hidden;
 }
 
@@ -1482,7 +1875,7 @@ function openAgentList(agentKey?: string) {
   z-index: 999;
   top: calc(50% - 24px);
   right: calc(100% + 16px);
-  width: min(550px, calc(50vw - 42px));
+  width: min(550px, calc(60vw - 42px));
   height: min(682px, calc(100% - 32px));
   flex: 0 0 auto;
   box-sizing: border-box;
@@ -1516,7 +1909,7 @@ function openAgentList(agentKey?: string) {
 .profile-welcome-panel {
   position: relative;
   isolation: isolate;
-  grid-column: 1 / 3;
+  grid-column: 1 / 14;
   grid-row: 1 / 3;
   min-height: 0;
   padding: 22px 24px 20px;
@@ -1525,36 +1918,14 @@ function openAgentList(agentKey?: string) {
   gap: 12px;
   overflow-x: clip;
   overflow-y: visible;
-  border: 1px solid rgba(226, 232, 240, 0.58);
-  border-radius: 24px;
-  background: radial-gradient(circle at 18% 14%, rgba(219, 234, 254, 0.52), transparent 34%),
-    radial-gradient(circle at 80% 18%, rgba(237, 233, 254, 0.46), transparent 32%),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(248, 251, 255, 0.74));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    0 20px 54px -46px rgba(30, 41, 59, 0.34);
-  backdrop-filter: blur(18px);
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 .profile-welcome-panel::before {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  content: '';
-  background: radial-gradient(
-      ellipse 58% 42% at 0% 0%,
-      rgba(255, 255, 255, 0.96) 0%,
-      rgba(255, 255, 255, 0.72) 34%,
-      rgba(255, 255, 255, 0) 76%
-    ),
-    linear-gradient(
-      135deg,
-      rgba(235, 244, 255, 0.74) 0%,
-      rgba(235, 244, 255, 0.32) 24%,
-      rgba(235, 244, 255, 0) 52%
-    );
+  display: none;
 }
 
 .profile-welcome-panel.has-profile-dialog {
@@ -2869,6 +3240,10 @@ p {
     min-height: 540px;
   }
 
+  .right-blank-panel {
+    min-height: 260px;
+  }
+
   .left-preview-scrim {
     display: none;
   }
@@ -3042,6 +3417,10 @@ p {
 
   .calendar-panel {
     min-height: 500px;
+  }
+
+  .right-blank-panel {
+    min-height: 220px;
   }
 
   .agent-list {

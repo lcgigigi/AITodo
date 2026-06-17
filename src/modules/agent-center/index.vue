@@ -1,717 +1,212 @@
-<template>
-  <main class="agent-center-page">
-    <Transition name="center-toast-fade">
-      <div v-if="actionToast" class="center-toast" role="status">
-        {{ actionToast }}
-      </div>
-    </Transition>
-
-    <header class="topbar">
-      <div class="brand">
-        <div class="brand-logo">
-          <img :src="logoDarkImage" alt="" />
-        </div>
-        <div>
-          <div class="brand-title">华力企业级Agent平台</div>
-        </div>
-      </div>
-
-      <div class="top-actions">
-        <div class="notification-wrap">
-          <button class="top-icon" type="button" aria-label="通知">
-            <IconBell />
-          </button>
-          <span class="notification-badge">6</span>
-        </div>
-        <button class="top-icon" type="button" aria-label="客服">
-          <IconHeadphones />
-        </button>
-        <button class="top-icon" type="button" aria-label="设置">
-          <IconSettings />
-        </button>
-        <div class="user">
-          <div class="user-avatar">刘</div>
-          <div>
-            <b>刘美华</b>
-          </div>
-        </div>
-      </div>
-    </header>
-
-    <section class="card summary-strip" aria-label="智能体指标概览">
-      <article v-for="(item, index) in summaryStats" :key="item.label">
-        <div class="summary-icon">{{ item.icon }}</div>
-        <div class="summary-copy">
-          <span>{{ item.label }}</span>
-          <b
-            >{{ item.value }}<em>{{ item.unit }}</em></b
-          >
-          <p>较上月 ↑ {{ item.rate }}%</p>
-        </div>
-        <div :ref="(el) => setSummaryChartRef(el, index)" class="mini-chart"></div>
-      </article>
-    </section>
-
-    <section class="main-grid">
-      <section class="card agent-panel">
-        <div class="panel-head">
-          <div>
-            <h2>全部智能体</h2>
-            <p>共 {{ filteredAgents.length }} / {{ agents.length }} 个智能体，本月持续统计中</p>
-          </div>
-
-          <div class="panel-actions">
-            <Input
-              v-model="searchKeyword"
-              class="soft-search"
-              type="search"
-              placeholder="搜索智能体..."
-              aria-label="搜索智能体"
-            />
-            <Select v-model="categoryFilter">
-              <SelectTrigger class="soft-select category-select" aria-label="智能体分类">
-                <SelectValue placeholder="智能体分类" />
-              </SelectTrigger>
-              <SelectContent position="popper">
-                <SelectItem v-for="option in categoryOptions" :key="option.key" :value="option.key">
-                  {{ option.label }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            <Select v-model="permissionFilter">
-              <SelectTrigger class="soft-select permission-select" aria-label="智能体状态筛选">
-                <SelectValue placeholder="状态筛选" />
-              </SelectTrigger>
-              <SelectContent position="popper">
-                <SelectItem
-                  v-for="option in permissionOptions"
-                  :key="option.value"
-                  :value="option.value"
-                >
-                  {{ option.label }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            <Select v-model="sortType">
-              <SelectTrigger class="soft-select sort-select" aria-label="智能体排序">
-                <SelectValue placeholder="智能体排序" />
-              </SelectTrigger>
-              <SelectContent position="popper">
-                <SelectItem v-for="option in sortOptions" :key="option.value" :value="option.value">
-                  {{ option.label }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        <div v-if="filteredAgents.length" class="agent-grid">
-          <article
-            v-for="agent in filteredAgents"
-            :key="agent.id"
-            class="agent-card"
-            :class="{ 'is-active': selectedAgent?.key === agent.key }"
-          >
-            <div class="agent-top">
-              <div class="agent-icon" :class="`theme-${agent.theme}`">{{ agent.icon }}</div>
-              <div>
-                <h3>{{ agent.name }}</h3>
-                <p>{{ agent.desc }}</p>
-              </div>
-            </div>
-
-            <div class="tag-line">
-              <span class="agent-tag info">{{ agent.categoryName }}</span>
-              <span class="agent-tag success">{{ agent.status }}</span>
-              <span class="agent-tag muted">{{ permissionText(agent.permissionState) }}</span>
-            </div>
-
-            <div class="agent-metrics">
-              <div>
-                <span>本月 Token</span><b>{{ formatNumber(agent.monthlyToken) }}</b>
-              </div>
-              <div>
-                <span>调用次数</span><b>{{ formatNumber(agent.calls) }}</b>
-              </div>
-              <div>
-                <span>积分贡献</span><b>{{ formatNumber(agent.points) }}</b>
-              </div>
-              <div>
-                <span>使用进度</span><b>{{ agent.progress }}%</b>
-              </div>
-            </div>
-
-            <div class="agent-progress" aria-hidden="true">
-              <span :style="{ width: `${agent.progress}%` }"></span>
-            </div>
-
-            <div class="agent-actions">
-              <button class="agent-use-btn" type="button" @click="openAgentAction(agent, 'use')">
-                <IconPlay />
-                使用
-              </button>
-              <button
-                class="agent-detail-btn"
-                type="button"
-                @click="openAgentAction(agent, 'detail')"
-              >
-                <IconInfo />
-                详情
-              </button>
-            </div>
-          </article>
-        </div>
-        <div v-else class="agent-empty">
-          <h3>没有匹配的智能体</h3>
-          <p>调整搜索词、分类或状态筛选后再试。</p>
-          <Button type="button" @click="resetAgentFilters">清空筛选</Button>
-        </div>
-      </section>
-
-      <aside class="right-panel">
-        <section class="card overview-card">
-          <div class="panel-head small">
-            <h2>Token 使用概览</h2>
-            <Select v-model="overviewPeriod">
-              <SelectTrigger class="soft-select period-select" aria-label="Token 统计周期">
-                <SelectValue placeholder="统计周期" />
-              </SelectTrigger>
-              <SelectContent position="popper">
-                <SelectItem
-                  v-for="option in periodOptions"
-                  :key="option.value"
-                  :value="option.value"
-                >
-                  {{ option.label }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div class="overview-grid">
-            <div class="overview-list">
-              <div>
-                <span>本月总使用量</span>
-                <b>{{ formatNumber(tokenOverview.monthTotal) }}</b>
-                <em class="green">↑ 18.3%</em>
-              </div>
-              <div>
-                <span>今日使用量</span>
-                <b>{{ formatNumber(tokenOverview.today) }}</b>
-                <em class="green">↓ {{ tokenOverview.todayRate }}%</em>
-              </div>
-              <div>
-                <span>单智能体平均</span>
-                <b>{{ formatNumber(tokenOverview.average) }}</b>
-                <em class="green">↑ 9.6%</em>
-              </div>
-              <div>
-                <span>剩余配额</span>
-                <b>{{ formatNumber(tokenOverview.remaining) }}</b>
-                <em class="red">↓ 4.8%</em>
-              </div>
-              <div class="quota-row">
-                <span>配额使用率</span>
-                <strong>{{ tokenOverview.quotaUsed }}%</strong>
-                <div class="quota-progress" aria-hidden="true">
-                  <span :style="{ width: `${tokenOverview.quotaUsed}%` }"></span>
-                </div>
-              </div>
-            </div>
-
-            <div class="donut-area">
-              <div ref="donutChartRef" class="donut-chart"></div>
-              <div class="legend">
-                <p v-for="item in tokenOverview.categoryPercent" :key="item.name">
-                  <i :style="{ backgroundColor: item.color }"></i>
-                  <span>{{ item.name }}</span>
-                  <b>{{ item.percent }}%</b>
-                </p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section class="rank-grid">
-          <div class="card rank-card">
-            <div class="panel-head small">
-              <h2>Token 排名</h2>
-              <button class="link-action" type="button">
-                更多
-                <IconChevronRight />
-              </button>
-            </div>
-            <div ref="tokenRankChartRef" class="rank-chart"></div>
-          </div>
-
-          <div class="card rank-card">
-            <div class="panel-head small">
-              <h2>积分排行</h2>
-              <button class="link-action" type="button">
-                更多
-                <IconChevronRight />
-              </button>
-            </div>
-            <div ref="pointsRankChartRef" class="rank-chart"></div>
-          </div>
-        </section>
-
-        <section class="card trend-card">
-          <div class="panel-head small">
-            <h2>Token 趋势 <span>近 7 天</span></h2>
-            <div class="mode-tabs" role="group" aria-label="趋势维度">
-              <button
-                type="button"
-                :class="{ active: trendMode === 'day' }"
-                @click="trendMode = 'day'"
-              >
-                按日
-              </button>
-              <button
-                type="button"
-                :class="{ active: trendMode === 'week' }"
-                @click="trendMode = 'week'"
-              >
-                按周
-              </button>
-            </div>
-          </div>
-
-          <div ref="trendChartRef" class="trend-chart"></div>
-        </section>
-      </aside>
-    </section>
-
-    <Transition name="agent-drawer-fade">
-      <section
-        v-if="selectedAgent"
-        class="agent-drawer"
-        role="dialog"
-        aria-modal="false"
-        :aria-label="`${selectedAgent.name}智能体详情`"
-      >
-        <header class="drawer-head">
-          <div>
-            <span
-              >{{ selectedAgent.categoryName }} ·
-              {{ permissionText(selectedAgent.permissionState) }}</span
-            >
-            <h2>{{ selectedAgent.name }}</h2>
-            <p>{{ selectedAgent.desc }}</p>
-          </div>
-          <button type="button" aria-label="关闭智能体详情" @click="closeAgentDrawer">×</button>
-        </header>
-
-        <div class="drawer-metrics">
-          <span>
-            <b>{{ formatNumber(selectedAgent.monthlyToken) }}</b>
-            本月 Token
-          </span>
-          <span>
-            <b>{{ formatNumber(selectedAgent.calls) }}</b>
-            调用次数
-          </span>
-          <span>
-            <b>{{ selectedAgent.owner }}</b>
-            负责人
-          </span>
-        </div>
-
-        <section v-if="agentActionMode === 'use'" class="mock-use-panel">
-          <h3>模拟使用入口</h3>
-          <p>当前前端使用 mock 数据模拟能力入口。真实接口接入后，这里会跳转到对应智能体工作流。</p>
-          <button type="button" @click="agentActionMode = 'detail'">查看能力详情</button>
-        </section>
-
-        <section class="drawer-section">
-          <h3>核心能力</h3>
-          <div class="chip-list">
-            <span v-for="item in selectedAgent.capabilities" :key="item">{{ item }}</span>
-          </div>
-        </section>
-
-        <section class="drawer-section">
-          <h3>适用场景</h3>
-          <ul>
-            <li v-for="item in selectedAgent.scenarios" :key="item">{{ item }}</li>
-          </ul>
-        </section>
-      </section>
-    </Transition>
-  </main>
-</template>
-
 <script setup lang="ts">
-import type { ComponentPublicInstance } from 'vue'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { Component } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import * as echarts from 'echarts'
-import IconBell from '~icons/lucide/bell'
-import IconChevronRight from '~icons/lucide/chevron-right'
-import IconHeadphones from '~icons/lucide/headphones'
-import IconInfo from '~icons/lucide/info'
-import IconPlay from '~icons/lucide/play'
-import IconSettings from '~icons/lucide/settings'
-import logoDarkImage from '@/assets/logoDark1.png'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import IconActivity from '~icons/lucide/activity'
+import IconBot from '~icons/lucide/bot'
+import IconBox from '~icons/lucide/box'
+import IconChevronDown from '~icons/lucide/chevron-down'
+import IconCircleHelp from '~icons/lucide/circle-help'
+import IconCode2 from '~icons/lucide/code-2'
+import IconCoins from '~icons/lucide/coins'
+import IconCpu from '~icons/lucide/cpu'
+import IconHistory from '~icons/lucide/history'
+import IconImage from '~icons/lucide/image'
+import IconMessageCircle from '~icons/lucide/message-circle'
+import IconPanelLeftClose from '~icons/lucide/panel-left-close'
+import IconPanelLeftOpen from '~icons/lucide/panel-left-open'
+import IconPlus from '~icons/lucide/plus'
+import IconSearch from '~icons/lucide/search'
+import IconShieldCheck from '~icons/lucide/shield-check'
+import IconSparkles from '~icons/lucide/sparkles'
+import IconStar from '~icons/lucide/star'
+import IconTrendingDown from '~icons/lucide/trending-down'
+import IconTrendingUp from '~icons/lucide/trending-up'
+import IconUsers from '~icons/lucide/users'
+import IconX from '~icons/lucide/x'
+import makeUrl from '@/assets/agent-center/make.png'
+import moreAbilityUrl from '@/assets/agent-center/newagnet.png'
+import DashboardTopBar from '@/modules/home/dashboard/DashboardTopBar.vue'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import {
+  agentCategories,
   agents,
-  categories,
-  pointsRanking,
-  summaryStats,
-  tokenOverview,
-  tokenRanking,
-  trendData,
-  type AgentPermissionState,
-  type AgentItem,
-  type RankItem,
+  getAgentByKey,
+  permissionLabels,
+  skills,
 } from './mock'
+import type { AgentCatalogItem, AgentCategory } from './types'
 
 defineOptions({
   name: 'AgentCenterPage',
 })
 
-type SortType = 'default' | 'tokenDesc' | 'pointsDesc' | 'callsDesc'
-type TrendMode = 'day' | 'week'
-type PermissionFilter = 'all' | AgentPermissionState
-type AgentActionMode = 'use' | 'detail'
+type AgentVisual = {
+  icon: Component
+  tone: string
+}
 
 const route = useRoute()
 const router = useRouter()
-const sortType = ref<SortType>('default')
+
 const searchKeyword = ref('')
-const categoryFilter = ref('all')
-const permissionFilter = ref<PermissionFilter>('all')
-const overviewPeriod = ref('month')
-const trendMode = ref<TrendMode>('day')
+const activeCategory = ref<AgentCategory | '全部'>('全部')
+const selectedAgent = ref<AgentCatalogItem | null>(null)
 const actionToast = ref('')
-const selectedAgent = ref<AgentItem | null>(null)
-const agentActionMode = ref<AgentActionMode>('detail')
+const sidebarCollapsed = ref(false)
 
-const donutChartRef = ref<HTMLElement | null>(null)
-const tokenRankChartRef = ref<HTMLElement | null>(null)
-const pointsRankChartRef = ref<HTMLElement | null>(null)
-const trendChartRef = ref<HTMLElement | null>(null)
-const summaryChartRefs = ref<HTMLElement[]>([])
-
-const sortOptions = [
-  { label: '默认排序', value: 'default' },
-  { label: 'Token 从高到低', value: 'tokenDesc' },
-  { label: '积分贡献从高到低', value: 'pointsDesc' },
-  { label: '调用次数从高到低', value: 'callsDesc' },
+const primaryNav = [
+  { label: '智能体 Agent', icon: IconBot, active: true },
+  { label: '能力 Skills', icon: IconCpu, active: false },
+  { label: '我的收藏', icon: IconStar, active: false },
+  { label: '使用记录', icon: IconHistory, active: false },
 ]
 
-const categoryOptions = categories.map((item) => ({ key: item.key, label: item.label }))
-const permissionOptions: Array<{ label: string; value: PermissionFilter }> = [
-  { label: '全部状态', value: 'all' },
-  { label: '可使用', value: 'available' },
-  { label: '需授权', value: 'locked' },
-  { label: '管理员', value: 'admin-only' },
-]
+const secondaryNav = [{ label: '帮助中心', icon: IconCircleHelp }]
 
-const periodOptions = [
-  { label: '本月', value: 'month' },
-  { label: '本周', value: 'week' },
-  { label: '今日', value: 'today' },
-]
+function formatTokens(value: number) {
+  if (value >= 10000) {
+    const wan = value / 10000
+    return `${Number.isInteger(wan) ? wan : wan.toFixed(1)}万`
+  }
+  return value.toLocaleString('zh-CN')
+}
 
-const filteredAgents = computed<AgentItem[]>(() => {
+const tokenUsage = computed(() => {
+  const quota = 2_000_000
+  const used = 1_240_000
+  const todayUsed = 86_000
+  const todayDelta = 12
+
+  const remaining = quota - used
+  const usedPercent = Math.min(100, Math.round((used / quota) * 100))
+
+  return {
+    quotaLabel: formatTokens(quota),
+    remainingLabel: formatTokens(remaining),
+    usedPercent,
+    isRunningLow: usedPercent >= 80,
+    todayLabel: formatTokens(todayUsed),
+    todayDelta,
+    todayTrendUp: todayDelta >= 0,
+  }
+})
+
+const agentVisualMap: Record<string, AgentVisual> = {
+  'policy-qa': { icon: IconMessageCircle, tone: 'icon-blue' },
+  'image-analysis': { icon: IconImage, tone: 'icon-blue' },
+  'meeting-notes': { icon: IconUsers, tone: 'icon-teal' },
+  'ppt-creator': { icon: IconSparkles, tone: 'icon-orange' },
+  'agent-workshop': { icon: IconBox, tone: 'icon-blue' },
+  'code-assistant': { icon: IconCode2, tone: 'icon-cyan' },
+  'compliance-assistant': { icon: IconShieldCheck, tone: 'icon-blue' },
+}
+
+const defaultAgentVisual: AgentVisual = {
+  icon: IconBot,
+  tone: 'icon-blue',
+}
+
+const categoryTabs = computed(() => [
+  { key: '全部' as const, label: '全部', count: agents.length + skills.length },
+  ...agentCategories.map((category) => ({
+    key: category,
+    label: category,
+    count: agents.filter((agent) => agent.category === category).length,
+  })),
+])
+
+const visibleAgents = computed(() => {
   const keyword = searchKeyword.value.trim().toLowerCase()
-  const list = agents.filter((agent) => {
+
+  return agents.filter((agent) => {
+    const matchesCategory =
+      activeCategory.value === '全部' || agent.category === activeCategory.value
     const matchesKeyword =
       !keyword ||
-      [agent.name, agent.desc, agent.categoryName, agent.owner, ...agent.capabilities]
+      [agent.name, agent.description, agent.category, ...agent.scenarios]
         .join(' ')
         .toLowerCase()
         .includes(keyword)
-    const matchesCategory =
-      categoryFilter.value === 'all' || agent.categoryKey === categoryFilter.value
-    const matchesPermission =
-      permissionFilter.value === 'all' || agent.permissionState === permissionFilter.value
 
-    return matchesKeyword && matchesCategory && matchesPermission
+    return matchesCategory && matchesKeyword
   })
-
-  if (sortType.value === 'tokenDesc')
-    return [...list].sort((a, b) => b.monthlyToken - a.monthlyToken)
-  if (sortType.value === 'pointsDesc') return [...list].sort((a, b) => b.points - a.points)
-  if (sortType.value === 'callsDesc') return [...list].sort((a, b) => b.calls - a.calls)
-  return list
 })
 
-const chartInstances = new Set<echarts.ECharts>()
-let resizeObserver: ResizeObserver | null = null
-let actionToastTimer: ReturnType<typeof setTimeout> | undefined
+const shouldShowMoreAbility = computed(
+  () => activeCategory.value === '全部' && searchKeyword.value.trim().length === 0,
+)
 
-const formatNumber = (value: number) => value.toLocaleString('en-US')
-const permissionText = (state: AgentPermissionState) => {
-  if (state === 'available') return '可使用'
-  if (state === 'locked') return '需授权'
-  return '管理员'
+function getAgentVisual(agent: AgentCatalogItem) {
+  return agentVisualMap[agent.key] ?? defaultAgentVisual
 }
 
-const clearActionToastTimer = () => {
-  if (!actionToastTimer) return
-  clearTimeout(actionToastTimer)
-  actionToastTimer = undefined
+function selectCategory(category: AgentCategory | '全部') {
+  activeCategory.value = category
 }
 
-const showActionToast = (message: string) => {
-  clearActionToastTimer()
+function showToast(message: string) {
   actionToast.value = message
-  actionToastTimer = setTimeout(() => {
-    actionToast.value = ''
-    actionToastTimer = undefined
-  }, 2200)
+  window.setTimeout(() => {
+    if (actionToast.value === message) actionToast.value = ''
+  }, 2400)
 }
 
-const openAgentAction = (agent: AgentItem, action: AgentActionMode) => {
-  const url = action === 'use' ? agent.useUrl : agent.detailUrl
-
-  if (url) {
-    window.open(url, '_blank', 'noopener,noreferrer')
+function handleNav(label: string) {
+  if (label === '智能体 Agent') {
+    activeCategory.value = '全部'
+    searchKeyword.value = ''
+    void router.replace({ name: 'AgentCenter' })
     return
   }
 
-  selectedAgent.value = agent
-  agentActionMode.value = action
-  void router.replace({ query: { ...route.query, agent: agent.routeQuery } })
-  showActionToast(action === 'use' ? '已打开模拟使用入口' : '已打开智能体详情')
+  showToast(`${label} 即将开放`)
 }
 
-function closeAgentDrawer() {
+function toggleSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+}
+
+function createAgent() {
+  showToast('开始创建专属智能体')
+}
+
+function openAgent(agent: AgentCatalogItem) {
+  selectedAgent.value = agent
+  void router.replace({ query: { ...route.query, agent: agent.key } })
+}
+
+function closeAgentPanel() {
   selectedAgent.value = null
   const nextQuery = { ...route.query }
   delete nextQuery.agent
   void router.replace({ query: nextQuery })
 }
 
-function resetAgentFilters() {
-  searchKeyword.value = ''
-  categoryFilter.value = 'all'
-  permissionFilter.value = 'all'
+function launchAgent(agent: AgentCatalogItem) {
+  if (agent.permissionState !== 'available') {
+    showToast(`${agent.name} 当前${permissionLabels[agent.permissionState]}，暂不可直接使用`)
+    return
+  }
+
+  showToast(`即将打开 ${agent.name}`)
+}
+
+function statusClass(state: AgentCatalogItem['permissionState']) {
+  return state === 'available' ? 'is-available' : 'is-pending'
 }
 
 function locateAgentFromQuery(agentKey?: string) {
   const normalizedKey = agentKey?.trim()
-  if (!normalizedKey) return
+  if (!normalizedKey) {
+    selectedAgent.value = null
+    return
+  }
 
-  const agent = agents.find(
-    (item) => item.key === normalizedKey || item.routeQuery === normalizedKey,
-  )
+  const agent = getAgentByKey(normalizedKey)
   if (!agent) return
 
+  activeCategory.value = agent.category
   selectedAgent.value = agent
-  agentActionMode.value = 'detail'
-  categoryFilter.value = agent.categoryKey
-}
-
-const setSummaryChartRef = (el: Element | ComponentPublicInstance | null, index: number) => {
-  if (el instanceof HTMLElement) {
-    summaryChartRefs.value[index] = el
-  }
-}
-
-const chartTextStyle = {
-  color: '#4f5879',
-  fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", Arial, sans-serif',
-}
-
-const renderChart = (el: HTMLElement | null, option: echarts.EChartsOption) => {
-  if (!el) return
-
-  const chart = echarts.getInstanceByDom(el) ?? echarts.init(el, undefined, { renderer: 'canvas' })
-  chart.setOption(option, true)
-  chartInstances.add(chart)
-}
-
-const createMiniLineOption = (values: number[], color = '#4f7cff'): echarts.EChartsOption => ({
-  animation: false,
-  grid: { top: 4, right: 3, bottom: 4, left: 3 },
-  xAxis: { type: 'category', show: false, data: values.map((_, index) => index) },
-  yAxis: { type: 'value', show: false, min: 'dataMin', max: 'dataMax' },
-  series: [
-    {
-      type: 'line',
-      data: values,
-      smooth: true,
-      showSymbol: false,
-      lineStyle: { width: 2.4, color },
-      areaStyle: {
-        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-          { offset: 0, color: 'rgba(79, 124, 255, 0.24)' },
-          { offset: 1, color: 'rgba(79, 124, 255, 0)' },
-        ]),
-      },
-    },
-  ],
-})
-
-const createDonutOption = (): echarts.EChartsOption => ({
-  color: tokenOverview.categoryPercent.map((item) => item.color),
-  title: {
-    text: formatNumber(tokenOverview.monthTotal),
-    subtext: '本月总量',
-    left: 'center',
-    top: '38%',
-    textStyle: { ...chartTextStyle, color: '#182044', fontSize: 19, fontWeight: 800 },
-    subtextStyle: { ...chartTextStyle, color: '#6c7390', fontSize: 13 },
-  },
-  tooltip: {
-    trigger: 'item',
-    confine: true,
-    formatter: (params: unknown) => {
-      const item = params as { name: string; percent: number }
-      return `${item.name}<br/>占比 ${item.percent}%`
-    },
-  },
-  series: [
-    {
-      name: 'Token 使用',
-      type: 'pie',
-      radius: ['60%', '84%'],
-      center: ['50%', '52%'],
-      avoidLabelOverlap: true,
-      label: { show: false },
-      labelLine: { show: false },
-      itemStyle: {
-        borderWidth: 4,
-        borderColor: '#fff',
-        borderRadius: 8,
-      },
-      data: tokenOverview.categoryPercent.map((item) => ({
-        name: item.name,
-        value: item.percent,
-      })),
-    },
-  ],
-})
-
-const createRankOption = (
-  data: RankItem[],
-  colorStops: [string, string],
-): echarts.EChartsOption => {
-  const orderedData = [...data].reverse()
-
-  return {
-    animationDuration: 600,
-    grid: { top: 4, right: 70, bottom: 4, left: 76, containLabel: false },
-    tooltip: { show: false },
-    xAxis: {
-      type: 'value',
-      show: false,
-      splitLine: { show: false },
-    },
-    yAxis: {
-      type: 'category',
-      data: orderedData.map((item) => item.name),
-      axisLine: { show: false },
-      axisTick: { show: false },
-      axisLabel: {
-        ...chartTextStyle,
-        color: '#323b62',
-        fontSize: 12,
-        fontWeight: 700,
-      },
-    },
-    series: [
-      {
-        type: 'bar',
-        silent: true,
-        data: orderedData.map((item) => item.value),
-        barWidth: 10,
-        showBackground: true,
-        backgroundStyle: {
-          color: '#eef2fa',
-          borderRadius: 999,
-        },
-        itemStyle: {
-          borderRadius: 999,
-          color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
-            { offset: 0, color: colorStops[0] },
-            { offset: 1, color: colorStops[1] },
-          ]),
-        },
-        label: {
-          show: true,
-          position: 'right',
-          color: '#182044',
-          fontSize: 12,
-          fontWeight: 800,
-          formatter: (params: { value?: unknown }) => formatNumber(Number(params.value ?? 0)),
-        },
-      },
-    ],
-  }
-}
-
-const createTrendOption = (): echarts.EChartsOption => ({
-  animationDuration: 700,
-  grid: { top: 14, right: 10, bottom: 24, left: 8 },
-  tooltip: {
-    trigger: 'axis',
-    confine: true,
-    formatter: (params: unknown) => {
-      const item = (Array.isArray(params) ? params[0] : params) as { name: string; value: number }
-      return `${item.name}<br/>${formatNumber(Number(item.value))} Tokens`
-    },
-  },
-  xAxis: {
-    type: 'category',
-    boundaryGap: false,
-    data: trendData.map((item) => item.date),
-    axisLine: { lineStyle: { color: '#dbe2f1' } },
-    axisTick: { show: false },
-    axisLabel: { ...chartTextStyle, color: '#7b839f', fontSize: 12 },
-  },
-  yAxis: {
-    type: 'value',
-    splitNumber: 3,
-    axisLabel: { show: false },
-    axisLine: { show: false },
-    axisTick: { show: false },
-    splitLine: { lineStyle: { color: '#edf1f8' } },
-  },
-  series: [
-    {
-      name: 'Token',
-      type: 'line',
-      data: trendData.map((item) => item.value),
-      smooth: true,
-      symbol: 'circle',
-      symbolSize: 7,
-      lineStyle: { width: 3, color: '#2f68ff' },
-      itemStyle: { color: '#2f68ff', borderColor: '#fff', borderWidth: 3 },
-      areaStyle: {
-        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-          { offset: 0, color: 'rgba(47, 104, 255, 0.22)' },
-          { offset: 1, color: 'rgba(47, 104, 255, 0.02)' },
-        ]),
-      },
-    },
-  ],
-})
-
-const renderAllCharts = () => {
-  summaryStats.forEach((item, index) => {
-    renderChart(summaryChartRefs.value[index] ?? null, createMiniLineOption(item.sparkline))
-  })
-  renderChart(donutChartRef.value, createDonutOption())
-  renderChart(tokenRankChartRef.value, createRankOption(tokenRanking, ['#2f68ff', '#765cff']))
-  renderChart(pointsRankChartRef.value, createRankOption(pointsRanking, ['#12b981', '#2f68ff']))
-  renderChart(trendChartRef.value, createTrendOption())
-}
-
-const resizeCharts = () => {
-  chartInstances.forEach((chart) => chart.resize())
 }
 
 watch(
@@ -722,1063 +217,1549 @@ watch(
   { immediate: true },
 )
 
-onMounted(async () => {
-  await nextTick()
-  renderAllCharts()
-
-  resizeObserver = new ResizeObserver(resizeCharts)
-  ;[
-    ...summaryChartRefs.value,
-    donutChartRef.value,
-    tokenRankChartRef.value,
-    pointsRankChartRef.value,
-    trendChartRef.value,
-  ].forEach((el) => {
-    if (el) resizeObserver?.observe(el)
+function handleOpenTodo(payload: { id: string; date: string }) {
+  void router.push({
+    name: 'Home',
+    query: { todo: payload.id, date: payload.date },
   })
+}
+
+const mobileSidebarMedia = window.matchMedia('(max-width: 760px)')
+
+function syncSidebarForViewport(event?: MediaQueryListEvent) {
+  const isMobile = event?.matches ?? mobileSidebarMedia.matches
+  if (isMobile) sidebarCollapsed.value = false
+}
+
+onMounted(() => {
+  syncSidebarForViewport()
+  mobileSidebarMedia.addEventListener('change', syncSidebarForViewport)
 })
 
 onBeforeUnmount(() => {
-  clearActionToastTimer()
-  resizeObserver?.disconnect()
-  chartInstances.forEach((chart) => chart.dispose())
-  chartInstances.clear()
+  mobileSidebarMedia.removeEventListener('change', syncSidebarForViewport)
 })
 </script>
 
+<template>
+  <div class="agent-center-page">
+    <DashboardTopBar @open-todo="handleOpenTodo" />
+
+    <main
+      class="agent-center-shell"
+      :class="{ 'is-sidebar-collapsed': sidebarCollapsed }"
+    >
+    <Transition
+      enter-active-class="toast-enter-active"
+      enter-from-class="toast-enter-from"
+      enter-to-class="toast-enter-to"
+      leave-active-class="toast-leave-active"
+      leave-from-class="toast-leave-from"
+      leave-to-class="toast-leave-to"
+    >
+      <div v-if="actionToast" class="agent-toast" role="status">
+        {{ actionToast }}
+      </div>
+    </Transition>
+
+    <aside class="agent-sidebar" aria-label="Agent Center 导航">
+      <nav class="sidebar-nav" aria-label="主要导航">
+        <template v-for="item in primaryNav" :key="item.label">
+          <div v-if="item.label === '智能体 Agent'" class="sidebar-link-row">
+            <button
+              type="button"
+              class="sidebar-link"
+              :class="{ active: item.active }"
+              :aria-label="item.label"
+              :title="sidebarCollapsed ? item.label : undefined"
+              @click="handleNav(item.label)"
+            >
+              <component :is="item.icon" class="sidebar-link-icon" />
+              <span class="sidebar-link-label">{{ item.label }}</span>
+            </button>
+
+            <button
+              type="button"
+              class="sidebar-collapse-toggle"
+              :aria-label="sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'"
+              :aria-expanded="!sidebarCollapsed"
+              @click="toggleSidebar"
+            >
+              <span class="sidebar-collapse-toggle-icon" aria-hidden="true">
+                <IconPanelLeftClose v-if="!sidebarCollapsed" />
+                <IconPanelLeftOpen v-else />
+              </span>
+            </button>
+          </div>
+
+          <button
+            v-else
+            type="button"
+            class="sidebar-link"
+            :class="{ active: item.active }"
+            :aria-label="item.label"
+            :title="sidebarCollapsed ? item.label : undefined"
+            @click="handleNav(item.label)"
+          >
+            <component :is="item.icon" class="sidebar-link-icon" />
+            <span class="sidebar-link-label">{{ item.label }}</span>
+          </button>
+        </template>
+      </nav>
+
+      <div class="sidebar-divider" />
+
+      <nav class="sidebar-nav sidebar-nav-secondary" aria-label="辅助导航">
+        <button
+          v-for="item in secondaryNav"
+          :key="item.label"
+          type="button"
+          class="sidebar-link"
+          :aria-label="item.label"
+          :title="sidebarCollapsed ? item.label : undefined"
+          @click="handleNav(item.label)"
+        >
+          <component :is="item.icon" class="sidebar-link-icon" />
+          <span class="sidebar-link-label">{{ item.label }}</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-spacer" />
+
+      <button
+        type="button"
+        class="make-agent-card"
+        :class="{ 'is-icon-only': sidebarCollapsed }"
+        :style="sidebarCollapsed ? undefined : { backgroundImage: `url(${makeUrl})` }"
+        :aria-label="sidebarCollapsed ? '创建专属智能体' : undefined"
+        @click="createAgent"
+      >
+        <span class="sr-only">创建专属智能体</span>
+        <span v-if="sidebarCollapsed" class="make-agent-icon-only" aria-hidden="true">
+          <IconPlus />
+        </span>
+        <span v-else class="make-agent-action">
+          <IconPlus />
+          创建智能体
+        </span>
+      </button>
+    </aside>
+
+    <section class="agent-main">
+      <header class="main-header">
+        <div class="header-intro">
+          <h1 class="page-title">智体中心</h1>
+
+          <div class="metric-row" aria-label="Token 用量概览">
+            <article class="metric-card token-card">
+              <div class="token-card-head">
+                <div class="token-card-meta">
+                  <p>本月 Token 额度</p>
+                  <strong>
+                    {{ tokenUsage.remainingLabel }}
+                    <span class="token-total">/ {{ tokenUsage.quotaLabel }}</span>
+                  </strong>
+                </div>
+                <span class="metric-icon metric-blue">
+                  <IconCoins />
+                </span>
+              </div>
+              <div class="token-progress">
+                <div
+                  class="token-progress-bar"
+                  role="progressbar"
+                  :aria-valuenow="tokenUsage.usedPercent"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                >
+                  <span
+                    class="token-progress-fill"
+                    :class="{ 'is-low': tokenUsage.isRunningLow }"
+                    :style="{ width: `${tokenUsage.usedPercent}%` }"
+                  />
+                </div>
+                <span class="token-progress-meta">已用 {{ tokenUsage.usedPercent }}%</span>
+              </div>
+            </article>
+
+            <article class="metric-card token-card">
+              <div class="token-card-head">
+                <div class="token-card-meta">
+                  <p>今日消耗</p>
+                  <strong>{{ tokenUsage.todayLabel }} <span class="token-unit">Tokens</span></strong>
+                </div>
+                <span class="metric-icon metric-teal">
+                  <IconActivity />
+                </span>
+              </div>
+              <span
+                class="token-trend"
+                :class="tokenUsage.todayTrendUp ? 'is-up' : 'is-down'"
+              >
+                <IconTrendingUp v-if="tokenUsage.todayTrendUp" />
+                <IconTrendingDown v-else />
+                较昨日 {{ tokenUsage.todayTrendUp ? '+' : '' }}{{ tokenUsage.todayDelta }}%
+              </span>
+            </article>
+          </div>
+        </div>
+
+        <div class="header-cluster">
+          <div class="utility-row">
+            <label class="search-box">
+              <span class="sr-only">搜索智能体或能力</span>
+              <input
+                v-model="searchKeyword"
+                type="search"
+                placeholder="搜索智能体或能力..."
+                autocomplete="off"
+              >
+              <IconSearch class="search-icon" />
+            </label>
+          </div>
+        </div>
+      </header>
+
+      <!-- banner 暂时隐藏
+      <section
+        class="hero-banner"
+        :style="{ backgroundImage: `url(${bannerUrl})` }"
+        aria-label="AI 赋能，智能无限"
+      />
+      -->
+
+      <section class="catalog-toolbar" aria-label="智能体筛选">
+        <div class="category-tabs" role="tablist" aria-label="分类筛选">
+          <button
+            v-for="tab in categoryTabs"
+            :key="tab.key"
+            type="button"
+            class="category-tab"
+            :class="{ active: activeCategory === tab.key }"
+            role="tab"
+            :aria-selected="activeCategory === tab.key"
+            @click="selectCategory(tab.key)"
+          >
+            {{ tab.label }}
+            <span>{{ tab.count }}</span>
+          </button>
+        </div>
+
+        <button type="button" class="sort-button" @click="showToast('已按推荐排序')">
+          推荐排序
+          <IconChevronDown />
+        </button>
+      </section>
+
+      <section class="agent-grid" aria-label="智能体列表">
+        <button
+          v-for="agent in visibleAgents"
+          :key="agent.id"
+          type="button"
+          class="agent-card"
+          :class="{ selected: selectedAgent?.id === agent.id }"
+          @click="openAgent(agent)"
+        >
+          <div class="agent-card-body">
+            <span class="agent-icon" :class="getAgentVisual(agent).tone">
+              <component :is="getAgentVisual(agent).icon" />
+            </span>
+
+            <div class="agent-card-copy">
+              <div class="agent-card-title-row">
+                <h2>{{ agent.name }}</h2>
+                <span v-if="agent.recommended" class="favorite-mark" aria-label="推荐">
+                  <IconStar />
+                </span>
+              </div>
+              <p class="agent-description">{{ agent.description }}</p>
+            </div>
+          </div>
+
+          <div class="agent-card-footer">
+            <span class="status-pill" :class="statusClass(agent.permissionState)">
+              {{ permissionLabels[agent.permissionState] }}
+            </span>
+            <span class="agent-card-source">来自：{{ agent.category }}</span>
+          </div>
+        </button>
+
+        <button
+          v-if="shouldShowMoreAbility"
+          type="button"
+          class="agent-card more-ability-card"
+          @click="handleNav('能力 Skills')"
+        >
+          <div class="agent-card-body">
+            <span class="agent-icon icon-blue">
+              <IconPlus />
+            </span>
+
+            <div class="agent-card-copy">
+              <h2>更多能力</h2>
+              <p class="agent-description">更多智能体与技能正在路上，敬请期待。</p>
+            </div>
+          </div>
+
+          <img :src="moreAbilityUrl" alt="" class="more-ability-art" aria-hidden="true">
+
+          <div class="agent-card-footer">
+            <span class="status-placeholder" aria-hidden="true" />
+            <span class="agent-card-source">来自：智体中心</span>
+          </div>
+        </button>
+
+        <p v-if="visibleAgents.length === 0" class="empty-message">
+          没有匹配的智能体
+        </p>
+      </section>
+    </section>
+
+    <Transition
+      enter-active-class="panel-enter-active"
+      enter-from-class="panel-enter-from"
+      enter-to-class="panel-enter-to"
+      leave-active-class="panel-leave-active"
+      leave-from-class="panel-leave-from"
+      leave-to-class="panel-leave-to"
+    >
+      <aside v-if="selectedAgent" class="agent-detail-panel" aria-label="智能体详情">
+        <header>
+          <div>
+            <p>{{ selectedAgent.category }}</p>
+            <h2>{{ selectedAgent.name }}</h2>
+          </div>
+          <button type="button" aria-label="关闭详情" @click="closeAgentPanel">
+            <IconX />
+          </button>
+        </header>
+
+        <p class="detail-description">{{ selectedAgent.description }}</p>
+
+        <section>
+          <h3>适用场景</h3>
+          <div class="detail-tags">
+            <span v-for="scenario in selectedAgent.scenarios" :key="scenario">
+              {{ scenario }}
+            </span>
+          </div>
+        </section>
+
+        <footer>
+          <button type="button" class="detail-secondary" @click="closeAgentPanel">关闭</button>
+          <button type="button" class="detail-primary" @click="launchAgent(selectedAgent)">
+            立即使用
+          </button>
+        </footer>
+      </aside>
+    </Transition>
+    </main>
+  </div>
+</template>
+
 <style scoped>
 .agent-center-page {
+  display: flex;
+  width: 100%;
+  height: 100vh;
+  flex-direction: column;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 78% 0%, rgba(207, 229, 255, 0.75) 0, transparent 360px),
+    linear-gradient(130deg, #f8fbff 0%, #edf6ff 52%, #f8fcff 100%);
+  color: #111827;
+  font-family:
+    Inter,
+    "PingFang SC",
+    "Microsoft YaHei",
+    system-ui,
+    sans-serif;
+}
+
+.agent-center-shell {
+  --sidebar-width: clamp(250px, 15vw, 288px);
+  --sidebar-collapsed-width: 76px;
+  --sidebar-card-margin: clamp(19px, 1.15vw, 22px);
+  --main-pad-top: clamp(17px, 1.9vh, 21px);
+  --main-pad-right: clamp(36px, 2.2vw, 42px);
+  --main-pad-bottom: 32px;
+  --main-pad-left: clamp(49px, 2.9vw, 56px);
+  --banner-height: clamp(260px, 26.5vh, 286px);
+  --toolbar-gap: clamp(14px, 1.55vh, 17px);
+  --grid-gap-x: 16px;
+  --grid-gap-y: 14px;
+  --agent-grid-columns: 4;
+  --agent-card-min-height: 132px;
+  --metric-card-width: clamp(269px, 16vw, 307px);
+  --metric-card-height: clamp(100px, 10.6vh, 116px);
   position: relative;
   display: flex;
-  flex-direction: column;
-  height: 100vh;
+  min-height: 0;
+  flex: 1;
+  width: 100%;
   overflow: hidden;
-  padding: 14px 18px;
-  color: #182044;
-  box-sizing: border-box;
-  font-family: Inter, 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
-  background: radial-gradient(circle at 18% 6%, rgba(77, 116, 255, 0.13), transparent 28%),
-    radial-gradient(circle at 75% 12%, rgba(21, 185, 130, 0.09), transparent 28%),
-    linear-gradient(180deg, #f8fbff 0%, #f4f7fc 100%);
 }
 
-.center-toast {
-  position: fixed;
-  z-index: 30;
-  top: 18px;
-  left: 50%;
-  min-height: 38px;
-  box-sizing: border-box;
-  border-radius: 999px;
-  background: rgba(24, 32, 68, 0.94);
-  color: #ffffff;
-  padding: 0 18px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  font-weight: 800;
-  line-height: 1.2;
-  box-shadow: 0 18px 34px rgba(31, 45, 86, 0.18);
-  transform: translateX(-50%);
-  pointer-events: none;
-}
-
-.center-toast-fade-enter-active,
-.center-toast-fade-leave-active {
+.agent-sidebar {
+  position: relative;
+  display: flex;
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
+  flex-direction: column;
+  overflow: hidden;
+  background: rgba(252, 253, 255, 0.78);
   transition:
-    opacity 0.18s ease,
-    transform 0.18s ease;
+    width 240ms ease,
+    min-width 240ms ease;
 }
 
-.center-toast-fade-enter-from,
-.center-toast-fade-leave-to {
-  opacity: 0;
-  transform: translate(-50%, -8px);
-}
-
-.topbar,
-.brand,
-.top-actions,
-.user,
-.panel-head {
+.sidebar-link-row {
   display: flex;
   align-items: center;
+  gap: 8px;
 }
 
-.topbar {
-  flex: 0 0 auto;
-  height: 48px;
-  justify-content: space-between;
-  margin-bottom: 8px;
+.sidebar-link-row .sidebar-link {
+  flex: 1;
+  min-width: 0;
 }
 
-.brand {
-  gap: 12px;
-}
-
-.brand-logo {
-  width: 40px;
-  height: 40px;
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-  background: transparent;
-  overflow: hidden;
-}
-
-.brand-logo img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  display: block;
-}
-
-.brand-title {
-  font-size: 20px;
-  font-weight: 800;
-}
-
-.brand-subtitle,
-.panel-head p {
-  margin: 3px 0 0;
-  color: #6c7390;
-  font-size: 12px;
-  line-height: 1.2;
-}
-
-.top-actions {
+.is-sidebar-collapsed .sidebar-link-row {
+  flex-direction: column;
   gap: 10px;
 }
 
-.notification-wrap {
+.is-sidebar-collapsed .sidebar-link-row .sidebar-collapse-toggle {
+  order: -1;
+}
+
+.is-sidebar-collapsed .sidebar-link-row .sidebar-link {
+  width: 100%;
+}
+
+.sidebar-collapse-toggle {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(207, 224, 248, 0.95);
+  border-radius: 11px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(244, 249, 255, 0.98) 100%);
+  color: #355a8f;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 6px 16px rgba(93, 130, 181, 0.1);
+  padding: 0;
+  transition:
+    background 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+.sidebar-collapse-toggle-icon {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+}
+
+.sidebar-collapse-toggle-icon svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.35;
+}
+
+.sidebar-collapse-toggle:hover,
+.sidebar-collapse-toggle:focus-visible {
+  border-color: rgba(122, 168, 255, 0.55);
+  background:
+    linear-gradient(180deg, #ffffff 0%, #edf4ff 100%);
+  color: #075df4;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 0 0 3px rgba(42, 125, 255, 0.1),
+    0 8px 18px rgba(61, 122, 211, 0.14);
+  outline: none;
+}
+
+.sidebar-collapse-toggle:active {
+  transform: translateY(1px);
+}
+
+.is-sidebar-collapsed {
+  --sidebar-width: var(--sidebar-collapsed-width);
+}
+
+.is-sidebar-collapsed .sidebar-nav {
+  margin: 28px 10px 0;
+}
+
+.is-sidebar-collapsed .sidebar-link-label,
+.is-sidebar-collapsed .make-agent-action {
+  max-width: 0;
+  opacity: 0;
+}
+
+.sidebar-nav {
+  display: grid;
+  gap: 10px;
+  margin: 32px 19px 0;
+  transition: margin 240ms ease;
+}
+
+.sidebar-nav-secondary {
+  margin-top: 24px;
+}
+
+.sidebar-link {
+  display: flex;
+  height: 52px;
+  width: 100%;
+  align-items: center;
+  gap: 15px;
+  border: 0;
+  border-radius: 13px;
+  background: transparent;
+  padding: 0 18px;
+  color: #31527f;
+  font-size: 16px;
+  font-weight: 650;
+  text-align: left;
+  transition:
+    background 160ms ease,
+    color 160ms ease,
+    transform 160ms ease,
+    padding 240ms ease,
+    gap 240ms ease;
+}
+
+.is-sidebar-collapsed .sidebar-link {
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+}
+
+.sidebar-link-label {
+  max-width: 160px;
+  overflow: hidden;
+  white-space: nowrap;
+  transition:
+    opacity 180ms ease,
+    max-width 240ms ease;
+}
+
+.sidebar-link:hover,
+.sidebar-link:focus-visible {
+  color: #075df4;
+  outline: none;
+}
+
+.sidebar-link:active {
+  transform: translateY(1px);
+}
+
+.sidebar-link.active {
+  color: #0862ff;
+  font-weight: 800;
+}
+
+.sidebar-link-icon {
+  width: 22px;
+  height: 22px;
+  stroke-width: 2.4;
+}
+
+.sidebar-divider {
+  height: 1px;
+  margin: 24px 28px 0;
+  background: #e9f0fa;
+  transition: margin 240ms ease;
+}
+
+.is-sidebar-collapsed .sidebar-divider {
+  margin: 24px 14px 0;
+}
+
+.sidebar-spacer {
+  flex: 1;
+  min-height: 24px;
+}
+
+.make-agent-card {
+  position: relative;
+  display: block;
+  width: auto;
+  height: clamp(243px, 25.9vh, 280px);
+  margin: 0 var(--sidebar-card-margin) 16px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 15px;
+  background-position: center;
+  background-size: cover;
+  box-shadow: 0 18px 35px rgba(33, 116, 244, 0.22);
+  transition:
+    height 240ms ease,
+    margin 240ms ease,
+    box-shadow 240ms ease;
+}
+
+.make-agent-card.is-icon-only {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 16px;
+  place-items: center;
+  border-radius: 13px;
+  background: linear-gradient(145deg, #53a0ff 0%, #0763ff 100%);
+  box-shadow: 0 10px 24px rgba(30, 111, 255, 0.28);
+}
+
+.make-agent-icon-only {
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+}
+
+.make-agent-icon-only svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 2.8;
+}
+
+.make-agent-card:focus-visible {
+  outline: 3px solid rgba(35, 112, 255, 0.34);
+  outline-offset: 3px;
+}
+
+.make-agent-action {
+  position: absolute;
+  top: clamp(86px, 9.2vh, 99px);
+  left: clamp(22px, 1.3vw, 25px);
+  display: inline-flex;
+  height: clamp(35px, 3.8vh, 41px);
+  min-width: clamp(128px, 7.7vw, 148px);
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #0966ff;
+  font-size: 14px;
+  font-weight: 800;
+  box-shadow: 0 10px 24px rgba(22, 100, 225, 0.16);
+  overflow: hidden;
+  white-space: nowrap;
+  transition:
+    opacity 180ms ease,
+    max-width 240ms ease;
+}
+
+.make-agent-action svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 3;
+}
+
+.agent-main {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+  padding: var(--main-pad-top) var(--main-pad-right) var(--main-pad-bottom) var(--main-pad-left);
+}
+
+.main-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 28px;
+}
+
+.header-intro {
+  display: grid;
+  gap: 14px;
+}
+
+.page-title {
+  margin: 0;
+  color: #101827;
+  font-size: 30px;
+  font-weight: 900;
+  line-height: 1.18;
+  letter-spacing: 0;
+}
+
+.header-cluster {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+}
+
+.utility-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.search-box {
+  position: relative;
+  display: block;
+  width: clamp(302px, 18vw, 346px);
+}
+
+.search-box input {
+  width: 100%;
+  height: 42px;
+  border: 1px solid rgba(219, 230, 248, 0.95);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 8px 22px rgba(93, 130, 181, 0.12);
+  color: #17345f;
+  font-size: 14px;
+  font-weight: 600;
+  outline: none;
+  padding: 0 48px 0 23px;
+}
+
+.search-box input::placeholder {
+  color: #7892b7;
+}
+
+.search-box input:focus {
+  border-color: rgba(50, 122, 255, 0.45);
+  box-shadow: 0 8px 22px rgba(93, 130, 181, 0.12);
+}
+
+.search-icon {
+  position: absolute;
+  top: 11px;
+  right: 18px;
+  width: 20px;
+  height: 20px;
+  color: #153b76;
+  stroke-width: 2.5;
+}
+
+.metric-row {
+  display: grid;
+  grid-template-columns: repeat(2, var(--metric-card-width));
+  gap: clamp(13px, 0.8vw, 15px);
+}
+
+.metric-card {
+  display: flex;
+  height: var(--metric-card-height);
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(227, 236, 250, 0.95);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 13px 30px rgba(83, 120, 171, 0.12);
+  padding: 16px 18px;
+}
+
+.token-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.token-card-meta {
+  min-width: 0;
+}
+
+.metric-card p {
+  margin: 0 0 8px;
+  color: #607ba3;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.metric-card strong {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  color: #091325;
+  font-size: 27px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.token-total {
+  color: #93a9c9;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.token-unit {
+  color: #93a9c9;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.metric-icon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 13px;
+}
+
+.metric-icon svg {
+  width: 23px;
+  height: 23px;
+  stroke-width: 2.5;
+}
+
+.metric-blue {
+  background: #eef5ff;
+  color: #126cff;
+}
+
+.metric-teal {
+  background: #ecfbfa;
+  color: #19bcae;
+}
+
+.token-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.token-progress-bar {
+  position: relative;
+  height: 7px;
+  flex: 1;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e9eef7;
+}
+
+.token-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #4c9dff 0%, #0966ff 100%);
+  transition: width 360ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.token-progress-fill.is-low {
+  background: linear-gradient(90deg, #ffb24c 0%, #f97316 100%);
+}
+
+.token-progress-meta {
+  flex-shrink: 0;
+  color: #607ba3;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.token-trend {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.token-trend svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.6;
+}
+
+.token-trend.is-up {
+  color: #ef6b53;
+}
+
+.token-trend.is-down {
+  color: #10a87c;
+}
+
+.hero-banner {
+  flex: 0 0 auto;
+  height: var(--banner-height);
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.95);
+  border-radius: 17px;
+  background: #dff0ff;
+  background-position: center 42%;
+  background-repeat: no-repeat;
+  background-size: cover;
+  box-shadow: 0 18px 35px rgba(51, 125, 229, 0.16);
+}
+
+.catalog-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: calc(var(--toolbar-gap) + 16px);
+  margin-bottom: 12px;
+}
+
+.category-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.category-tab,
+.sort-button {
+  border: 0;
+  background: transparent;
+  transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.category-tab {
+  display: inline-flex;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 0 16px;
+  font-size: 15px;
+  font-weight: 500;
+  color: #64748b;
   position: relative;
 }
 
-.top-icon {
-  width: 38px;
+.category-tab::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 2px;
+  background-color: #2563eb;
+  transition: width 200ms ease;
+  border-radius: 2px 2px 0 0;
+}
+
+.category-tab span {
+  display: inline-flex;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0 7px;
+  margin-left: 2px;
+  transition: all 200ms ease;
+}
+
+.category-tab.active {
+  color: #2563eb;
+  font-weight: 700;
+}
+
+.category-tab.active::after {
+  width: 100%;
+}
+
+.category-tab.active span {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.category-tab:hover:not(.active) {
+  color: #2563eb;
+}
+
+.category-tab:hover:not(.active) span {
+  background: #e0e7ff;
+  color: #2563eb;
+}
+
+.category-tab:focus-visible,
+.sort-button:focus-visible {
+  outline: 2px solid rgba(15, 23, 42, 0.2);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.category-tab:active,
+.sort-button:active {
+  transform: scale(0.97);
+}
+
+.sort-button {
+  display: inline-flex;
   height: 38px;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.74);
-  color: #263158;
-  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.2);
-  cursor: pointer;
-  transition:
-    border-color 0.18s ease,
-    background 0.18s ease,
-    box-shadow 0.18s ease,
-    transform 0.18s ease;
-}
-
-.top-icon:hover {
-  border-color: rgba(79, 124, 255, 0.28);
+  min-width: 130px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 600;
   background: #ffffff;
-  box-shadow: 0 10px 22px rgba(31, 45, 86, 0.08);
-  transform: translateY(-1px);
+  color: #0f172a;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  border: 1px solid #e2e8f0;
 }
 
-.top-icon svg {
+.sort-button:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+}
+
+.sort-button svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2;
+}
+
+.agent-grid {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: repeat(var(--agent-grid-columns), minmax(0, 1fr));
+  align-content: start;
+  gap: var(--grid-gap-y) var(--grid-gap-x);
+  min-height: 0;
+  margin-top: 12px;
+  overflow-y: auto;
+  padding: 4px 4px 8px 0;
+}
+
+.agent-grid::-webkit-scrollbar {
+  width: 8px;
+}
+
+.agent-grid::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.agent-grid::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: rgba(125, 157, 204, 0.42);
+  background-clip: padding-box;
+}
+
+.agent-card {
+  position: relative;
+  display: flex;
+  min-height: var(--agent-card-min-height);
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(225, 235, 249, 0.95);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 13px 28px rgba(91, 131, 184, 0.1);
+  padding: 16px 16px 14px;
+  color: inherit;
+  text-align: left;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.agent-card:hover,
+.agent-card:focus-visible {
+  border-color: rgba(63, 137, 255, 0.42);
+  box-shadow: 0 18px 34px rgba(61, 122, 211, 0.16);
+  outline: none;
+  transform: translateY(-2px);
+}
+
+.agent-card.selected {
+  border-color: rgba(28, 111, 255, 0.72);
+  box-shadow:
+    0 0 0 3px rgba(42, 125, 255, 0.13),
+    0 18px 34px rgba(61, 122, 211, 0.16);
+}
+
+.agent-card-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.agent-card-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.agent-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 50%;
+}
+
+.agent-icon svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.7;
+}
+
+.icon-blue {
+  background: #eaf4ff;
+  color: #126cff;
+}
+
+.icon-teal {
+  background: #e9fbf7;
+  color: #19bfae;
+}
+
+.icon-orange {
+  background: #fff2e5;
+  color: #ff7a00;
+}
+
+.icon-cyan {
+  background: #e8fbff;
+  color: #16b9c1;
+}
+
+.favorite-mark {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 50%;
+  background: #fff7e6;
+  color: #f6a400;
+}
+
+.favorite-mark svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+  stroke-width: 2;
+}
+
+.agent-card h2 {
+  margin: 0;
+  color: #101827;
+  font-size: 15px;
+  font-weight: 900;
+  line-height: 1.3;
+}
+
+.agent-description {
+  display: -webkit-box;
+  margin: 6px 0 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  color: #395982;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.agent-card-source {
+  color: #6d83a8;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.detail-tags span {
+  display: inline-flex;
+  height: 22px;
+  align-items: center;
+  border-radius: 7px;
+  background: #edf5ff;
+  color: #42628d;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0 8px;
+}
+
+.agent-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: auto;
+  padding-top: 12px;
+}
+
+.status-pill {
+  display: inline-flex;
+  height: 18px;
+  align-items: center;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 0 7px;
+}
+
+.status-pill.is-available {
+  background: #d8f8ed;
+  color: #10a87c;
+}
+
+.status-pill.is-pending {
+  background: #fff0d7;
+  color: #f39419;
+}
+
+.more-ability-card {
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.more-ability-card .agent-description {
+  max-width: 100%;
+}
+
+.more-ability-art {
+  position: absolute;
+  right: -6px;
+  bottom: -8px;
+  width: clamp(88px, 28%, 108px);
+  pointer-events: none;
+}
+
+.status-placeholder {
+  display: block;
+  width: 1px;
+  height: 24px;
+}
+
+.empty-message {
+  grid-column: 1 / -1;
+  margin: 40px 0;
+  color: #6d83a8;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.agent-toast {
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  z-index: 80;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: #0f1a2f;
+  box-shadow: 0 14px 32px rgba(15, 26, 47, 0.18);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 9px 17px;
+}
+
+.agent-detail-panel {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  z-index: 60;
+  display: flex;
+  width: min(360px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(222, 233, 249, 0.96);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 24px 62px rgba(32, 65, 116, 0.22);
+  padding: 22px;
+}
+
+.agent-detail-panel header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.agent-detail-panel header p {
+  margin: 0 0 8px;
+  color: #126cff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.agent-detail-panel header h2 {
+  margin: 0;
+  color: #101827;
+  font-size: 24px;
+  font-weight: 900;
+}
+
+.agent-detail-panel header button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: #f2f7ff;
+  color: #49658f;
+}
+
+.agent-detail-panel header button svg {
   width: 18px;
   height: 18px;
 }
 
-.notification-badge {
-  position: absolute;
-  top: -7px;
-  right: -6px;
-  min-width: 19px;
-  height: 19px;
-  padding: 0 5px;
-  border: 2px solid #ffffff;
-  border-radius: 999px;
-  background: #e3345f;
-  color: #ffffff;
-  font-size: 11px;
-  font-weight: 800;
-  line-height: 15px;
-  text-align: center;
-}
-
-.user {
-  gap: 9px;
-  padding-left: 8px;
-}
-
-.user-avatar {
-  width: 38px;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: #e8efff;
-  color: #2458ff;
-  font-size: 15px;
-  font-weight: 800;
-}
-
-.card {
-  border: 1px solid rgba(164, 175, 204, 0.22);
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.82);
-  box-shadow: 0 18px 45px rgba(31, 45, 86, 0.08);
-  backdrop-filter: blur(18px);
-}
-
-.summary-strip {
-  flex: 0 0 auto;
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 10px;
-  margin-bottom: 10px;
-  padding: 8px 12px;
-}
-
-.summary-strip article {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) 74px;
-  align-items: center;
-  gap: 8px;
-  min-height: 46px;
-}
-
-.summary-icon {
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border-radius: 14px;
-  background: #eef4ff;
-}
-
-.summary-copy {
-  min-width: 0;
-}
-
-.summary-strip span {
-  color: #69718d;
-  font-size: 11px;
-  line-height: 1.1;
-}
-
-.summary-strip b {
-  display: block;
-  margin-top: 2px;
-  overflow: hidden;
-  font-size: 15px;
-  line-height: 1.1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.summary-strip em {
-  margin-left: 3px;
-  font-size: 13px;
-  font-style: normal;
-}
-
-.summary-strip p {
-  margin: 2px 0 0;
-  color: #0ca768;
-  font-size: 10px;
-  line-height: 1.1;
-}
-
-.mini-chart {
-  width: 74px;
-  height: 28px;
-}
-
-.main-grid {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(500px, 560px);
-  gap: 12px;
-  align-items: stretch;
-}
-
-.panel-head {
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-
-.panel-head.small {
-  margin-bottom: 8px;
-}
-
-.panel-head h2 {
-  margin: 0;
-  font-size: 17px;
-}
-
-.panel-head h2 span {
-  margin-left: 6px;
-  color: #69718d;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.panel-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: flex-end;
-}
-
-.sort-select {
-  width: 176px;
-}
-
-.category-select,
-.permission-select {
-  width: 126px;
-}
-
-.period-select {
-  width: 96px;
-}
-
-.soft-search {
-  width: 180px;
-  height: 38px;
-  box-sizing: border-box;
-  border: 1px solid rgba(151, 164, 198, 0.28);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.9);
-  color: #263158;
-  padding: 0 14px;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 700;
-  outline: none;
-  box-shadow: 0 8px 20px rgba(31, 45, 86, 0.04);
-  transition:
-    border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    background 0.18s ease;
-}
-
-.soft-search::placeholder {
-  color: #8b94ad;
-}
-
-.soft-search:focus {
-  border-color: rgba(79, 124, 255, 0.72);
-  background: #ffffff;
-  box-shadow: 0 0 0 3px rgba(79, 124, 255, 0.12);
-}
-
-.soft-select {
-  height: 38px;
-  padding: 0 12px 0 14px;
-  border: 1px solid rgba(151, 164, 198, 0.28);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.88);
-  color: #263158;
-  display: inline-flex;
-  justify-content: space-between;
-  font-size: 13px;
-  font-weight: 700;
-  box-shadow: 0 8px 20px rgba(31, 45, 86, 0.04);
-  cursor: pointer;
-  outline: none;
-  transition:
-    border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    background-color 0.18s ease;
-}
-
-.soft-select:hover {
-  border-color: rgba(79, 124, 255, 0.48);
-  background-color: #ffffff;
-  color: #263158;
-}
-
-.soft-select:focus,
-.soft-select:focus-visible,
-.soft-select[aria-expanded='true'] {
-  border-color: rgba(79, 124, 255, 0.72);
-  box-shadow: 0 0 0 3px rgba(79, 124, 255, 0.12);
-}
-
-.agent-panel,
-.overview-card,
-.rank-card,
-.trend-card {
-  padding: 12px;
-}
-
-.overview-card {
-  display: flex;
-  min-height: 0;
-  flex-direction: column;
-}
-
-.agent-panel {
-  display: flex;
-  min-height: 0;
-  flex-direction: column;
-}
-
-.agent-grid {
-  flex: 1 1 auto;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  min-height: 0;
-}
-
-.agent-card {
-  min-height: 0;
-  padding: 11px;
-  overflow: hidden;
-  border: 1px solid rgba(144, 156, 190, 0.18);
-  border-radius: 18px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(250, 252, 255, 0.86));
-  box-shadow: 0 12px 26px rgba(39, 52, 97, 0.06);
-  display: flex;
-  flex-direction: column;
-  transition: 0.18s ease;
-}
-
-.agent-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 18px 36px rgba(39, 52, 97, 0.1);
-}
-
-.agent-card.is-active {
-  border-color: rgba(47, 104, 255, 0.42);
-  box-shadow:
-    0 18px 36px rgba(39, 52, 97, 0.1),
-    0 0 0 3px rgba(47, 104, 255, 0.08);
-}
-
-.agent-top {
-  display: flex;
-  gap: 10px;
-}
-
-.agent-icon {
-  width: 36px;
-  height: 36px;
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  color: #fff;
-  font-size: 17px;
-  font-weight: 800;
-  border-radius: 13px;
-}
-
-.agent-card h3 {
-  margin: 0 0 4px;
-  font-size: 15px;
-}
-
-.agent-card p {
-  margin: 0;
-}
-
-.agent-top p {
-  height: 28px;
-  color: #69718d;
-  font-size: 12px;
-  line-height: 14px;
-}
-
-.tag-line {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  margin: 7px 0 7px;
-}
-
-.agent-tag {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 0;
-  height: 22px;
-  padding: 0 9px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.agent-tag.info {
-  background: rgba(79, 124, 255, 0.1);
-  color: #315fe7;
-}
-
-.agent-tag.success {
-  background: rgba(18, 185, 129, 0.12);
-  color: #0f996b;
-}
-
-.agent-tag.muted {
-  background: rgba(100, 116, 139, 0.1);
-  color: #64748b;
-}
-
-.agent-empty {
-  flex: 1 1 auto;
-  min-height: 240px;
-  border: 1px dashed rgba(151, 164, 198, 0.34);
-  border-radius: 18px;
-  background: rgba(248, 251, 255, 0.76);
-  display: grid;
-  place-content: center;
-  gap: 8px;
-  text-align: center;
-}
-
-.agent-empty h3,
-.agent-empty p {
-  margin: 0;
-}
-
-.agent-empty h3 {
-  color: #263158;
-  font-size: 16px;
-}
-
-.agent-empty p {
-  color: #6c7390;
-  font-size: 13px;
-}
-
-.agent-empty button {
-  justify-self: center;
-  min-height: 32px;
-  border: 1px solid rgba(79, 124, 255, 0.24);
-  border-radius: 999px;
-  background: #eff4ff;
-  color: #2458ff;
-  padding: 0 14px;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.agent-empty button:hover {
-  background: #dfe8ff;
-}
-
-.agent-metrics {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 12px;
-}
-
-.agent-metrics div {
-  display: grid;
-  gap: 4px;
-  color: #69718d;
-  font-size: 12px;
-}
-
-.agent-metrics b {
-  color: #1c2448;
-}
-
-.agent-progress {
-  height: 7px;
-  overflow: hidden;
-  margin-top: 8px;
-  border-radius: 999px;
-  background: #eef2fa;
-}
-
-.agent-progress span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, #2f68ff, #765cff);
-}
-
-.agent-actions {
-  margin-top: auto;
-  padding-top: 10px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-}
-
-.agent-actions button {
-  height: 34px;
-  min-width: 0;
-  border: 1px solid transparent;
-  border-radius: 12px;
-  padding: 0 12px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 800;
-  line-height: 1;
-  cursor: pointer;
-  transition:
-    border-color 0.18s ease,
-    background 0.18s ease,
-    color 0.18s ease,
-    box-shadow 0.18s ease,
-    transform 0.18s ease;
-}
-
-.agent-actions svg {
-  width: 15px;
-  height: 15px;
-}
-
-.agent-use-btn {
-  background: #2458ff;
-  color: #ffffff;
-  box-shadow: 0 12px 22px rgba(47, 104, 255, 0.2);
-}
-
-.agent-use-btn:hover {
-  background: #1f49dd;
-  box-shadow: 0 14px 26px rgba(47, 104, 255, 0.26);
-  transform: translateY(-1px);
-}
-
-.agent-detail-btn {
-  min-width: 72px;
-  border-color: rgba(151, 164, 198, 0.28) !important;
-  background: rgba(255, 255, 255, 0.86);
-  color: #4f5879;
-}
-
-.agent-detail-btn:hover {
-  border-color: rgba(79, 124, 255, 0.38) !important;
-  background: #ffffff;
-  color: #2458ff;
-  transform: translateY(-1px);
-}
-
-.right-panel {
-  display: grid;
-  grid-template-rows: 250px minmax(0, 1fr) minmax(0, 1fr);
-  gap: 10px;
-  min-height: 0;
-}
-
-.agent-drawer {
-  position: fixed;
-  z-index: 40;
-  top: 76px;
-  right: 18px;
-  width: min(420px, calc(100vw - 36px));
-  max-height: calc(100vh - 96px);
-  overflow: auto;
-  box-sizing: border-box;
-  border: 1px solid rgba(151, 164, 198, 0.26);
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.96);
-  padding: 18px;
-  box-shadow: 0 28px 70px rgba(31, 45, 86, 0.18);
-  backdrop-filter: blur(18px);
-}
-
-.agent-drawer-fade-enter-active,
-.agent-drawer-fade-leave-active {
-  transition:
-    opacity 0.18s ease,
-    transform 0.18s ease;
-}
-
-.agent-drawer-fade-enter-from,
-.agent-drawer-fade-leave-to {
-  opacity: 0;
-  transform: translateX(16px);
-}
-
-.drawer-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid #eef2f8;
-}
-
-.drawer-head span {
-  color: #6c7390;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.drawer-head h2 {
-  margin: 5px 0 6px;
-  color: #182044;
-  font-size: 22px;
-}
-
-.drawer-head p {
-  margin: 0;
-  color: #4f5879;
-  font-size: 13px;
-  line-height: 1.45;
-}
-
-.drawer-head button {
-  width: 32px;
-  height: 32px;
-  border: 1px solid #e5ebf5;
-  border-radius: 999px;
-  background: #ffffff;
-  color: #64748b;
-  font: inherit;
-  font-size: 20px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.drawer-metrics {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin: 14px 0;
-}
-
-.drawer-metrics span {
-  min-width: 0;
-  border: 1px solid #eef2f8;
-  border-radius: 14px;
-  background: #f8fbff;
-  color: #6c7390;
-  padding: 10px;
-  display: grid;
-  gap: 5px;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.drawer-metrics b {
-  overflow: hidden;
-  color: #182044;
-  font-size: 15px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mock-use-panel,
-.drawer-section {
-  margin-top: 12px;
-  border-top: 1px solid #eef2f8;
-  padding-top: 12px;
-}
-
-.mock-use-panel {
-  border: 1px solid rgba(47, 104, 255, 0.12);
-  border-radius: 16px;
-  background: #f4f7ff;
-  padding: 12px;
-}
-
-.mock-use-panel h3,
-.drawer-section h3 {
-  margin: 0 0 8px;
-  color: #182044;
+.detail-description {
+  margin: 18px 0 22px;
+  color: #405d86;
   font-size: 14px;
-}
-
-.mock-use-panel p {
-  margin: 0 0 10px;
-  color: #4f5879;
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.mock-use-panel button {
-  min-height: 32px;
-  border: 0;
-  border-radius: 999px;
-  background: #2458ff;
-  color: #ffffff;
-  padding: 0 13px;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 850;
-  cursor: pointer;
-}
-
-.chip-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.chip-list span {
-  min-height: 26px;
-  border-radius: 999px;
-  background: #eef4ff;
-  color: #315fe7;
-  padding: 0 10px;
-  display: inline-flex;
-  align-items: center;
-  font-size: 12px;
-  font-weight: 850;
-}
-
-.drawer-section ul {
-  margin: 0;
-  padding-left: 18px;
-  color: #4f5879;
-  font-size: 13px;
+  font-weight: 600;
   line-height: 1.7;
 }
 
-.overview-grid {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(220px, 0.9fr) minmax(0, 1.35fr);
-  gap: 22px;
-  align-items: center;
-  padding: 2px 4px 4px;
+.agent-detail-panel h3 {
+  margin: 0 0 12px;
+  color: #101827;
+  font-size: 15px;
+  font-weight: 900;
 }
 
-.overview-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-content: center;
-  gap: 11px 14px;
+.detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.overview-list > div:not(.quota-row) {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 4px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid rgba(151, 164, 198, 0.18);
-}
-
-.overview-list span {
-  color: #69718d;
-  font-size: 12px;
-  line-height: 1.1;
-}
-
-.overview-list b {
-  grid-column: 1 / 2;
-  font-size: 18px;
-  line-height: 1;
-}
-
-.overview-list em {
-  grid-column: 1 / 2;
-  color: #69718d;
-  font-size: 11px;
-  font-style: normal;
-  line-height: 1.1;
-}
-
-.overview-list .green {
-  color: #0ca768;
-}
-
-.overview-list .red {
-  color: #e5484d;
-}
-
-.quota-row {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: center;
-  gap: 6px 10px;
-  margin-top: 2px;
-}
-
-.quota-progress {
-  grid-column: 1 / -1;
-  height: 8px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: #eef2fa;
-}
-
-.quota-progress span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, #2f68ff, #765cff);
-}
-
-.quota-row strong {
-  color: #182044;
-  font-size: 13px;
-  line-height: 1;
-}
-
-.donut-area {
-  display: grid;
-  grid-template-columns: 192px minmax(0, 1fr);
-  gap: 14px;
-  align-items: center;
-}
-
-.donut-chart {
-  width: 192px;
-  height: 192px;
-}
-
-.legend {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-content: center;
-  gap: 11px 12px;
-}
-
-.legend p {
-  display: grid;
-  grid-template-columns: 8px 1fr auto;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  margin: 0;
-  color: #4f5879;
-  font-size: 12px;
-  line-height: 1.1;
-}
-
-.legend span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.legend b {
-  white-space: nowrap;
-}
-
-.legend i {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-}
-
-.rank-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+.agent-detail-panel footer {
+  display: flex;
+  justify-content: flex-end;
   gap: 10px;
-  min-height: 0;
+  margin-top: 26px;
 }
 
-.rank-card {
-  display: flex;
-  min-height: 0;
-  flex-direction: column;
+.detail-secondary,
+.detail-primary {
+  height: 38px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 800;
+  padding: 0 17px;
 }
 
-.rank-chart {
-  flex: 1 1 auto;
-  min-height: 0;
+.detail-secondary {
+  border: 1px solid #dce9fb;
+  background: #ffffff;
+  color: #36567e;
 }
 
-.link-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
+.detail-primary {
   border: 0;
-  background: transparent;
-  color: #2f68ff;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.link-action svg {
-  width: 15px;
-  height: 15px;
-}
-
-.trend-card {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.trend-chart {
-  flex: 1 1 auto;
-  width: 100%;
-  min-height: 0;
-}
-
-.mode-tabs {
-  display: inline-grid;
-  grid-template-columns: repeat(2, 1fr);
-  overflow: hidden;
-  padding: 2px;
-  border: 1px solid rgba(151, 164, 198, 0.26);
-  border-radius: 15px;
-  background: #eef2fa;
-}
-
-.mode-tabs button {
-  min-width: 48px;
-  height: 30px;
-  border: 0;
-  border-radius: 12px;
-  background: transparent;
-  color: #6b7390;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  transition:
-    background 0.18s ease,
-    color 0.18s ease,
-    box-shadow 0.18s ease;
-}
-
-.mode-tabs button.active {
-  background: #2f68ff;
+  background: #0966ff;
   color: #ffffff;
-  box-shadow: 0 8px 18px rgba(47, 104, 255, 0.24);
+  box-shadow: 0 12px 24px rgba(17, 108, 255, 0.22);
 }
 
-.theme-blue {
-  background: linear-gradient(135deg, #1a84ff, #3f5dff);
-}
-.theme-green {
-  background: linear-gradient(135deg, #12b981, #11a36b);
-}
-.theme-purple {
-  background: linear-gradient(135deg, #7a5cff, #9b62ff);
-}
-.theme-orange {
-  background: linear-gradient(135deg, #ff7a1a, #ffb21f);
-}
-.theme-indigo {
-  background: linear-gradient(135deg, #24345d, #465782);
-}
-.theme-pink {
-  background: linear-gradient(135deg, #f4458d, #ff6cb2);
-}
-.theme-yellow {
-  background: linear-gradient(135deg, #f6a800, #ffca42);
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
 }
 
-@media (max-width: 1600px) {
-  .main-grid {
-    grid-template-columns: minmax(0, 1fr) 500px;
+.toast-enter-active,
+.toast-leave-active,
+.panel-enter-active,
+.panel-leave-active {
+  transition: all 200ms ease;
+}
+
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translate(-50%, -8px);
+}
+
+.toast-enter-to,
+.toast-leave-from {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.panel-enter-from,
+.panel-leave-to {
+  opacity: 0;
+  transform: translateX(18px);
+}
+
+.panel-enter-to,
+.panel-leave-from {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+@media (max-width: 1280px) {
+  .metric-row {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
   }
 
-  .summary-strip article {
-    grid-template-columns: 30px minmax(0, 1fr) 60px;
+  .agent-center-shell {
+    --agent-grid-columns: 3;
+  }
+}
+
+@media (max-width: 1024px) {
+  .agent-center-shell {
+    --sidebar-width: 220px;
+    --main-pad-top: 18px;
+    --main-pad-right: 24px;
+    --main-pad-bottom: 32px;
+    --main-pad-left: 24px;
+    --banner-height: 170px;
+    --agent-grid-columns: 3;
+    --agent-card-min-height: 148px;
+    overflow: hidden;
   }
 
-  .mini-chart {
-    width: 60px;
+  .agent-sidebar {
+    width: var(--sidebar-width);
+    min-width: var(--sidebar-width);
+  }
+
+  .agent-main {
+    padding: var(--main-pad-top) var(--main-pad-right) var(--main-pad-bottom) var(--main-pad-left);
+  }
+
+  .main-header {
+    flex-direction: column;
+    min-height: auto;
+    margin-bottom: 20px;
+  }
+
+  .header-cluster {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .utility-row {
+    justify-content: flex-end;
+  }
+
+  .metric-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .agent-center-shell {
+    --banner-height: 128px;
+    --agent-grid-columns: 2;
+    --agent-card-min-height: 152px;
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .agent-center-shell.is-sidebar-collapsed {
+    --sidebar-width: 100%;
+  }
+
+  .sidebar-collapse-toggle {
+    display: none;
+  }
+
+  .agent-sidebar {
+    width: 100%;
+    min-width: 0;
+    border-right: 0;
+    border-bottom: 1px solid rgba(220, 232, 250, 0.8);
+    padding-bottom: 14px;
+  }
+
+  .sidebar-nav {
+    display: flex;
+    overflow-x: auto;
+    margin: 20px 16px 0;
+    padding-bottom: 2px;
+  }
+
+  .sidebar-link {
+    width: auto;
+    min-width: fit-content;
+    padding: 0 16px;
+  }
+
+  .sidebar-divider,
+  .sidebar-nav-secondary,
+  .make-agent-card {
+    display: none;
+  }
+
+  .agent-main {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    padding: 18px 16px 28px;
+  }
+
+  .page-title {
+    font-size: 25px;
+  }
+
+  .utility-row {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 12px;
+  }
+
+  .search-box {
+    width: min(100%, 360px);
+  }
+
+  .metric-row {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-banner {
+    height: 168px;
+  }
+
+  .catalog-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .category-tabs {
+    gap: 10px;
+  }
+
+  .category-tab {
+    min-width: auto;
   }
 }
 </style>

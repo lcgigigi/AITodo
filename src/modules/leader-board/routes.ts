@@ -1,13 +1,13 @@
 import type { RouteRecordRaw } from 'vue-router'
 import { PERMISSIONS } from '@/shared/constants/permission'
 
-export const agentCenterRoutes: RouteRecordRaw[] = [
+export const leaderBoardRoutes: RouteRecordRaw[] = [
   {
-    path: '/agents',
-    name: 'AgentCenter',
+    path: '/leader-board',
+    name: 'LeaderBoard',
     component: () => import('./index.vue'),
     meta: {
-      title: '智能体中心',
+      title: '智能体排行榜',
       requiresAuth: true,
       permission: PERMISSIONS.AGENT_LIST_VIEW,
     },
