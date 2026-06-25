@@ -29,6 +29,10 @@ import {
   CalendarPrevButton,
 } from '.'
 
+defineOptions({
+  name: 'UiCalendar',
+})
+
 const props = withDefaults(
   defineProps<
     CalendarRootProps & {

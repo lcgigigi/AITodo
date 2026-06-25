@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Workbench V1.0</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        :root {
+            --primary: #165dff;
+            --primary-light: #e8f3ff;
+            --danger: #f53f3f;
+            --danger-light: #ffece8;
+            --success: #00b42a;
+            --success-light: #e8ffea;
+            --text-main: #1d2129;
+            --text-regular: #4e5969;
+            --text-secondary: #86909c;
+            --glass-bg: rgba(255, 255, 255, 0.55);
+            --glass-border: rgba(255, 255, 255, 0.9);
+            --glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.05);
+            --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+
+        body {
+            /* 注入背景图以激活真实的毛玻璃折射效果 */
+            background: url('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2800&auto=format&fit=crop') center/cover no-repeat;
+            height: 100vh;
+            overflow: hidden;
+            color: var(--text-main);
+            padding: 16px;
+            display: flex;
+            justify-content: center;
+        }
+
+        #app {
+            width: 100%;
+            max-width: 1600px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            height: 100%;
+        }
+
+        /* 核心毛玻璃类 */
+        .glass {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            box-shadow: var(--glass-shadow), var(--glass-highlight);
+            border-radius: 20px;
+        }
+
+        /* 顶部导航 */
+        .top-bar {
+            height: 64px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 24px;
+            border-radius: 32px;
+            flex-shrink: 0;
+        }
+
+        .logo-area { display: flex; align-items: center; gap: 12px; font-size: 18px; font-weight: 600; }
+        .logo-icon { width: 24px; height: 24px; background: var(--primary); border-radius: 6px; }
+
+        .nav-pills {
+            display: flex;
+            gap: 8px;
+            background: rgba(255,255,255,0.4);
+            padding: 4px;
+            border-radius: 100px;
+        }
+        .nav-item {
+            padding: 6px 20px;
+            border-radius: 100px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: var(--text-regular);
+        }
+        .nav-item.active { background: #fff; font-weight: 500; color: var(--text-main); box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+
+        .user-area { display: flex; align-items: center; gap: 12px; text-align: right; }
+        .avatar { width: 36px; height: 36px; border-radius: 50%; background: #d9d9d9; }
+
+        /* 主体网格 */
+        .main-layout {
+            display: grid;
+            grid-template-columns: 280px 1fr 340px;
+            gap: 16px;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* 左侧区域 */
+        .left-col { display: flex; flex-direction: column; gap: 16px; }
+        .visual-3d { flex: 1; border-radius: 24px; display: flex; align-items: center; justify-content: center; font-size: 14px; color: var(--text-secondary); background: rgba(255,255,255,0.3); border: 1px dashed rgba(255,255,255,0.6); }
+        .data-row { display: flex; gap: 12px; height: 180px; }
+        .chart-card { flex: 1; padding: 16px; display: flex; flex-direction: column; position: relative; }
+        .chart-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+        .chart-container { flex: 1; width: 100%; }
+
+        /* 中间待办区域 */
+        .center-col { padding: 24px; display: flex; flex-direction: column; border-radius: 24px; }
+        .header-title { font-size: 20px; font-weight: 600; margin-bottom: 6px; }
+        .header-sub { font-size: 12px; color: var(--text-secondary); margin-bottom: 20px; }
+        
+        .filters { display: flex; gap: 8px; margin-bottom: 16px; }
+        .filter-btn { padding: 6px 16px; border-radius: 16px; font-size: 13px; cursor: pointer; background: transparent; border: none; color: var(--text-regular); transition: 0.2s; }
+        .filter-btn.active { background: var(--primary); color: white; }
+        .filter-btn.urgent { color: var(--danger); }
+
+        .todo-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-right: 4px; }
+        .todo-item {
+            background: rgba(255,255,255,0.7);
+            border-radius: 16px;
+            padding: 16px;
+            border: 1px solid transparent;
+            transition: 0.3s;
+        }
+        .todo-item.expanded { background: var(--primary-light); border-color: rgba(22, 93, 255, 0.2); }
+        
+        .todo-main { display: flex; align-items: center; gap: 16px; cursor: pointer; }
+        .checkbox { width: 18px; height: 18px; border-radius: 4px; border: 1px solid #c9cdd4; cursor: pointer; display: flex; align-items: center; justify-content: center; background: white;}
+        .checkbox.checked { background: var(--primary); border-color: var(--primary); }
+        .checkbox.checked::after { content: "✓"; color: white; font-size: 12px; }
+        
+        .time { font-size: 15px; font-weight: 600; width: 45px; }
+        .info { flex: 1; }
+        .task-title { font-size: 14px; font-weight: 500; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+        .task-desc { font-size: 12px; color: var(--text-secondary); }
+        
+        .tag { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+        .tag.blue { background: var(--primary-light); color: var(--primary); }
+        .tag.red { background: var(--danger-light); color: var(--danger); }
+        .tag.green { background: var(--success-light); color: var(--success); }
+
+        .details-panel {
+            margin-top: 16px; margin-left: 80px; padding-top: 16px;
+            border-top: 1px dashed rgba(0,0,0,0.1);
+            display: grid; grid-template-columns: 70px 1fr; gap: 12px 8px;
+            font-size: 12px; color: var(--text-regular);
+        }
+
+        .input-bar {
+            margin-top: 16px; background: white; border-radius: 24px; padding: 6px 6px 6px 20px;
+            display: flex; align-items: center; gap: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+        .input-bar input { flex: 1; border: none; outline: none; font-size: 14px; }
+        .send-btn { width: 36px; height: 36px; border-radius: 50%; background: var(--primary); color: white; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center;}
+
+        /* 右侧区域 */
+        .right-col { display: flex; flex-direction: column; gap: 16px; }
+        .calendar-card { padding: 20px; border-radius: 24px; }
+        .mode-toggle { display: flex; background: rgba(255,255,255,0.5); border-radius: 20px; padding: 4px; margin-bottom: 16px; }
+        .mode-btn { flex: 1; text-align: center; padding: 6px; font-size: 12px; border-radius: 16px; cursor: pointer; color: var(--text-regular); }
+        .mode-btn.active { background: var(--primary); color: white; }
+        
+        .schedule-card { flex: 1; padding: 20px; border-radius: 24px; overflow-y: auto; }
+        .schedule-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+        .timeline { position: relative; padding-left: 12px; display: flex; flex-direction: column; gap: 24px;}
+        .timeline::before { content: ''; position: absolute; left: 16px; top: 4px; bottom: 0; width: 1px; background: #e5e6eb; }
+        .tl-item { position: relative; padding-left: 20px; }
+        .tl-dot { position: absolute; left: -2px; top: 4px; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--primary); background: white; z-index: 2;}
+        .tl-dot.success { border-color: var(--success); }
+        .tl-time { font-size: 12px; font-weight: 600; color: var(--text-main); margin-bottom: 4px; }
+        .tl-title { font-size: 13px; font-weight: 500; margin-bottom: 2px; }
+        .tl-desc { font-size: 11px; color: var(--text-secondary); }
+
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <header class="top-bar glass">
+        <div class="logo-area">
+            <svg class="logo-icon" viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>
+            早上好，admin
+        </div>
+        <div class="nav-pills">
+            <div v-for="nav in navs" :key="nav" :class="['nav-item', { active: currentNav === nav }]" @click="currentNav = nav">
+                {{ nav }}
+            </div>
+        </div>
+        <div class="user-area">
+            <div style="line-height: 1.2;">
+                <div style="font-size: 13px; font-weight: 600;">admin</div>
+                <div style="font-size: 11px; color: var(--text-secondary);">信息技术部</div>
+            </div>
+            <div class="avatar"></div>
+        </div>
+    </header>
+
+    <main class="main-layout">
+        <aside class="left-col">
+            <div class="visual-3d glass">3D 可视化区域占位</div>
+            <div class="data-row">
+                <div class="chart-card glass">
+                    <div class="chart-title">今日完成率</div>
+                    <div id="progressChart" class="chart-container"></div>
+                </div>
+                <div class="chart-card glass">
+                    <div class="chart-title">本周趋势</div>
+                    <div id="trendChart" class="chart-container"></div>
+                </div>
+            </div>
+        </aside>
+
+        <section class="center-col glass">
+            <div class="header-title">今日待办</div>
+            <div class="header-sub">2026年6月24日 周三 | 任务总数 24 | 已完成 5 | 待处理 16 | 高优先级 <span style="color:var(--danger)">3</span></div>
+            
+            <div class="filters">
+                <button class="filter-btn active">全部 (24)</button>
+                <button class="filter-btn">待处理 (16)</button>
+                <button class="filter-btn">已完成 (5)</button>
+                <button class="filter-btn urgent">高优先级 (3)</button>
+            </div>
+
+            <div class="todo-list">
+                <div v-for="(task, index) in tasks" :key="index" :class="['todo-item', { expanded: task.expanded }]">
+                    <div class="todo-main" @click="task.expanded = !task.expanded">
+                        <div :class="['checkbox', { checked: task.checked }]" @click.stop="task.checked = !task.checked"></div>
+                        <div class="time">{{ task.time }}</div>
+                        <div class="info">
+                            <div class="task-title">
+                                {{ task.title }}
+                                <span v-if="task.tag" :class="['tag', task.tagColor]">{{ task.tag }}</span>
+                            </div>
+                            <div class="task-desc">{{ task.desc }}</div>
+                        </div>
+                        <div v-if="task.statusTag" :class="['tag', task.statusColor]">{{ task.statusTag }}</div>
+                    </div>
+                    
+                    <div class="details-panel" v-if="task.expanded && task.details">
+                        <span style="color:var(--text-secondary)">项目:</span> <span>{{ task.details.project }}</span>
+                        <span style="color:var(--text-secondary)">协作人:</span> <span>{{ task.details.team }}</span>
+                        <span style="color:var(--text-secondary)">截止时间:</span> <span>{{ task.details.deadline }}</span>
+                        <span style="color:var(--text-secondary)">描述:</span> <span>{{ task.details.desc }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="input-bar">
+                <span style="font-size: 18px; color: #86909c;">+</span>
+                <input type="text" placeholder="一句话新增待办，AI 自动识别时间与任务类型...">
+                <button class="send-btn">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                </button>
+            </div>
+        </section>
+
+        <aside class="right-col">
+            <div class="calendar-card glass">
+                <div class="mode-toggle">
+                    <div class="mode-btn">总览模式</div>
+                    <div class="mode-btn active">工作模式</div>
+                </div>
+                <div style="text-align: center; font-weight: 600; font-size: 14px; margin-bottom: 16px;">2026年 6月</div>
+                <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; text-align: center; font-size: 12px; color: var(--text-secondary);">
+                    <div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div><div>日</div>
+                    <div style="grid-column: 1 / -1; height: 120px; display: flex; align-items: center; justify-content: center; border: 1px dashed rgba(0,0,0,0.1); border-radius: 8px; margin-top: 8px;">日历组件区域</div>
+                </div>
+            </div>
+
+            <div class="schedule-card glass">
+                <div class="schedule-header">
+                    <div style="font-size: 15px; font-weight: 600;">当日日程 <span style="font-size: 12px; font-weight: 400; color: var(--text-secondary); margin-left: 4px;">6月24日 周三</span></div>
+                    <span style="font-size: 12px; color: var(--primary); cursor: pointer;">全部日程 ></span>
+                </div>
+                <div class="timeline">
+                    <div class="tl-item">
+                        <div class="tl-dot"></div>
+                        <div class="tl-time">09:00</div>
+                        <div class="tl-title">智慧校园项目周例会</div>
+                        <div class="tl-desc">会议室 3A-01 · 王强、李文博等 5 人</div>
+                    </div>
+                    <div class="tl-item">
+                        <div class="tl-dot success"></div>
+                        <div class="tl-time">10:30</div>
+                        <div class="tl-title">教学楼网络设备巡检工单审批</div>
+                        <div class="tl-desc">线上审批 · 张晓明</div>
+                    </div>
+                    <div class="tl-item">
+                        <div class="tl-dot"></div>
+                        <div class="tl-time">13:30</div>
+                        <div class="tl-title">数据平台需求评审会</div>
+                        <div class="tl-desc">会议室 2B-01 · 陈凯、刘洋等 4 人</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </main>
+</div>
+
+<script>
+    const { createApp, ref, onMounted } = Vue;
+
+    createApp({
+        setup() {
+            const currentNav = ref('智能体工坊');
+            const navs = ['图文分析', '办事咨询', '会议纪要', 'PPT制作', '智能体工坊', '代码辅助'];
+            
+            const tasks = ref([
+                { time: '09:00', title: '智慧校园项目周例会', desc: '智慧校园建设项目', tag: '会议', tagColor: 'blue', statusTag: '高优先级', statusColor: 'red', checked: true, expanded: false },
+                { time: '15:00', title: '教务系统报表优化需求对接', desc: '教务信息优化项目', tag: '开发', tagColor: '', statusTag: '高优先级', statusColor: 'red', checked: true, expanded: true, 
+                  details: { project: '教务信息优化项目', team: '张晓明、李文博', deadline: '2026-06-26 18:00', desc: '反馈教务处对现有报表的使用问题，梳理优化需求，输出需求文档。' } },
+                { time: '16:30', title: '校园一卡通异常数据处理', desc: '校园卡系统', tag: '开发', tagColor: '', statusTag: '已完成', statusColor: 'green', checked: false, expanded: false }
+            ]);
+
+            onMounted(() => {
+                // 初始化左侧 ECharts 圆环
+                const progressChart = echarts.init(document.getElementById('progressChart'));
+                progressChart.setOption({
+                    series: [{
+                        type: 'pie', radius: ['65%', '85%'], avoidLabelOverlap: false,
+                        label: { show: true, position: 'center', formatter: '62%\n{sub|5/8 已完成}', rich: { sub: { fontSize: 10, color: '#86909c', lineHeight: 16 } }, fontSize: 24, fontWeight: 'bold', color: '#165dff' },
+                        data: [{ value: 62, itemStyle: { color: '#165dff' } }, { value: 38, itemStyle: { color: '#e5e6eb' } }]
+                    }]
+                });
+
+                // 初始化左侧 ECharts 折线图
+                const trendChart = echarts.init(document.getElementById('trendChart'));
+                trendChart.setOption({
+                    grid: { left: '0', right: '0', bottom: '0', top: '20px', containLabel: false },
+                    xAxis: { type: 'category', data: ['一', '二', '三', '四', '五', '六', '日'], axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: '#86909c', fontSize: 10 } },
+                    yAxis: { type: 'value', show: false },
+                    series: [{ data: [12, 10, 14, 24, 15, 18, 12], type: 'line', smooth: true, showSymbol: false, itemStyle: { color: '#165dff' }, lineStyle: { width: 3 }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(22,93,255,0.2)' }, { offset: 1, color: 'rgba(22,93,255,0)' }]) } }]
+                });
+            });
+
+            return { currentNav, navs, tasks };
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>

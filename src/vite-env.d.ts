@@ -8,6 +8,7 @@ interface ImportMetaEnv {
   readonly VITE_APP_MOCK: string
   readonly VITE_APP_PUBLIC_PATH: string
   readonly VITE_APP_AI_STREAM: string
+  readonly VITE_APP_SYS_MESSAGE_WS_BASE_URL?: string
 }
 
 interface ImportMeta {

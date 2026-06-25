@@ -2,10 +2,11 @@
 import { computed, ref, watch } from 'vue'
 import IconArrowLeft from '~icons/lucide/arrow-left'
 import IconCalendarPlus from '~icons/lucide/calendar-plus'
+import IconPlus from '~icons/lucide/plus'
 import IconX from '~icons/lucide/x'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import AppRive from '@/shared/components/animation/AppRive.vue'
+import AiParseStatus from './components/AiParseStatus.vue'
 import TodoAssigneeSelect from './components/TodoAssigneeSelect.vue'
 import TodoDatePicker from './components/TodoDatePicker.vue'
 import TodoDeadlineDateTimeRange from './components/TodoDeadlineDateTimeRange.vue'
@@ -21,10 +22,22 @@ import type {
 } from './types'
 import EventScheduleTime from './components/EventScheduleTime.vue'
 import {
+  eventTypeLabel,
+  filterEventsByStatus,
+  filterEventsByType,
+  isMeetingEvent,
+  scheduledTimePresets,
+  shouldShowEventMeta,
+  specialText,
+  statusText,
+  type PanelMode,
+  type ParsedHighlightField,
+  type TodoStatusFilter,
+  type TodoTypeFilter,
+} from './dayPreviewPanel.helpers'
+import {
   addDays,
-  formatFormDateTime,
   getRejectedTodoMessage,
-  getTodoStatusLabel,
   isRangeEvent,
   isRejectedTodo,
   parseDate,
@@ -58,25 +71,9 @@ const emit = defineEmits<{
   close: []
 }>()
 
-type PanelMode = 'list' | 'create' | 'edit' | 'view'
-type ParsedHighlightField =
-  | 'date'
-  | 'time'
-  | 'endDate'
-  | 'endTime'
-  | 'title'
-  | 'source'
-  | 'assignee'
-
-const scheduledTimePresets = [
-  { label: '中午12点', value: '12:00' },
-  { label: '下午3点', value: '15:00' },
-  { label: '晚上5点', value: '17:00' },
-]
-const aiParsingRiveSrc = '/animations/ai-parsing.riv'
-const aiParsingSteps = ['识别日期', '整理时间', '提取事项']
-
 const panelMode = ref<PanelMode>('list')
+const statusFilter = ref<TodoStatusFilter>('all')
+const typeFilter = ref<TodoTypeFilter>('all')
 const editingId = ref('')
 const aiPrompt = ref('')
 const isParsing = ref(false)
@@ -88,19 +85,34 @@ const pendingDeleteId = ref('')
 let pendingDiscardAction: (() => void) | undefined
 let highlightTimer: ReturnType<typeof setTimeout> | undefined
 
-const specialText: Record<CalendarSpecialDay['type'], string> = {
-  holiday: '节假日',
-  workday: '补班',
-  'solar-term': '节气',
-}
+const eventsForStatusCounts = computed(() => filterEventsByType(props.events, typeFilter.value))
+const eventsForTypeCounts = computed(() => filterEventsByStatus(props.events, statusFilter.value))
 
+const totalCount = computed(() => eventsForStatusCounts.value.length)
 const pendingCount = computed(
-  () => props.events.filter((event) => event.status !== 'done' && !isRejectedTodo(event)).length,
+  () =>
+    eventsForStatusCounts.value.filter((event) => event.status !== 'done' && !isRejectedTodo(event))
+      .length,
 )
-const rejectedCount = computed(() => props.events.filter((event) => isRejectedTodo(event)).length)
+const rejectedCount = computed(
+  () => eventsForStatusCounts.value.filter((event) => isRejectedTodo(event)).length,
+)
 const doneCount = computed(
-  () => props.events.filter((event) => event.status === 'done' && !isRejectedTodo(event)).length,
+  () =>
+    eventsForStatusCounts.value.filter((event) => event.status === 'done' && !isRejectedTodo(event))
+      .length,
 )
+const taskTypeCount = computed(
+  () => eventsForTypeCounts.value.filter((event) => !isMeetingEvent(event)).length,
+)
+const meetingTypeCount = computed(
+  () => eventsForTypeCounts.value.filter((event) => isMeetingEvent(event)).length,
+)
+const filteredEvents = computed(() =>
+  filterEventsByType(filterEventsByStatus(props.events, statusFilter.value), typeFilter.value),
+)
+const hasActiveFilters = computed(() => statusFilter.value !== 'all' || typeFilter.value !== 'all')
+const isFilterEmpty = computed(() => props.events.length > 0 && filteredEvents.value.length === 0)
 const isFormMode = computed(() => panelMode.value !== 'list')
 const isViewMode = computed(() => panelMode.value === 'view')
 const canEditForm = computed(() => panelMode.value === 'create' || panelMode.value === 'edit')
@@ -111,7 +123,6 @@ const formTitle = computed(() => {
 })
 const canSubmit = computed(() => canEditForm.value && Boolean(todoForm.value.title.trim()))
 const isFormReadonly = computed(() => isParsing.value || isViewMode.value)
-const formDateTimeLabel = computed(() => formatFormDateTime(todoForm.value))
 const isDeadlineMode = computed(() => todoForm.value.mode === 'deadline')
 const canChooseAssignee = computed(() => props.assignableUsers.length > 1)
 const hasUnsavedChanges = computed(
@@ -138,6 +149,7 @@ watch(
   () => props.date,
   () => {
     resetFormState()
+    resetListFilters()
   },
 )
 
@@ -170,6 +182,7 @@ watch(
       assigneeId: draft.assigneeId ?? props.currentUser.id,
       assigneeName: draft.assigneeName ?? draft.owner ?? props.currentUser.name,
       source: draft.source ?? '',
+      type: draft.type ?? 1,
     })
   },
   { immediate: true },
@@ -204,6 +217,7 @@ function createEmptyForm(date = props.date): CalendarTodoForm {
     assigneeId: assignee.id,
     assigneeName: assignee.name,
     source: '',
+    type: 1,
   }
 }
 
@@ -227,6 +241,7 @@ function createFormFromEvent(event: CalendarEvent): CalendarTodoForm {
     assigneeId: event.assigneeId ?? props.currentUser.id,
     assigneeName: event.assigneeName ?? event.owner,
     source: event.source ?? '',
+    type: event.type === 'meeting' ? 2 : 1,
   }
 }
 
@@ -242,6 +257,7 @@ function createFormCopy(form: CalendarTodoForm): CalendarTodoForm {
     assigneeId: form.assigneeId,
     assigneeName: form.assigneeName,
     source: form.source,
+    type: form.type,
   }
 }
 
@@ -289,6 +305,31 @@ function confirmDiscardChanges(onConfirm?: () => void) {
   if (!hasUnsavedChanges.value) return true
   showDiscardWarning(onConfirm)
   return false
+}
+
+function resetListFilters() {
+  statusFilter.value = 'all'
+  typeFilter.value = 'all'
+}
+
+function setStatusFilter(filter: TodoStatusFilter) {
+  statusFilter.value = statusFilter.value === filter && filter !== 'all' ? 'all' : filter
+}
+
+function applyStatusFilter(filter: TodoStatusFilter) {
+  resetFormState()
+  statusFilter.value = filter
+  typeFilter.value = 'all'
+}
+
+function applyTypeFilter(filter: TodoTypeFilter) {
+  resetFormState()
+  typeFilter.value = filter
+  statusFilter.value = 'all'
+}
+
+function setTypeFilter(filter: TodoTypeFilter) {
+  typeFilter.value = typeFilter.value === filter && filter !== 'all' ? 'all' : filter
 }
 
 function resetFormState() {
@@ -476,6 +517,8 @@ function triggerParsedHighlights(previousForm: CalendarTodoForm, nextForm: Calen
     fields.push('assignee')
   }
 
+  if (nextForm.type !== previousForm.type) fields.push('type')
+
   if (!fields.length) return
 
   clearParsedHighlights()
@@ -558,6 +601,10 @@ function selectAssignees(ids: string[]) {
   todoForm.value.owner = todoForm.value.assigneeName
 }
 
+function setTodoType(type: 1 | 2) {
+  todoForm.value.type = type
+}
+
 function submitTodo() {
   if (!canEditForm.value || !todoForm.value.title.trim()) return
 
@@ -575,6 +622,7 @@ function submitTodo() {
       source: payload.source,
       assigneeId: payload.assigneeId,
       assigneeName: payload.assigneeName,
+      type: payload.type,
     })
   } else {
     emit('createTodo', {
@@ -587,6 +635,7 @@ function submitTodo() {
       source: payload.source,
       assigneeId: payload.assigneeId,
       assigneeName: payload.assigneeName,
+      type: payload.type,
     })
   }
 
@@ -612,16 +661,20 @@ function toggleStatus(event: CalendarEvent) {
   emit('updateStatus', event.id, event.status === 'done' ? 'todo' : 'done')
 }
 
-function shouldShowEventMeta(event: CalendarEvent) {
-  return Boolean(event.source) || (isRejectedTodo(event) && Boolean(getRejectedTodoMessage(event)))
-}
+function openEventDetailById(id: string) {
+  const event = props.events.find((item) => item.id === id)
+  if (!event) return false
 
-function statusText(event: CalendarEvent) {
-  return getTodoStatusLabel(event)
+  openEventDetail(event)
+  return true
 }
 
 defineExpose({
+  openCreateForm,
+  openEventDetailById,
   showDiscardWarning,
+  applyStatusFilter,
+  applyTypeFilter,
 })
 </script>
 
@@ -636,41 +689,99 @@ defineExpose({
         <p v-else-if="!isFormMode">待办详情</p>
         <h2>{{ isFormMode ? formTitle : props.dateLabel }}</h2>
       </div>
-      <button
-        v-if="showClose"
-        class="close-btn"
-        :class="{ 'is-back': isFormMode }"
-        type="button"
-        :aria-label="isFormMode ? '返回待办列表' : '关闭当天待办'"
-        @click="isFormMode ? requestCancelForm() : requestClosePanel()"
-      >
-        <IconArrowLeft v-if="isFormMode" aria-hidden="true" />
-        <IconX v-else aria-hidden="true" />
-      </button>
+      <div class="preview-head-actions">
+        <button
+          v-if="showClose"
+          class="close-btn"
+          :class="{ 'is-back': isFormMode }"
+          type="button"
+          :aria-label="isFormMode ? '返回待办列表' : '关闭当天待办'"
+          @click="isFormMode ? requestCancelForm() : requestClosePanel()"
+        >
+          <IconArrowLeft v-if="isFormMode" aria-hidden="true" />
+          <IconX v-else aria-hidden="true" />
+        </button>
+      </div>
     </header>
 
     <template v-if="!isFormMode">
-      <div class="preview-toolbar">
-        <button class="add-btn" type="button" @click="openCreateForm">+ 新增</button>
-      </div>
-
-      <div class="summary-grid" aria-label="当天待办概览">
-        <span class="summary-card summary-total">
-          <strong>{{ events.length }}</strong>
+      <div class="summary-grid" role="group" aria-label="当天待办概览">
+        <button
+          type="button"
+          class="summary-card summary-total"
+          :class="{ active: statusFilter === 'all' }"
+          :aria-pressed="statusFilter === 'all'"
+          @click="setStatusFilter('all')"
+        >
+          <strong>{{ totalCount }}</strong>
           <span class="summary-label">
-            待办总数
+            <span>待办总数</span>
             <small v-if="rejectedCount">含 {{ rejectedCount }} 项已拒绝</small>
           </span>
-        </span>
-        <span class="summary-card summary-pending">
+        </button>
+        <button
+          type="button"
+          class="summary-card summary-pending"
+          :class="{ active: statusFilter === 'pending' }"
+          :aria-pressed="statusFilter === 'pending'"
+          @click="setStatusFilter('pending')"
+        >
           <strong>{{ pendingCount }}</strong>
-          待处理
-        </span>
-        <span class="summary-card summary-done">
+          <span class="summary-label">
+            <span>待处理</span>
+          </span>
+        </button>
+        <button
+          type="button"
+          class="summary-card summary-done"
+          :class="{ active: statusFilter === 'done' }"
+          :aria-pressed="statusFilter === 'done'"
+          @click="setStatusFilter('done')"
+        >
           <strong>{{ doneCount }}</strong>
-          已完成
-        </span>
+          <span class="summary-label">
+            <span>已完成</span>
+          </span>
+        </button>
       </div>
+
+      <div class="type-filter-row" role="group" aria-label="待办类型筛选">
+        <button
+          type="button"
+          class="type-filter-chip type-all"
+          :class="{ active: typeFilter === 'all' }"
+          :aria-pressed="typeFilter === 'all'"
+          @click="setTypeFilter('all')"
+        >
+          <span class="type-filter-label"> 全部 </span>
+          <span class="type-filter-count">{{ eventsForTypeCounts.length }}</span>
+        </button>
+        <button
+          type="button"
+          class="type-filter-chip type-task"
+          :class="{ active: typeFilter === 'task' }"
+          :aria-pressed="typeFilter === 'task'"
+          @click="setTypeFilter('task')"
+        >
+          <span class="type-filter-label"> 待办 </span>
+          <span class="type-filter-count">{{ taskTypeCount }}</span>
+        </button>
+        <button
+          type="button"
+          class="type-filter-chip type-meeting"
+          :class="{ active: typeFilter === 'meeting' }"
+          :aria-pressed="typeFilter === 'meeting'"
+          @click="setTypeFilter('meeting')"
+        >
+          <span class="type-filter-label"> 会议 </span>
+          <span class="type-filter-count">{{ meetingTypeCount }}</span>
+        </button>
+      </div>
+
+      <p v-if="hasActiveFilters" class="filter-hint">
+        当前展示 {{ filteredEvents.length }} 项
+        <button type="button" @click="resetListFilters">清除筛选</button>
+      </p>
 
       <div v-if="specialDays.length" class="special-row">
         <span
@@ -683,9 +794,9 @@ defineExpose({
         </span>
       </div>
 
-      <div v-if="events.length" class="timeline">
+      <div v-if="filteredEvents.length" class="timeline">
         <article
-          v-for="event in events"
+          v-for="event in filteredEvents"
           :key="event.id"
           class="timeline-item"
           :class="[
@@ -705,6 +816,12 @@ defineExpose({
               <div class="event-title-block">
                 <h3>{{ event.title }}</h3>
                 <div class="event-meta-row">
+                  <span
+                    class="event-kind"
+                    :class="isMeetingEvent(event) ? 'is-meeting' : 'is-task'"
+                  >
+                    {{ eventTypeLabel(event) }}
+                  </span>
                   <span v-if="event.scope === 'assigned_by_me'" class="dispatch-target">
                     派发：{{ event.assigneeName ?? event.owner }}
                   </span>
@@ -781,6 +898,17 @@ defineExpose({
         </article>
       </div>
 
+      <div v-else-if="isFilterEmpty" class="empty empty-filtered">
+        <span class="empty-icon" aria-hidden="true">
+          <IconCalendarPlus />
+        </span>
+        <div class="empty-copy">
+          <h3>当前筛选下暂无事项</h3>
+          <p>试试切换状态或类型筛选，或清除筛选查看全部安排。</p>
+          <button type="button" class="empty-reset-btn" @click="resetListFilters">清除筛选</button>
+        </div>
+      </div>
+
       <div v-else class="empty">
         <span class="empty-icon" aria-hidden="true">
           <IconCalendarPlus />
@@ -790,6 +918,11 @@ defineExpose({
           <p>安排一个待办，或选择其他日期查看日程。</p>
         </div>
       </div>
+
+      <button class="add-btn floating-add-btn" type="button" @click="openCreateForm">
+        <IconPlus aria-hidden="true" />
+        <span>新增</span>
+      </button>
     </template>
 
     <form v-else class="inline-todo-form" :aria-busy="isParsing" @submit.prevent="submitTodo">
@@ -840,120 +973,117 @@ defineExpose({
           </div>
         </label>
         <Transition name="ai-parse-status">
-          <div
-            v-if="isParsing"
-            class="ai-parse-status"
-            role="status"
-            aria-live="polite"
-            aria-labelledby="ai-parse-status-title"
-          >
-            <div class="ai-rive-stage" aria-hidden="true">
-              <AppRive class="ai-rive-player" :src="aiParsingRiveSrc">
-                <template #fallback>
-                  <div class="ai-rive-fallback">
-                    <span class="ai-orbit-ring"></span>
-                    <span class="ai-orbit-dot is-one"></span>
-                    <span class="ai-orbit-dot is-two"></span>
-                    <span class="ai-orbit-dot is-three"></span>
-                    <span class="ai-note-card is-front"></span>
-                    <span class="ai-note-card is-back"></span>
-                  </div>
-                </template>
-              </AppRive>
-            </div>
-            <div class="ai-status-copy">
-              <div class="ai-status-heading">
-                <strong id="ai-parse-status-title">正在解析待办内容</strong>
-                <span>智能整理中</span>
-              </div>
-              <p>正在识别时间、地点和事项，稍后自动填入表单。</p>
-              <div class="ai-status-steps" aria-hidden="true">
-                <span
-                  v-for="(step, index) in aiParsingSteps"
-                  :key="step"
-                  :style="{ '--step-index': index }"
-                >
-                  <i></i>
-                  {{ step }}
-                </span>
-              </div>
-            </div>
-          </div>
+          <AiParseStatus v-if="isParsing" />
         </Transition>
       </section>
 
       <section
         class="inline-section todo-details-section"
-        :class="{ 'has-parse-scrim': isParsing, 'is-readonly': isViewMode }"
+        :class="{ 'is-readonly': isViewMode }"
         :aria-disabled="isFormReadonly"
       >
-        <div class="section-title">
-          <h3>基础信息</h3>
-          <span>{{ formDateTimeLabel }}</span>
-        </div>
-        <div class="mode-switch" aria-label="待办时间模式">
-          <button
-            type="button"
-            :class="{ active: todoForm.mode === 'scheduled' }"
-            :disabled="isFormReadonly"
-            @click="setMode('scheduled')"
-          >
-            指定时间
-          </button>
-          <button
-            type="button"
-            :class="{ active: todoForm.mode === 'deadline' }"
-            :disabled="isFormReadonly"
-            @click="setMode('deadline')"
-          >
-            截止日期
-          </button>
-        </div>
-        <div class="form-grid" :inert="isFormReadonly">
+        <div class="basic-info-layout" :inert="isFormReadonly">
+          <div class="basic-info-columns">
+            <div class="basic-info-column">
+              <label class="mode-switch-field">
+                <span>事项类型</span>
+                <div class="mode-switch" role="group" aria-label="事项类型">
+                  <button
+                    type="button"
+                    :class="{
+                      active: todoForm.type === 1,
+                      'is-ai-highlighted': isAiHighlighted('type'),
+                    }"
+                    :disabled="isFormReadonly"
+                    @click="setTodoType(1)"
+                  >
+                    待办
+                  </button>
+                  <button
+                    type="button"
+                    :class="{
+                      active: todoForm.type === 2,
+                      'is-ai-highlighted': isAiHighlighted('type'),
+                    }"
+                    :disabled="isFormReadonly"
+                    @click="setTodoType(2)"
+                  >
+                    会议
+                  </button>
+                </div>
+              </label>
+              <label v-if="!isDeadlineMode" class="field">
+                <span>日期</span>
+                <TodoDatePicker
+                  v-model="todoForm.date"
+                  class="soft-picker"
+                  :disabled="isFormReadonly"
+                  :highlighted="isAiHighlighted('date')"
+                  aria-label="选择待办日期"
+                  @change="syncDateRange"
+                />
+              </label>
+              <div v-if="!isDeadlineMode" class="quick-time-row" aria-label="快捷时间">
+                <button
+                  v-for="preset in scheduledTimePresets"
+                  :key="preset.value"
+                  type="button"
+                  :class="{ active: todoForm.time === preset.value }"
+                  :disabled="isFormReadonly"
+                  @click="applyScheduledTime(preset.value)"
+                >
+                  {{ preset.label }}
+                </button>
+              </div>
+            </div>
+
+            <div class="basic-info-column">
+              <label class="mode-switch-field">
+                <span>时间模式</span>
+                <div class="mode-switch" role="group" aria-label="时间模式">
+                  <button
+                    type="button"
+                    :class="{ active: todoForm.mode === 'scheduled' }"
+                    :disabled="isFormReadonly"
+                    @click="setMode('scheduled')"
+                  >
+                    指定时间
+                  </button>
+                  <button
+                    type="button"
+                    :class="{ active: todoForm.mode === 'deadline' }"
+                    :disabled="isFormReadonly"
+                    @click="setMode('deadline')"
+                  >
+                    截止日期
+                  </button>
+                </div>
+              </label>
+              <label v-if="!isDeadlineMode" class="field">
+                <span>时间</span>
+                <TodoTimePicker
+                  v-model="todoForm.time"
+                  class="soft-picker"
+                  :disabled="isFormReadonly"
+                  :highlighted="isAiHighlighted('time')"
+                  aria-label="选择待办时间"
+                />
+              </label>
+            </div>
+          </div>
+
           <TodoDeadlineDateTimeRange
             v-if="isDeadlineMode"
             v-model:start-date="todoForm.date"
             v-model:start-time="todoForm.time"
             v-model:end-date="todoForm.endDate"
             v-model:end-time="todoForm.endTime"
+            class="field-full"
             :disabled="isFormReadonly"
             :start-highlighted="isAiHighlighted('date') || isAiHighlighted('time')"
             :end-highlighted="isAiHighlighted('endDate') || isAiHighlighted('endTime')"
             @change="syncDateRange"
           />
-          <label v-else class="field">
-            <span>日期</span>
-            <TodoDatePicker
-              v-model="todoForm.date"
-              class="soft-picker"
-              :disabled="isFormReadonly"
-              :highlighted="isAiHighlighted('date')"
-              aria-label="选择待办日期"
-              @change="syncDateRange"
-            />
-          </label>
-          <label v-if="!isDeadlineMode" class="field">
-            <span>时间</span>
-            <TodoTimePicker
-              v-model="todoForm.time"
-              class="soft-picker"
-              :disabled="isFormReadonly"
-              :highlighted="isAiHighlighted('time')"
-              aria-label="选择待办时间"
-            />
-          </label>
-          <div v-if="!isDeadlineMode" class="quick-time-row field-full" aria-label="指定时间">
-            <button
-              v-for="preset in scheduledTimePresets"
-              :key="preset.value"
-              type="button"
-              :class="{ active: todoForm.time === preset.value }"
-              :disabled="isFormReadonly"
-              @click="applyScheduledTime(preset.value)"
-            >
-              {{ preset.label }}
-            </button>
-          </div>
           <div v-if="isDeadlineMode" class="quick-range-row field-full" aria-label="快捷时间">
             <button type="button" :disabled="isFormReadonly" @click="applyQuickRange('today')">
               今天
@@ -968,39 +1098,42 @@ defineExpose({
               本月内
             </button>
           </div>
-          <label v-if="canChooseAssignee" class="field field-full">
-            <span>负责人</span>
-            <TodoAssigneeSelect
-              :model-value="parseAssigneeIds(todoForm.assigneeId)"
-              :users="assignableUsers"
-              :disabled="isFormReadonly"
-              :highlighted="isAiHighlighted('assignee')"
-              @update:model-value="selectAssignees"
-            />
-          </label>
-          <label class="field field-full">
-            <span>待办内容</span>
-            <Input
-              v-model="todoForm.title"
-              :class="{ 'is-ai-highlighted': isAiHighlighted('title') }"
-              type="text"
-              required
-              :disabled="isFormReadonly"
-              :readonly="isViewMode"
-              placeholder="输入待办内容"
-            />
-          </label>
-          <label class="field field-full">
-            <span>备注</span>
-            <Input
-              v-model="todoForm.source"
-              :class="{ 'is-ai-highlighted': isAiHighlighted('source') }"
-              type="text"
-              :disabled="isFormReadonly"
-              :readonly="isViewMode"
-              placeholder="备注或来源"
-            />
-          </label>
+
+          <div class="form-grid">
+            <label v-if="canChooseAssignee" class="field field-full">
+              <span>负责人</span>
+              <TodoAssigneeSelect
+                :model-value="parseAssigneeIds(todoForm.assigneeId)"
+                :users="assignableUsers"
+                :disabled="isFormReadonly"
+                :highlighted="isAiHighlighted('assignee')"
+                @update:model-value="selectAssignees"
+              />
+            </label>
+            <label class="field field-full">
+              <span>待办内容</span>
+              <Input
+                v-model="todoForm.title"
+                :class="{ 'is-ai-highlighted': isAiHighlighted('title') }"
+                type="text"
+                required
+                :disabled="isFormReadonly"
+                :readonly="isViewMode"
+                placeholder="输入待办内容"
+              />
+            </label>
+            <label class="field field-full">
+              <span>备注</span>
+              <Input
+                v-model="todoForm.source"
+                :class="{ 'is-ai-highlighted': isAiHighlighted('source') }"
+                type="text"
+                :disabled="isFormReadonly"
+                :readonly="isViewMode"
+                placeholder="备注或来源"
+              />
+            </label>
+          </div>
         </div>
       </section>
 
@@ -1022,6 +1155,7 @@ defineExpose({
   --todo-primary: #3b82f6;
   --todo-primary-hover: #2563eb;
   --todo-primary-rgb: 59, 130, 246;
+  position: relative;
   height: 100%;
   width: 100%;
   min-width: 0;
@@ -1044,6 +1178,18 @@ defineExpose({
   gap: 14px;
 }
 
+.preview-head > div:first-child {
+  min-width: 0;
+}
+
+.preview-head-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
 .preview-head p {
   margin: 0 0 7px;
   font-size: 12px;
@@ -1060,21 +1206,6 @@ defineExpose({
   overflow-wrap: anywhere;
 }
 
-.form-date {
-  margin-top: 7px;
-  display: inline-flex;
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.preview-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1084,33 +1215,46 @@ defineExpose({
 .summary-card {
   min-height: 58px;
   box-sizing: border-box;
-  border: 0;
-  border-radius: 12px;
+  border: 1px solid #e5ebf2;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #64748b;
   padding: 10px 12px;
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 5px;
-  font-size: 11px;
-  font-weight: 850;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    0 1px 3px rgba(15, 23, 42, 0.14),
-    0 4px 10px rgba(15, 23, 42, 0.12),
-    0 0 16px rgba(15, 23, 42, 0.08);
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  text-align: left;
+  box-shadow: 0 8px 18px -22px rgba(15, 23, 42, 0.4);
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
 }
 
 .summary-card strong {
-  font-size: 22px;
+  min-width: 28px;
+  color: #1f2937;
+  font-size: 24px;
   line-height: 1;
   font-weight: 950;
+  letter-spacing: 0;
+  text-align: center;
 }
 
 .summary-label {
   min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  color: #475569;
+  line-height: 1.15;
   white-space: nowrap;
 }
 
@@ -1119,25 +1263,186 @@ defineExpose({
   font-size: 10px;
   font-weight: 800;
   line-height: 1;
+  white-space: nowrap;
 }
 
-.summary-total,
-.summary-pending,
-.summary-done {
+.summary-card:hover {
+  border-color: #cbd5e1;
   background: #ffffff;
+  box-shadow: 0 12px 22px -24px rgba(15, 23, 42, 0.56);
+  transform: translateY(-1px);
+}
+
+.summary-card:focus-visible {
+  outline: 2px solid rgba(var(--todo-primary-rgb), 0.24);
+  outline-offset: 3px;
+}
+
+.summary-card.active {
+  border-color: rgba(var(--todo-primary-rgb), 0.28);
+  background: #f8fbff;
+  box-shadow:
+    inset 0 0 0 1px rgba(var(--todo-primary-rgb), 0.08),
+    0 10px 22px -24px rgba(var(--todo-primary-rgb), 0.55);
+}
+
+.summary-card.active strong,
+.summary-card.active .summary-label {
+  color: var(--todo-primary-hover);
+}
+
+.summary-card:active {
+  transform: translateY(0);
+}
+
+.type-filter-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  border-bottom: 1px solid #e5ebf2;
+  background: transparent;
+  padding: 0 4px;
+}
+
+.type-filter-chip {
+  min-width: 0;
+  min-height: 38px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
   color: #64748b;
+  padding: 0 12px 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 850;
+  cursor: pointer;
+  transition:
+    border-bottom-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease;
 }
 
-.summary-total strong {
-  color: #d97706;
+.type-filter-label {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  white-space: nowrap;
 }
 
-.summary-pending strong {
+.type-filter-count {
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.07);
+  color: #475569;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.type-filter-chip:hover:not(.active) {
+  color: #1e293b;
+}
+
+.type-filter-chip:focus-visible {
+  outline: 2px solid rgba(var(--todo-primary-rgb), 0.22);
+  outline-offset: 2px;
+}
+
+.type-filter-chip.active {
+  border-bottom-color: var(--todo-primary);
+  color: #0f172a;
+}
+
+.type-filter-chip.active .type-filter-count {
+  background: #eaf2ff;
+  color: var(--todo-primary-hover);
+}
+
+.filter-hint {
+  margin: -2px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 750;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-hint button {
+  border: 0;
+  background: transparent;
+  color: var(--todo-primary);
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 820;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.filter-hint button:hover {
+  color: var(--todo-primary-hover);
+}
+
+.event-kind {
+  min-height: 20px;
+  border-radius: 999px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.event-kind.is-task {
+  background: #eff6ff;
   color: #1d4ed8;
 }
 
-.summary-done strong {
-  color: #059669;
+.event-kind.is-meeting {
+  background: #f5f3ff;
+  color: #6d28d9;
+}
+
+.empty-filtered .empty-copy {
+  align-items: center;
+  text-align: center;
+}
+
+.empty-reset-btn {
+  margin-top: 4px;
+  min-height: 32px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #334155;
+  padding: 0 14px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 820;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease;
+}
+
+.empty-reset-btn:hover {
+  border-color: #cbd5e1;
+  background: #f8fafc;
 }
 
 .add-btn,
@@ -1169,6 +1474,33 @@ defineExpose({
   border-color: var(--todo-primary);
   background: var(--todo-primary);
   color: #ffffff;
+}
+
+.floating-add-btn {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 20;
+  min-height: 44px;
+  padding: 0 18px 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 13px;
+  box-shadow:
+    0 18px 28px -18px rgba(var(--todo-primary-rgb), 0.78),
+    0 6px 14px -12px rgba(15, 23, 42, 0.32);
+}
+
+.floating-add-btn svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 3;
+}
+
+.floating-add-btn span {
+  white-space: nowrap;
 }
 
 .close-btn {
@@ -1262,7 +1594,7 @@ defineExpose({
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding-right: 4px;
+  padding: 0 4px 72px 0;
 }
 
 .timeline::-webkit-scrollbar,
@@ -1654,30 +1986,6 @@ p {
   position: relative;
 }
 
-.todo-details-section.has-parse-scrim {
-  z-index: 1;
-}
-
-.todo-details-section.has-parse-scrim::before {
-  content: '';
-  position: absolute;
-  z-index: 2;
-  inset: -10px -2px -6px;
-  border-radius: 16px;
-  background: rgba(248, 250, 252, 0.58);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.58);
-  pointer-events: auto;
-  cursor: wait;
-}
-
-@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .todo-details-section.has-parse-scrim::before {
-    background: rgba(248, 250, 252, 0.46);
-    -webkit-backdrop-filter: blur(1px);
-    backdrop-filter: blur(1px);
-  }
-}
-
 .ai-inline-section {
   position: relative;
   z-index: 4;
@@ -1741,9 +2049,6 @@ p {
   height: 4px;
   border-radius: 999px;
   animation: ai-dot-bounce 0.82s ease-in-out infinite;
-}
-
-.ai-button-dots span {
   background: rgba(255, 255, 255, 0.92);
 }
 
@@ -1761,218 +2066,40 @@ p {
   cursor: progress;
 }
 
-.ai-parse-status {
-  position: absolute;
-  z-index: 7;
-  top: calc(100% + 10px);
-  left: 0;
-  right: 0;
-  box-sizing: border-box;
-  min-height: 104px;
-  border: 1px solid rgba(147, 197, 253, 0.6);
-  border-radius: 18px;
-  background: radial-gradient(circle at 82% 20%, rgba(219, 234, 254, 0.76), transparent 34%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(239, 246, 255, 0.92)), #ffffff;
-  color: #334155;
-  box-shadow:
-    0 22px 42px -34px rgba(var(--todo-primary-rgb), 0.55),
-    0 13px 26px -24px rgba(15, 23, 42, 0.18);
-  padding: 14px 18px;
-  display: grid;
-  grid-template-columns: 68px minmax(0, 1fr);
-  align-items: center;
-  gap: 16px;
-  pointer-events: none;
-  backdrop-filter: blur(3px);
-}
-
-.ai-rive-stage {
-  width: 68px;
-  height: 68px;
-  border-radius: 22px;
-  background: radial-gradient(circle at 66% 24%, rgba(255, 255, 255, 0.98), transparent 28%),
-    linear-gradient(135deg, rgba(239, 246, 255, 0.96), rgba(219, 234, 254, 0.78));
-  box-shadow:
-    inset 0 0 0 1px rgba(191, 219, 254, 0.88),
-    0 14px 22px -20px rgba(var(--todo-primary-rgb), 0.58);
-  overflow: hidden;
-}
-
-.ai-rive-player {
-  width: 100%;
-  height: 100%;
-}
-
-.ai-rive-fallback {
-  position: relative;
-  width: 100%;
-  height: 100%;
-}
-
-.ai-orbit-ring {
-  position: absolute;
-  inset: 13px;
-  border: 1px dashed rgba(96, 165, 250, 0.55);
-  border-radius: 18px;
-  animation: ai-rive-orbit 2.8s linear infinite;
-}
-
-.ai-orbit-dot {
-  position: absolute;
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: #60a5fa;
-  box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.13);
-  animation: ai-orbit-dot 1.18s ease-in-out infinite;
-}
-
-.ai-orbit-dot.is-one {
-  top: 17px;
-  left: 17px;
-}
-
-.ai-orbit-dot.is-two {
-  top: 17px;
-  right: 17px;
-  animation-delay: 0.16s;
-}
-
-.ai-orbit-dot.is-three {
-  right: 20px;
-  bottom: 17px;
-  animation-delay: 0.32s;
-}
-
-.ai-note-card {
-  position: absolute;
-  left: 24px;
-  top: 28px;
-  width: 24px;
-  height: 18px;
-  border-radius: 7px;
-  background: #ffffff;
-  box-shadow:
-    inset 0 0 0 1px rgba(147, 197, 253, 0.58),
-    0 8px 14px -12px rgba(37, 99, 235, 0.48);
-}
-
-.ai-note-card::before,
-.ai-note-card::after {
-  content: '';
-  position: absolute;
-  left: 6px;
-  right: 6px;
-  height: 2px;
-  border-radius: 999px;
-  background: rgba(96, 165, 250, 0.52);
-}
-
-.ai-note-card::before {
-  top: 6px;
-}
-
-.ai-note-card::after {
-  top: 11px;
-}
-
-.ai-note-card.is-front {
-  animation: ai-note-sort 1.8s ease-in-out infinite;
-}
-
-.ai-note-card.is-back {
-  top: 22px;
-  left: 20px;
-  opacity: 0.72;
-  transform: rotate(-8deg);
-  animation: ai-note-back 1.8s ease-in-out infinite;
-}
-
-.ai-status-copy {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-}
-
-.ai-status-heading {
+.basic-info-layout {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.basic-info-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.basic-info-column {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mode-switch-field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
-  min-width: 0;
-  flex-wrap: wrap;
 }
 
-.ai-status-heading strong {
-  display: block;
-  color: #1e293b;
-  font-size: 14px;
-  font-weight: 900;
-  line-height: 1.35;
-}
-
-.ai-status-heading span {
-  display: inline-flex;
-  align-items: center;
-  min-height: 20px;
-  border-radius: 999px;
-  background: rgba(219, 234, 254, 0.88);
-  color: #2563eb;
-  padding: 0 8px;
-  font-size: 11px;
-  font-weight: 900;
-}
-
-.ai-parse-status p {
-  margin: 0;
-  color: #475569;
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.ai-status-steps {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 2px;
-}
-
-.ai-status-steps span {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 23px;
-  border: 1px solid rgba(191, 219, 254, 0.9);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.82);
+.mode-switch-field > span {
   color: #64748b;
-  padding: 0 9px;
-  font-size: 11px;
-  font-weight: 850;
-  animation: ai-step-pulse 1.72s ease-in-out infinite;
-  animation-delay: calc(var(--step-index) * 0.16s);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
 }
 
-.ai-status-steps i {
-  width: 5px;
-  height: 5px;
-  border-radius: 999px;
-  background: #60a5fa;
-}
-
-.ai-parse-status-enter-active,
-.ai-parse-status-leave-active {
-  transition:
-    opacity 0.16s ease,
-    transform 0.16s ease;
-}
-
-.ai-parse-status-enter-from,
-.ai-parse-status-leave-to {
-  opacity: 0;
-  transform: translateY(-5px);
-}
-
-.mode-switch,
 .quick-range-row,
 .quick-time-row {
   display: inline-flex;
@@ -1982,37 +2109,57 @@ p {
 }
 
 .mode-switch {
-  width: fit-content;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  width: 100%;
   padding: 3px;
-  border: 1px solid #e5edf6;
-  border-radius: 999px;
-  background: #f8fafc;
+  border: 0;
+  border-radius: 10px;
+  background: #eceff3;
 }
 
 .mode-switch button,
 .quick-range-row button,
 .quick-time-row button {
-  min-height: 30px;
-  border: 0;
-  border-radius: 999px;
+  min-height: 34px;
+  border: 1px solid transparent;
+  border-radius: 8px;
   background: transparent;
   color: #64748b;
-  padding: 0 12px;
+  padding: 0 10px;
   font: inherit;
   font-size: 13px;
-  font-weight: 850;
+  font-weight: 600;
   cursor: pointer;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    color 0.18s ease;
 }
 
 .mode-switch button.active {
-  background: var(--todo-primary);
-  color: #ffffff;
+  background: #ffffff;
+  color: #111827;
+  border-color: rgba(226, 232, 240, 0.9);
+  box-shadow:
+    0 1px 1px rgba(15, 23, 42, 0.04),
+    0 2px 8px rgba(15, 23, 42, 0.08);
 }
 
 .quick-range-row button,
 .quick-time-row button {
-  border: 1px solid #e5edf6;
+  min-height: 30px;
+  border: 1px solid #dbe4ee;
+  border-radius: 999px;
   background: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.basic-info-column .quick-time-row {
+  margin-top: -4px;
 }
 
 .quick-range-row button:hover,
@@ -2022,16 +2169,24 @@ p {
 }
 
 .quick-time-row button.active {
-  border-color: var(--todo-primary);
-  background: var(--todo-primary);
-  color: #ffffff;
+  border-color: #bfdbfe;
+  background: #ffffff;
+  color: #2563eb;
 }
 
-.mode-switch button.active:hover,
+.mode-switch button.active:hover {
+  background: #ffffff;
+  color: #111827;
+  border-color: rgba(226, 232, 240, 0.95);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.06),
+    0 3px 8px rgba(15, 23, 42, 0.08);
+}
+
 .quick-time-row button.active:hover {
-  border-color: var(--todo-primary-hover);
-  background: var(--todo-primary-hover);
-  color: #ffffff;
+  border-color: #93c5fd;
+  background: #ffffff;
+  color: #2563eb;
 }
 
 .mode-switch button:disabled,
@@ -2039,27 +2194,6 @@ p {
 .quick-time-row button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
-}
-
-.section-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.section-title h3 {
-  color: #1f2937;
-  font-size: 14px;
-  font-weight: 900;
-  line-height: 1.3;
-}
-
-.section-title span {
-  color: #64748b;
-  font-size: 13px;
-  font-weight: 750;
-  white-space: nowrap;
 }
 
 .form-grid {
@@ -2083,6 +2217,12 @@ p {
   color: #475569;
   font-size: 13px;
   font-weight: 820;
+}
+
+.basic-info-column .field span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .field input,
@@ -2232,58 +2372,6 @@ p {
   }
 }
 
-@keyframes ai-rive-orbit {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes ai-orbit-dot {
-  0%,
-  100% {
-    transform: translateY(0) scale(0.88);
-    opacity: 0.58;
-  }
-  42% {
-    transform: translateY(-3px) scale(1);
-    opacity: 1;
-  }
-}
-
-@keyframes ai-note-sort {
-  0%,
-  100% {
-    transform: translate(0, 0) rotate(2deg);
-  }
-  48% {
-    transform: translate(6px, -5px) rotate(9deg);
-  }
-}
-
-@keyframes ai-note-back {
-  0%,
-  100% {
-    transform: translate(0, 0) rotate(-8deg);
-  }
-  48% {
-    transform: translate(-4px, 4px) rotate(-13deg);
-  }
-}
-
-@keyframes ai-step-pulse {
-  0%,
-  100% {
-    border-color: rgba(191, 219, 254, 0.9);
-    color: #64748b;
-    transform: translateY(0);
-  }
-  46% {
-    border-color: rgba(96, 165, 250, 0.58);
-    color: #2563eb;
-    transform: translateY(-1px);
-  }
-}
-
 @keyframes ai-value-highlight {
   0% {
     color: #111827;
@@ -2303,8 +2391,6 @@ p {
 
 @media (prefers-reduced-motion: reduce) {
   .ai-button-dots span,
-  .ai-rive-fallback *,
-  .ai-status-steps span,
   .field input.is-ai-highlighted,
   .field select.is-ai-highlighted {
     animation: none;
@@ -2341,21 +2427,10 @@ p {
   .summary-grid,
   .empty,
   .form-grid,
+  .basic-info-columns,
   .ai-inline-row,
   .inline-discard-warning {
     grid-template-columns: 1fr;
-  }
-
-  .ai-parse-status {
-    grid-template-columns: 58px minmax(0, 1fr);
-    gap: 12px;
-    padding: 12px;
-  }
-
-  .ai-rive-stage {
-    width: 58px;
-    height: 58px;
-    border-radius: 19px;
   }
 
   .discard-warning-actions {

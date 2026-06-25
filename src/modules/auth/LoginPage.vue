@@ -6,7 +6,7 @@ import IconEye from '~icons/lucide/eye'
 import IconEyeOff from '~icons/lucide/eye-off'
 import IconLockKeyhole from '~icons/lucide/lock-keyhole'
 import IconUserRound from '~icons/lucide/user-round'
-import campusImage from '@/assets/modelone.png'
+import campusImage from '@/assets/morning.png'
 import logoDarkImage from '@/assets/logoDark1.png'
 import { Button } from '@/components/ui/button'
 import { routeConfig } from '@/config/route.config'
@@ -178,7 +178,7 @@ onUnmounted(() => {
         <span class="brand-mark" aria-hidden="true">
           <img :src="logoDarkImage" alt="" />
         </span>
-        <span>华力企业级 AI 平台</span>
+        <!-- <span>华力企业级 AI 平台</span> -->
       </header>
 
       <div class="hero-copy">

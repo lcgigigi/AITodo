@@ -1,0 +1,31 @@
+---
+description: AITodo 前端代码定位索引，找文件时优先查阅 docs/frontend-code-index.md
+alwaysApply: true
+---
+
+# 前端代码定位
+
+完整文件索引与职责说明见 `docs/frontend-code-index.md`（2026-06-25）。探索或修改前端代码前，先读该文档或按下列结构定位。
+
+## 架构速查
+
+- **入口/路由**：`src/app/main.ts` → `App.vue`；路由在 `src/router/`（`routes.ts`、`module-routes.ts`、`guards.ts`）
+- **登录**：`src/modules/auth/`
+- **首页/待办日历（核心）**：`src/modules/home/`
+  - 容器：`DashboardPage.vue`（总览/详细切换、邮箱确认）
+  - 总览：`dashboard/CalendarWorkspace.vue`
+  - 详细：`dashboard/DetailedDashboardWorkspace.vue`
+  - 顶栏：`dashboard/DashboardTopBar.vue`、`components/TopbarToolDock.vue`
+  - 单日面板：`dashboard/DayPreviewPanel.vue`
+  - 数据层：`dashboard/todo.service.ts`、`useDashboardTodos.ts`、`sys-message.service.ts`
+  - 类型/展示：`dashboard/types.ts`、`todoDisplay.ts`、`dayPreviewPanel.helpers.ts`
+  - 日期时间选择器：`dashboard/components/TodoDatePicker.vue`、`TodoTimePicker.vue`、`TodoDeadlineDateTimeRange.vue`、`picker.helpers.ts`
+- **智能体中心**：`src/modules/agent-center/`（含 `mock.ts` 静态数据）
+- **Token 看板**：`src/modules/leader-board/`
+- **共享 UI**：`src/components/ui/`（button、input、popover、select、calendar、scroll-area）
+- **共享能力**：`src/shared/request/`（HTTP）、`src/stores/`（user、feedback）、`src/shared/components/feedback/GlobalFeedback.vue`
+- **样式**：`src/styles/`；**测试**：`src/modules/home/dashboard/*.test.ts`
+
+## 模拟数据注意
+
+以下仍为前端 mock/占位，改接口行为前先确认：`agent-center/mock.ts`、`agent-center/index.vue`（Token 图表）、`leader-board/index.vue`、`CalendarWorkspace.vue`（2026 节假日硬编码）。首页邮箱确认已接真实接口 `POST /smart-todo/select-email`。

@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
+import { getTodoHourOptions, getTodoMinuteOptions, parseTodoTime } from './picker.helpers'
 
 defineOptions({
   inheritAttrs: false,
@@ -40,38 +41,12 @@ const popoverWidth = ref('')
 const hourTouched = ref(false)
 const minuteTouched = ref(false)
 const externalClass = computed(() => attrs.class as HTMLAttributes['class'])
-const baseHourOptions = Array.from({ length: 17 }, (_, index) => String(index + 7).padStart(2, '0'))
-const baseMinuteOptions = Array.from({ length: 12 }, (_, index) =>
-  String(index * 5).padStart(2, '0'),
-)
 
-const parsedTime = computed(() => parseTime(props.modelValue))
-const hourOptions = computed(() => {
-  const currentHour = parsedTime.value?.hour
-  if (!currentHour || baseHourOptions.includes(currentHour)) return baseHourOptions
-
-  return [...baseHourOptions, currentHour].sort((first, second) => Number(first) - Number(second))
-})
-const minuteOptions = computed(() => {
-  const currentMinute = parsedTime.value?.minute
-  if (!currentMinute || baseMinuteOptions.includes(currentMinute)) return baseMinuteOptions
-
-  return [...baseMinuteOptions, currentMinute].sort(
-    (first, second) => Number(first) - Number(second),
-  )
-})
+const parsedTime = computed(() => parseTodoTime(props.modelValue))
+const hourOptions = computed(() => getTodoHourOptions(parsedTime.value?.hour))
+const minuteOptions = computed(() => getTodoMinuteOptions(parsedTime.value?.minute))
 
 const displayValue = computed(() => (parsedTime.value ? props.modelValue : props.placeholder))
-
-function parseTime(value: string) {
-  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value)
-  if (!match) return undefined
-
-  return {
-    hour: match[1],
-    minute: match[2],
-  }
-}
 
 function setHour(hour: string) {
   const minute = parsedTime.value?.minute ?? '00'

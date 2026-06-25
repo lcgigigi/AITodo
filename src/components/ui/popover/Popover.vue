@@ -2,6 +2,10 @@
 import type { PopoverRootEmits, PopoverRootProps } from 'reka-ui'
 import { PopoverRoot, useForwardPropsEmits } from 'reka-ui'
 
+defineOptions({
+  name: 'UiPopover',
+})
+
 const props = defineProps<PopoverRootProps>()
 const emits = defineEmits<PopoverRootEmits>()
 

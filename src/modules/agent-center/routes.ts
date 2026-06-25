@@ -4,7 +4,7 @@ import { PERMISSIONS } from '@/shared/constants/permission'
 export const agentCenterRoutes: RouteRecordRaw[] = [
   {
     path: '/agents',
-    name: 'AgentList',
+    name: 'AgentCenter',
     component: () => import('./index.vue'),
     meta: {
       title: '智能体中心',
