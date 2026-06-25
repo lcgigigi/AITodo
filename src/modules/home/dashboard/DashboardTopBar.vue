@@ -38,6 +38,10 @@ import {
   removeSysMessageIdsFromList,
 } from '@/modules/home/dashboard/sys-message.state'
 import TopbarToolDock from '@/modules/home/dashboard/components/TopbarToolDock.vue'
+import {
+  navigateDashboardTool,
+  type DashboardToolTarget,
+} from '@/modules/home/dashboard/dashboardTools'
 import type { CalendarEvent, CalendarUser } from '@/modules/home/dashboard/types'
 import { useFeedbackStore } from '@/stores/feedback.store'
 import { useUserStore } from '@/stores/user.store'
@@ -62,11 +66,6 @@ const feedbackStore = useFeedbackStore()
 
 type PendingActionMode = 'reject' | null
 type NotificationTab = 'sys-message' | 'pending-todo'
-type TopbarToolTarget = {
-  routeName?: string
-  agentKey?: string
-  isMore?: boolean
-}
 
 const SYS_MESSAGE_PAGE_SIZE = 10
 const notificationPanelRef = ref<HTMLElement | null>(null)
@@ -571,30 +570,10 @@ function closeUserMenu() {
   isUserMenuOpen.value = false
 }
 
-function openAgentCenter(agentKey?: string) {
-  void router.push({
-    name: 'AgentCenter',
-    query: agentKey ? { agent: agentKey } : undefined,
-  })
-}
-
-function openTopbarTool(tool: TopbarToolTarget) {
+function openTopbarTool(tool: DashboardToolTarget) {
   closeNotificationPanel()
   closeUserMenu()
-
-  if (tool.routeName) {
-    void router.push({ name: tool.routeName })
-    return
-  }
-
-  if (tool.agentKey) {
-    openAgentCenter(tool.agentKey)
-    return
-  }
-
-  if (tool.isMore) {
-    openAgentCenter()
-  }
+  void navigateDashboardTool(router, tool)
 }
 
 async function handleLogout() {

@@ -12,31 +12,25 @@ import IconPresentation from '~icons/lucide/presentation'
 import IconSendHorizontal from '~icons/lucide/send-horizontal'
 import { routeConfig } from '@/config/route.config'
 import { useFeedbackStore } from '@/stores/feedback.store'
-import { useUserStore } from '@/stores/user.store'
 import DayPreviewPanel from './DayPreviewPanel.vue'
 import type {
   CalendarDay,
-  CalendarEvent,
   CalendarEventStatus,
   CalendarSpecialDay,
   CalendarTodoDraft,
   CalendarTodoUpdate,
-  CalendarUser,
 } from './types'
-import { compareEvents, dateRange } from './todoDisplay'
+import { dateRange } from './todoDisplay'
 import {
   createTodo as serviceCreateTodo,
   deleteTodo as serviceDeleteTodo,
-  listTodos,
-  loadCurrentUser,
-  loadAssignableUsers as serviceLoadAssignableUsers,
   getTodoMonthRange,
   getTodoWeekRange,
   loadTodoDetail,
-  loadTodos,
   updateTodo as serviceUpdateTodo,
   updateTodoStatus as serviceUpdateTodoStatus,
 } from './todo.service'
+import { useDashboardTodos } from './useDashboardTodos'
 
 type TodoStatusFilter = 'all' | 'pending' | 'done'
 type TodoTypeFilter = 'all' | 'task' | 'meeting'
@@ -51,9 +45,6 @@ type DayPreviewPanelExpose = {
 const now = ref(new Date())
 const selectedDate = ref(ymd(now.value))
 const currentMonth = ref(new Date(now.value.getFullYear(), now.value.getMonth(), 1))
-const allEvents = ref<CalendarEvent[]>([])
-const backendAssignableUsers = ref<CalendarUser[]>([])
-const isDashboardLoading = ref(false)
 const isDayPreviewOpen = ref(false)
 const quickCreatePrompt = ref('')
 const homeQuickTodoText = ref('')
@@ -67,7 +58,6 @@ const calendarViewMode = ref<'month' | 'week'>('month')
 const trendStatMode = ref<'week' | 'month'>('week')
 const route = useRoute()
 const router = useRouter()
-const userStore = useUserStore()
 const feedbackStore = useFeedbackStore()
 let clockTimer: ReturnType<typeof setInterval> | undefined
 let trendChart: echarts.ECharts | undefined
@@ -78,6 +68,19 @@ const trendChartTextStyle = {
   color: '#64748b',
   fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", Arial, sans-serif',
 }
+
+const {
+  allEvents,
+  assignableUsers,
+  currentUser,
+  eventMap,
+  events,
+  initializeDashboardTodos,
+  refreshTodos,
+} = useDashboardTodos({
+  getLoadRange: getActiveTodoLoadRange,
+  onUnauthorized: redirectToLogin,
+})
 
 onMounted(async () => {
   clockTimer = setInterval(() => {
@@ -187,21 +190,6 @@ function completedEventCountByDate(date: string) {
   ).length
 }
 
-const eventMap = computed(() => {
-  const map = new Map<string, CalendarEvent[]>()
-  for (const event of events.value) {
-    for (const date of dateRange(event.date, event.endDate)) {
-      const list = map.get(date) ?? []
-      list.push(event)
-      map.set(date, list)
-    }
-  }
-  for (const list of map.values()) {
-    list.sort(compareEvents)
-  }
-  return map
-})
-
 const specialDayMap = computed(() => {
   const map = new Map<string, CalendarSpecialDay[]>()
   for (const item of specialDays) {
@@ -214,23 +202,7 @@ const specialDayMap = computed(() => {
   return map
 })
 
-const currentUser = computed<CalendarUser>(() => ({
-  id: userStore.profile?.id ?? '',
-  name: userStore.profile?.name ?? '未登录',
-  role: userStore.profile?.role ?? 'employee',
-  department: userStore.profile?.department,
-  avatar: userStore.profile?.avatar,
-  leaderId: userStore.profile?.leaderId,
-  teamMemberIds: userStore.profile?.teamMemberIds,
-}))
-
-const assignableUsers = computed(() => {
-  if (backendAssignableUsers.value.length) return backendAssignableUsers.value
-
-  return currentUser.value.id ? [currentUser.value] : []
-})
 const todayDate = computed(() => ymd(now.value))
-const events = computed(() => listTodos(allEvents.value, currentUser.value))
 const canSubmitHomeQuickTodo = computed(() => Boolean(homeQuickTodoText.value.trim()))
 
 const days = computed<CalendarDay[]>(() => {
@@ -565,40 +537,19 @@ function showToast(message: string, type: 'success' | 'error' | 'info' = 'succes
 }
 
 async function initializeDashboardData() {
-  isDashboardLoading.value = true
+  const initialized = await initializeDashboardTodos()
+  if (!initialized) return
 
-  try {
-    if (!userStore.token) {
-      void router.replace({
-        path: routeConfig.loginRoute,
-        query: { redirect: router.currentRoute.value.fullPath },
-      })
-      return
-    }
+  hasInitializedTodoRange = true
+  await nextTick()
+  consumeDesktopTodoText()
+}
 
-    if (!userStore.profile) {
-      const profile = await loadCurrentUser()
-      userStore.setProfile(profile)
-    }
-
-    await refreshAssignableUsers()
-    await refreshTodos()
-    hasInitializedTodoRange = true
-    await nextTick()
-    consumeDesktopTodoText()
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '后台接口连接失败'
-
-    if (message.includes('登录状态') || message.includes('401')) {
-      userStore.logout()
-      void router.replace({
-        path: routeConfig.loginRoute,
-        query: { redirect: router.currentRoute.value.fullPath },
-      })
-    }
-  } finally {
-    isDashboardLoading.value = false
-  }
+function redirectToLogin() {
+  void router.replace({
+    path: routeConfig.loginRoute,
+    query: { redirect: router.currentRoute.value.fullPath },
+  })
 }
 
 function getDesktopTodoTextQuery() {
@@ -630,23 +581,10 @@ function consumeDesktopTodoText() {
   isConsumingDesktopTodoText = false
 }
 
-async function refreshAssignableUsers() {
-  backendAssignableUsers.value = await serviceLoadAssignableUsers()
-}
-
 function getActiveTodoLoadRange() {
   return calendarViewMode.value === 'week'
     ? getTodoWeekRange(selectedDate.value)
     : getTodoMonthRange(currentMonth.value)
-}
-
-async function refreshTodos() {
-  if (!currentUser.value.id) return
-  allEvents.value = await loadTodos(
-    currentUser.value,
-    assignableUsers.value,
-    getActiveTodoLoadRange(),
-  )
 }
 
 watch(todoLoadRangeKey, () => {

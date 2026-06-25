@@ -2,36 +2,25 @@
 import { computed, onMounted, ref } from 'vue'
 import type { Component } from 'vue'
 import IconAlarmClock from '~icons/lucide/alarm-clock'
-import IconBox from '~icons/lucide/box'
 import IconCheck from '~icons/lucide/check'
 import IconChevronLeft from '~icons/lucide/chevron-left'
 import IconChevronRight from '~icons/lucide/chevron-right'
-import IconCode from '~icons/lucide/code'
-import IconCompass from '~icons/lucide/compass'
-import IconFileText from '~icons/lucide/file-text'
 import IconFlag from '~icons/lucide/flag'
-import IconImage from '~icons/lucide/image'
-import IconMessageCircle from '~icons/lucide/message-circle'
-import IconPresentation from '~icons/lucide/presentation'
 import IconSendHorizontal from '~icons/lucide/send-horizontal'
-import IconUsers from '~icons/lucide/users'
 import { routeConfig } from '@/config/route.config'
 import { useFeedbackStore } from '@/stores/feedback.store'
-import { useUserStore } from '@/stores/user.store'
 import { useRouter } from 'vue-router'
-import type { CalendarEvent, CalendarTodoDraft, CalendarUser } from './types'
-import { dateRange, formatEventTime, ymd } from './todoDisplay'
+import { dashboardTools, navigateDashboardTool, type DashboardToolTarget } from './dashboardTools'
+import type { CalendarEvent, CalendarTodoDraft } from './types'
+import { formatEventTime, ymd } from './todoDisplay'
 import {
   createTodo as serviceCreateTodo,
   getTodoMonthRange,
-  listTodos,
-  loadAssignableUsers,
-  loadCurrentUser,
   loadTodoDetail,
-  loadTodos,
   parseTodoText,
   updateTodoStatus as serviceUpdateTodoStatus,
 } from './todo.service'
+import { useDashboardTodos } from './useDashboardTodos'
 
 type DetailMode = 'simple' | 'detail'
 type DetailFilter = 'all' | 'pending' | 'done' | 'urgent' | 'overdue'
@@ -41,15 +30,6 @@ type FilterItem = {
   value: DetailFilter
   label: string
   icon?: Component
-}
-
-type DetailTool = {
-  name: string
-  icon: Component
-  tone: string
-  routeName?: string
-  agentKey?: string
-  isMore?: boolean
 }
 
 type MonthDay = {
@@ -74,23 +54,31 @@ const emit = defineEmits<{
 }>()
 
 const router = useRouter()
-const userStore = useUserStore()
 const feedbackStore = useFeedbackStore()
 
 const now = ref(new Date())
 const todayDate = computed(() => ymd(now.value))
 const currentMonth = ref(new Date(now.value.getFullYear(), now.value.getMonth(), 1))
 const selectedDate = ref(todayDate.value)
-const allEvents = ref<CalendarEvent[]>([])
-const backendAssignableUsers = ref<CalendarUser[]>([])
 const taskDetails = ref<Record<string, CalendarEvent>>({})
 const activeFilter = ref<DetailFilter>('all')
 const activeTaskId = ref('')
 const detailLoadingId = ref('')
 const quickCreateText = ref('')
-const isLoading = ref(false)
 const isCreating = ref(false)
-const loadError = ref('')
+const {
+  assignableUsers,
+  currentUser,
+  eventMap,
+  isLoading,
+  loadError,
+  refreshTodos: refreshDashboardTodos,
+  initializeDashboardTodos,
+} = useDashboardTodos({
+  getLoadRange: () => getTodoMonthRange(currentMonth.value),
+  loadErrorFallback: '加载待办数据失败',
+  onUnauthorized: redirectToLogin,
+})
 
 const filters: FilterItem[] = [
   { value: 'all', label: '全部' },
@@ -99,47 +87,6 @@ const filters: FilterItem[] = [
   { value: 'urgent', label: '高优先级', icon: IconFlag },
   { value: 'overdue', label: '逾期', icon: IconAlarmClock },
 ]
-
-const detailTools: DetailTool[] = [
-  { name: '图文分析', icon: IconImage, tone: 'orange', agentKey: 'image-analysis' },
-  { name: '办事咨询', icon: IconMessageCircle, tone: 'blue', routeName: 'LeaderBoard' },
-  { name: '会议纪要', icon: IconFileText, tone: 'green', agentKey: 'meeting-notes' },
-  { name: 'PPT创作', icon: IconPresentation, tone: 'violet', agentKey: 'ppt-creator' },
-  { name: '智体工坊', icon: IconBox, tone: 'purple', agentKey: 'agent-workshop' },
-  { name: '代码辅助', icon: IconCode, tone: 'cyan', agentKey: 'code-assistant' },
-  { name: '面试中心', icon: IconUsers, tone: 'sky', agentKey: 'interview-center' },
-  { name: '更多工具', icon: IconCompass, tone: 'slate', isMore: true },
-]
-
-const currentUser = computed<CalendarUser>(() => ({
-  id: userStore.profile?.id ?? '',
-  name: userStore.profile?.name ?? '未登录',
-  role: userStore.profile?.role ?? 'employee',
-  department: userStore.profile?.department,
-  avatar: userStore.profile?.avatar,
-  leaderId: userStore.profile?.leaderId,
-  teamMemberIds: userStore.profile?.teamMemberIds,
-}))
-
-const assignableUsers = computed(() => {
-  if (backendAssignableUsers.value.length) return backendAssignableUsers.value
-  return currentUser.value.id ? [currentUser.value] : []
-})
-
-const events = computed(() => listTodos(allEvents.value, currentUser.value))
-const eventMap = computed(() => {
-  const map = new Map<string, CalendarEvent[]>()
-
-  for (const event of events.value) {
-    for (const date of dateRange(event.date, event.endDate)) {
-      const list = map.get(date) ?? []
-      list.push(event)
-      map.set(date, list)
-    }
-  }
-
-  return map
-})
 
 const selectedDateEvents = computed(() => eventMap.value.get(selectedDate.value) ?? [])
 const pendingEvents = computed(() =>
@@ -196,60 +143,26 @@ onMounted(() => {
 })
 
 async function initializeDetailData() {
-  isLoading.value = true
-  loadError.value = ''
+  const initialized = await initializeDashboardTodos()
+  if (!initialized) return
 
-  try {
-    if (!userStore.token) {
-      void router.replace({
-        path: routeConfig.loginRoute,
-        query: { redirect: router.currentRoute.value.fullPath },
-      })
-      return
-    }
-
-    if (!userStore.profile) {
-      const profile = await loadCurrentUser()
-      userStore.setProfile(profile)
-    }
-
-    backendAssignableUsers.value = await loadAssignableUsers()
-    await refreshTodos()
-  } catch (error) {
-    loadError.value = error instanceof Error ? error.message : '加载待办数据失败'
-  } finally {
-    isLoading.value = false
-  }
+  taskDetails.value = {}
+  ensureSelectedDateInLoadedMonth()
 }
 
-function openAgentCenter(agentKey?: string) {
-  void router.push({
-    name: 'AgentCenter',
-    query: agentKey ? { agent: agentKey } : undefined,
+function redirectToLogin() {
+  void router.replace({
+    path: routeConfig.loginRoute,
+    query: { redirect: router.currentRoute.value.fullPath },
   })
 }
 
-function openDetailTool(tool: DetailTool) {
-  if (tool.routeName) {
-    void router.push({ name: tool.routeName })
-    return
-  }
-
-  if (tool.agentKey) {
-    openAgentCenter(tool.agentKey)
-    return
-  }
-
-  if (tool.isMore) {
-    openAgentCenter()
-  }
+function openDetailTool(tool: DashboardToolTarget) {
+  void navigateDashboardTool(router, tool)
 }
 
 async function refreshTodos() {
-  if (!currentUser.value.id) return
-
-  const range = getTodoMonthRange(currentMonth.value)
-  allEvents.value = await loadTodos(currentUser.value, assignableUsers.value, range)
+  await refreshDashboardTodos()
   taskDetails.value = {}
   ensureSelectedDateInLoadedMonth()
 }
@@ -534,7 +447,7 @@ function monthLabel(date: Date) {
     <aside class="detail-left-panel" aria-label="快捷入口和统计">
       <nav class="detail-tool-panel" aria-label="AI工具">
         <button
-          v-for="tool in detailTools"
+          v-for="tool in dashboardTools"
           :key="tool.name"
           type="button"
           class="detail-tool-item side-content-card"

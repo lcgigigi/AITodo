@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from 'vue'
-import { getLocalTimeZone, parseDate, today } from '@internationalized/date'
+import { getLocalTimeZone, today } from '@internationalized/date'
 import {
   computed,
   nextTick,
@@ -19,6 +19,12 @@ import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
+import {
+  getTodoHourOptions,
+  getTodoMinuteOptions,
+  parseTodoTime,
+  safeParseCalendarDate,
+} from './picker.helpers'
 
 type ActiveField = 'start' | 'end'
 
@@ -64,10 +70,6 @@ const calendarPlaceholder = shallowRef<DateValue>(today(getLocalTimeZone()))
 const hourTouched = ref(false)
 const minuteTouched = ref(false)
 const externalClass = computed(() => attrs.class as HTMLAttributes['class'])
-const baseHourOptions = Array.from({ length: 17 }, (_, index) => String(index + 7).padStart(2, '0'))
-const baseMinuteOptions = Array.from({ length: 12 }, (_, index) =>
-  String(index * 5).padStart(2, '0'),
-)
 
 const activeDate = computed({
   get: () => (activeField.value === 'start' ? props.startDate : props.endDate),
@@ -93,24 +95,12 @@ const activeTime = computed({
   },
 })
 
-const parsedTime = computed(() => parseTime(activeTime.value))
-const hourOptions = computed(() => {
-  const currentHour = parsedTime.value?.hour
-  if (!currentHour || baseHourOptions.includes(currentHour)) return baseHourOptions
-
-  return [...baseHourOptions, currentHour].sort((first, second) => Number(first) - Number(second))
-})
-const minuteOptions = computed(() => {
-  const currentMinute = parsedTime.value?.minute
-  if (!currentMinute || baseMinuteOptions.includes(currentMinute)) return baseMinuteOptions
-
-  return [...baseMinuteOptions, currentMinute].sort(
-    (first, second) => Number(first) - Number(second),
-  )
-})
+const parsedTime = computed(() => parseTodoTime(activeTime.value))
+const hourOptions = computed(() => getTodoHourOptions(parsedTime.value?.hour))
+const minuteOptions = computed(() => getTodoMinuteOptions(parsedTime.value?.minute))
 
 const selectedDate = computed<DateValue | undefined>({
-  get: () => safeParseDate(activeDate.value),
+  get: () => safeParseCalendarDate(activeDate.value),
   set: (value) => {
     activeDate.value = value?.toString() ?? ''
   },
@@ -128,30 +118,10 @@ function formatDisplayValue(date: string, time: string, placeholder: string) {
   if (!date) return placeholder
 
   const dateText = date.split('-').join('/')
-  const parsed = parseTime(time)
+  const parsed = parseTodoTime(time)
   if (!parsed) return dateText
 
   return `${dateText} ${time}`
-}
-
-function parseTime(value: string) {
-  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value)
-  if (!match) return undefined
-
-  return {
-    hour: match[1],
-    minute: match[2],
-  }
-}
-
-function safeParseDate(value: string): DateValue | undefined {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined
-
-  try {
-    return parseDate(value)
-  } catch {
-    return undefined
-  }
 }
 
 function openPicker(field: ActiveField) {
@@ -242,14 +212,14 @@ function onPopoverOutside(event: { target?: EventTarget | null; preventDefault?:
 watch(
   () => activeDate.value,
   (value) => {
-    const nextDate = safeParseDate(value)
+    const nextDate = safeParseCalendarDate(value)
     if (nextDate) calendarPlaceholder.value = nextDate
   },
   { immediate: true },
 )
 
 watch(activeField, () => {
-  const nextDate = safeParseDate(activeDate.value)
+  const nextDate = safeParseCalendarDate(activeDate.value)
   if (nextDate) calendarPlaceholder.value = nextDate
   resetSelectionState()
 

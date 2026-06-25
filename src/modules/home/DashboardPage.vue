@@ -16,7 +16,7 @@ import CalendarWorkspace from './dashboard/CalendarWorkspace.vue'
 import DashboardTopBar from './dashboard/DashboardTopBar.vue'
 import DetailedDashboardWorkspace from './dashboard/DetailedDashboardWorkspace.vue'
 import {
-  // selectEmailProvider as submitEmailProvider,
+  selectEmailProvider as submitEmailProvider,
   type SmartTodoEmailProvider,
 } from './dashboard/todo.service'
 
@@ -113,12 +113,7 @@ async function confirmEmailProvider() {
   isEmailProviderSaving.value = true
 
   try {
-    // 模拟网络请求延迟，让按钮有短暂的 loading 状态
-    await new Promise((resolve) => setTimeout(resolve, 300))
-
-    // TODO: 真实接口尚未接通，暂时注释掉
-    // await submitEmailProvider(selectedEmailProvider.value)
-
+    await submitEmailProvider(selectedEmailProvider.value)
     userStore.setCheckEmail(selectedEmailProvider.value)
     feedbackStore.success('邮箱类型已确认')
   } catch (error) {

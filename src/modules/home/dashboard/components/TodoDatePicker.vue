@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from 'vue'
-import { getLocalTimeZone, parseDate, today } from '@internationalized/date'
+import { getLocalTimeZone, today } from '@internationalized/date'
 import { computed, ref, shallowRef, useAttrs, watch } from 'vue'
 import IconCalendarDays from '~icons/lucide/calendar-days'
 import type { DateValue } from 'reka-ui'
@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
+import { safeParseCalendarDate } from './picker.helpers'
 
 defineOptions({
   inheritAttrs: false,
@@ -40,7 +41,7 @@ const calendarPlaceholder = shallowRef<DateValue>(today(getLocalTimeZone()))
 const externalClass = computed(() => attrs.class as HTMLAttributes['class'])
 
 const selectedDate = computed<DateValue | undefined>({
-  get: () => safeParseDate(props.modelValue),
+  get: () => safeParseCalendarDate(props.modelValue),
   set: (value) => {
     emit('update:modelValue', value?.toString() ?? '')
     emit('change')
@@ -56,21 +57,11 @@ const displayValue = computed(() => {
 watch(
   () => props.modelValue,
   (value) => {
-    const nextDate = safeParseDate(value)
+    const nextDate = safeParseCalendarDate(value)
     if (nextDate) calendarPlaceholder.value = nextDate
   },
   { immediate: true },
 )
-
-function safeParseDate(value: string): DateValue | undefined {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined
-
-  try {
-    return parseDate(value)
-  } catch {
-    return undefined
-  }
-}
 
 function shouldKeepDatePopoverOpen(event: { target?: EventTarget | null }) {
   const target = event.target
