@@ -1,26 +1,25 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import * as echarts from 'echarts'
-import IconCalendarDays from '~icons/lucide/calendar-days'
-import IconCalendarRange from '~icons/lucide/calendar-range'
-import IconChevronLeft from '~icons/lucide/chevron-left'
+import IconBell from '~icons/lucide/bell'
+import IconCheck from '~icons/lucide/check'
 import IconChevronRight from '~icons/lucide/chevron-right'
-import IconClipboardList from '~icons/lucide/clipboard-list'
-import IconSquareCheck from '~icons/lucide/square-check'
+import IconPlus from '~icons/lucide/plus'
 import IconPresentation from '~icons/lucide/presentation'
 import IconSendHorizontal from '~icons/lucide/send-horizontal'
+import IconSquareCheck from '~icons/lucide/square-check'
 import { routeConfig } from '@/config/route.config'
 import { useFeedbackStore } from '@/stores/feedback.store'
 import DayPreviewPanel from './DayPreviewPanel.vue'
 import type {
   CalendarDay,
+  CalendarEvent,
   CalendarEventStatus,
   CalendarSpecialDay,
   CalendarTodoDraft,
   CalendarTodoUpdate,
 } from './types'
-import { dateRange } from './todoDisplay'
+import { compareEvents, formatEventTime, isAllDayEvent } from './todoDisplay'
 import {
   createTodo as serviceCreateTodo,
   deleteTodo as serviceDeleteTodo,
@@ -31,12 +30,14 @@ import {
   updateTodoStatus as serviceUpdateTodoStatus,
 } from './todo.service'
 import { useDashboardTodos } from './useDashboardTodos'
+import { useDashboardGlassSettings } from './useDashboardGlassSettings'
 
 type TodoStatusFilter = 'all' | 'pending' | 'done'
 type TodoTypeFilter = 'all' | 'task' | 'meeting'
 
 type DayPreviewPanelExpose = {
   showDiscardWarning: (onConfirm?: () => void) => void
+  openCreateForm: () => void
   openEventDetailById: (id: string) => boolean
   applyStatusFilter: (filter: TodoStatusFilter) => void
   applyTypeFilter: (filter: TodoTypeFilter) => void
@@ -53,28 +54,18 @@ const presetCreateTime = ref('')
 const presetCreateKey = ref(0)
 const isDayPreviewFormDirty = ref(false)
 const dayPreviewPanelRef = ref<DayPreviewPanelExpose | null>(null)
-const trendChartRef = ref<HTMLElement | null>(null)
 const calendarViewMode = ref<'month' | 'week'>('month')
-const trendStatMode = ref<'week' | 'month'>('week')
 const route = useRoute()
 const router = useRouter()
 const feedbackStore = useFeedbackStore()
+const { glassStyle } = useDashboardGlassSettings()
 let clockTimer: ReturnType<typeof setInterval> | undefined
-let trendChart: echarts.ECharts | undefined
-let trendChartResizeObserver: ResizeObserver | undefined
 let isConsumingDesktopTodoText = false
 
-const trendChartTextStyle = {
-  color: '#64748b',
-  fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", Arial, sans-serif',
-}
-
 const {
-  allEvents,
   assignableUsers,
   currentUser,
   eventMap,
-  events,
   initializeDashboardTodos,
   refreshTodos,
 } = useDashboardTodos({
@@ -82,22 +73,15 @@ const {
   onUnauthorized: redirectToLogin,
 })
 
-onMounted(async () => {
+onMounted(() => {
   clockTimer = setInterval(() => {
     now.value = new Date()
   }, 60_000)
   void initializeDashboardData()
-  await nextTick()
-  renderTrendChart()
-  trendChartResizeObserver = new ResizeObserver(() => {
-    trendChart?.resize()
-  })
-  if (trendChartRef.value) trendChartResizeObserver.observe(trendChartRef.value)
 })
 
 onBeforeUnmount(() => {
   if (clockTimer) clearInterval(clockTimer)
-  disposeTrendChart()
 })
 
 let hasInitializedTodoRange = false
@@ -184,12 +168,6 @@ function getMonthGridCellCount(year: number, month: number) {
   return rowCount * 7
 }
 
-function completedEventCountByDate(date: string) {
-  return events.value.filter(
-    (event) => event.status === 'done' && dateRange(event.date, event.endDate).includes(date),
-  ).length
-}
-
 const specialDayMap = computed(() => {
   const map = new Map<string, CalendarSpecialDay[]>()
   for (const item of specialDays) {
@@ -204,6 +182,7 @@ const specialDayMap = computed(() => {
 
 const todayDate = computed(() => ymd(now.value))
 const canSubmitHomeQuickTodo = computed(() => Boolean(homeQuickTodoText.value.trim()))
+const todayPreviewTasks = computed(() => [...todayEvents.value].sort(compareEvents))
 
 const days = computed<CalendarDay[]>(() => {
   const result: CalendarDay[] = []
@@ -220,32 +199,6 @@ const days = computed<CalendarDay[]>(() => {
       date,
       day: cursor.getDate(),
       inMonth: cursor.getFullYear() === year && cursor.getMonth() === month,
-      isToday: date === todayDate.value,
-      specialDays: specialDayMap.value.get(date) ?? [],
-      events: eventMap.value.get(date) ?? [],
-    })
-    cursor.setDate(cursor.getDate() + 1)
-  }
-
-  return result
-})
-
-const weekDays = computed<CalendarDay[]>(() => {
-  const result: CalendarDay[] = []
-  const selected = new Date(`${selectedDate.value}T12:00:00`)
-  const offset = (selected.getDay() + 6) % 7
-  const cursor = new Date(selected)
-  cursor.setDate(selected.getDate() - offset)
-
-  for (let i = 0; i < 7; i += 1) {
-    const date = ymd(cursor)
-    result.push({
-      date,
-      day: cursor.getDate(),
-      inMonth:
-        cursor.getFullYear() === currentMonth.value.getFullYear() &&
-        cursor.getMonth() === currentMonth.value.getMonth(),
-      inActiveWeek: true,
       isToday: date === todayDate.value,
       specialDays: specialDayMap.value.get(date) ?? [],
       events: eventMap.value.get(date) ?? [],
@@ -299,128 +252,11 @@ const homeWeekDays = computed(() =>
     }
   }),
 )
-const homeDateLabel = computed(() => {
+const homeFooterDateLabel = computed(() => {
   const date = new Date(`${selectedDate.value}T12:00:00`)
   const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()]
-  return `${date.getFullYear()} 年 ${date.getMonth() + 1} 月 ${date.getDate()} 日 ${weekday}`
+  return `${date.getMonth() + 1}月${date.getDate()}日 ${weekday}`
 })
-const todayCompletionSummary = computed(() =>
-  todayEvents.value.length
-    ? `${todayCompletedCount.value} / ${todayEvents.value.length} 已完成`
-    : '0 / 0 已完成',
-)
-const todayTaskProgress = computed(() =>
-  todayEvents.value.length
-    ? Math.round((todayCompletedCount.value / todayEvents.value.length) * 100)
-    : 0,
-)
-const trendSeries = computed(() =>
-  trendStatMode.value === 'week' ? weekTrendSeries.value : monthTrendSeries.value,
-)
-const weekTrendSeries = computed(() =>
-  weekDays.value.map((day) => ({
-    label: ['日', '一', '二', '三', '四', '五', '六'][new Date(`${day.date}T12:00:00`).getDay()],
-    value: completedEventCountByDate(day.date),
-  })),
-)
-const monthTrendSeries = computed(() => {
-  const rows: Array<{ label: string; value: number }> = []
-
-  for (let row = 0; row < 6; row += 1) {
-    const rowDays = days.value.slice(row * 7, row * 7 + 7).filter((day) => day.inMonth)
-    if (!rowDays.length) continue
-
-    rows.push({
-      label: `${rows.length + 1}周`,
-      value: rowDays.reduce((total, day) => total + completedEventCountByDate(day.date), 0),
-    })
-  }
-
-  return rows
-})
-function createTrendChartOption(): echarts.EChartsOption {
-  const series = trendSeries.value
-  const accent = '#7c3aed'
-
-  return {
-    animationDuration: 500,
-    grid: { top: 8, right: 6, bottom: 14, left: 4 },
-    tooltip: {
-      trigger: 'axis',
-      confine: true,
-      formatter: (params: unknown) => {
-        const item = (Array.isArray(params) ? params[0] : params) as { name: string; value: number }
-        return `${item.name}<br/>${Number(item.value)} 项`
-      },
-    },
-    xAxis: {
-      type: 'category',
-      boundaryGap: false,
-      data: series.map((item) => item.label),
-      axisLine: { lineStyle: { color: 'rgba(203, 213, 225, 0.58)' } },
-      axisTick: { show: false },
-      axisLabel: {
-        ...trendChartTextStyle,
-        color: '#94a3b8',
-        fontSize: 9,
-        fontWeight: 850,
-        margin: 4,
-      },
-    },
-    yAxis: {
-      type: 'value',
-      min: 0,
-      splitNumber: 3,
-      axisLabel: { show: false },
-      axisLine: { show: false },
-      axisTick: { show: false },
-      splitLine: { lineStyle: { color: 'rgba(203, 213, 225, 0.58)' } },
-    },
-    series: [
-      {
-        name: '完成待办',
-        type: 'line',
-        data: series.map((item) => item.value),
-        smooth: true,
-        symbol: 'circle',
-        symbolSize: 6,
-        lineStyle: { width: 2.5, color: accent },
-        itemStyle: { color: accent, borderColor: '#ffffff', borderWidth: 2 },
-        areaStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(124, 58, 237, 0.18)' },
-            { offset: 1, color: 'rgba(124, 58, 237, 0.02)' },
-          ]),
-        },
-      },
-    ],
-  }
-}
-
-function renderTrendChart() {
-  const el = trendChartRef.value
-  if (!el) return
-
-  trendChart = echarts.getInstanceByDom(el) ?? echarts.init(el, undefined, { renderer: 'canvas' })
-  trendChart.setOption(createTrendChartOption(), true)
-}
-
-function disposeTrendChart() {
-  trendChartResizeObserver?.disconnect()
-  trendChartResizeObserver = undefined
-  trendChart?.dispose()
-  trendChart = undefined
-}
-
-watch(
-  () => [trendSeries.value, trendStatMode.value, allEvents.value.length] as const,
-  async () => {
-    await nextTick()
-    renderTrendChart()
-  },
-  { deep: true },
-)
-
 const selectedDateLabel = computed(() => {
   const date = new Date(`${selectedDate.value}T12:00:00`)
   const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()]
@@ -439,10 +275,54 @@ function selectDate(date: string, syncMonth = true) {
   }
 }
 
-function changeHomeWeek(delta: number) {
-  const nextDate = new Date(`${selectedDate.value}T12:00:00`)
-  nextDate.setDate(nextDate.getDate() + delta * 7)
-  selectDate(ymd(nextDate))
+function formatHomeTodoMeta(event: CalendarEvent) {
+  if (event.status === 'done') return '已完成'
+  if (isAllDayEvent(event)) return '今天'
+  return formatEventTime(event)
+}
+
+function openTodayAddTodo() {
+  const openCreate = () => {
+    isDayPreviewFormDirty.value = false
+    quickCreatePrompt.value = ''
+    presetCreateTime.value = ''
+    selectDate(todayDate.value)
+    openTodoPanel()
+    void nextTick(() => {
+      dayPreviewPanelRef.value?.openCreateForm()
+    })
+  }
+
+  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges(openCreate)) return
+
+  openCreate()
+}
+
+function openTodayTask(event: CalendarEvent) {
+  const openDetail = () => {
+    isDayPreviewFormDirty.value = false
+    quickCreatePrompt.value = ''
+    presetCreateTime.value = ''
+    selectDate(todayDate.value)
+    openTodoPanel()
+    void nextTick(() => {
+      dayPreviewPanelRef.value?.openEventDetailById(event.id)
+    })
+  }
+
+  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges(openDetail)) return
+
+  openDetail()
+}
+
+async function toggleTodayTaskStatus(event: CalendarEvent) {
+  if (event.completable === false) {
+    showToast('当前待办不可由你完成', 'info')
+    return
+  }
+
+  const nextStatus: CalendarEventStatus = event.status === 'done' ? 'todo' : 'done'
+  await updateTodoStatus(event.id, nextStatus)
 }
 
 function openDayPreviewWithStatusFilter(date: string, filter: TodoStatusFilter) {
@@ -705,18 +585,12 @@ defineExpose({
 
 <template>
   <div class="calendar-workspace" @click="closeDayPreview">
-    <div
-      v-if="isDayPreviewOpen"
-      class="left-preview-scrim"
-      role="presentation"
-      @click.stop="closeDayPreview"
-    ></div>
-
     <section class="layout-column left-column" aria-label="日历与待办" @click.stop>
       <Transition name="day-preview-float">
         <aside
           v-if="isDayPreviewOpen"
           class="day-preview-popover"
+          :style="glassStyle"
           aria-label="当天待办详情"
           @click.stop
           @pointerdown.stop
@@ -745,133 +619,132 @@ defineExpose({
         </aside>
       </Transition>
 
-      <section class="home-main-panel" aria-label="今日待办">
-        <div class="home-main-head">
-          <div class="home-title-metrics">
-            <div class="home-summary-grid" aria-label="今日待办统计">
-              <button
-                type="button"
-                class="home-summary-card meeting-card"
-                aria-label="查看今日会议"
-                @click.stop="openDayPreviewWithTypeFilter(todayDate, 'meeting')"
-              >
-                <IconPresentation class="home-summary-icon" aria-hidden="true" />
-                <span class="home-summary-label">会议</span>
-                <strong class="home-summary-value">{{ todayMeetingCount }}</strong>
+      <section class="home-main-panel" :style="glassStyle" aria-label="今日待办">
+        <header class="home-todo-calendar-header">
+          <div class="home-todo-calendar-card">
+            <div class="home-todo-calendar-left">
+              <strong>{{ homeFooterDateLabel }}</strong>
+              <div class="home-week-strip" aria-label="本周日期">
+                <button
+                  v-for="day in homeWeekDays"
+                  :key="day.date"
+                  type="button"
+                  :class="{ active: day.isSelected, 'is-today': day.isToday }"
+                  @click.stop="openDayPreviewWithStatusFilter(day.date, 'all')"
+                >
+                  <strong>{{ day.day }}</strong>
+                  <span>{{ day.weekday }}</span>
+                </button>
+              </div>
+            </div>
+            <div class="home-todo-calendar-actions">
+              <button type="button" class="home-todo-add-btn" @click.stop="openTodayAddTodo">
+                <IconPlus aria-hidden="true" />
+                <span>新增待办</span>
               </button>
               <button
                 type="button"
-                class="home-summary-card pending-card"
-                aria-label="查看今日待处理待办"
-                @click.stop="openDayPreviewWithStatusFilter(todayDate, 'pending')"
-              >
-                <IconClipboardList class="home-summary-icon" aria-hidden="true" />
-                <span class="home-summary-label">待处理</span>
-                <strong class="home-summary-value">{{ todayPendingEvents.length }}</strong>
-              </button>
-              <button
-                type="button"
-                class="home-summary-card completed-card"
-                aria-label="查看今日已完成待办"
-                @click.stop="openDayPreviewWithStatusFilter(todayDate, 'done')"
-              >
-                <IconSquareCheck class="home-summary-icon" aria-hidden="true" />
-                <span class="home-summary-label">已完成</span>
-                <strong class="home-summary-value">{{ todayCompletedCount }}</strong>
-              </button>
-              <button
-                type="button"
-                class="home-summary-card all-card"
-                aria-label="查看今日全部待办"
+                class="home-todo-view-all"
                 @click.stop="openDayPreviewWithStatusFilter(todayDate, 'all')"
               >
-                <IconCalendarRange class="home-summary-icon" aria-hidden="true" />
-                <span class="home-summary-label">全部</span>
-                <strong class="home-summary-value">{{ todayEvents.length }}</strong>
+                <span>查看全部</span>
+                <IconChevronRight aria-hidden="true" />
               </button>
             </div>
           </div>
+        </header>
 
-          <section class="home-week-card" aria-label="本周日期">
-            <header class="home-week-head">
-              <div>
-                <IconCalendarDays aria-hidden="true" />
-                <strong>{{ homeDateLabel }}</strong>
-              </div>
-              <div class="home-week-actions" aria-label="切换周">
-                <button type="button" aria-label="上一周" @click.stop="changeHomeWeek(-1)">
-                  <IconChevronLeft aria-hidden="true" />
-                </button>
-                <button type="button" aria-label="下一周" @click.stop="changeHomeWeek(1)">
-                  <IconChevronRight aria-hidden="true" />
-                </button>
-              </div>
-            </header>
-            <div class="home-week-strip">
-              <button
-                v-for="day in homeWeekDays"
-                :key="day.date"
-                type="button"
-                :class="{ active: day.isSelected, 'is-today': day.isToday }"
-                @click.stop="selectDate(day.date)"
-              >
-                <strong>{{ day.day }}</strong>
-                <span>{{ day.weekday }}</span>
-              </button>
-            </div>
-          </section>
-        </div>
-
-        <form class="home-main-quick-create" @submit.prevent.stop="submitHomeQuickTodo">
-          <input
-            id="home-quick-todo"
-            v-model="homeQuickTodoText"
-            type="text"
-            autocomplete="off"
-            aria-label="一句话新增"
-            placeholder="一句话新增待办..."
-          />
-          <button type="submit" :disabled="!canSubmitHomeQuickTodo" aria-label="解析并新增待办">
-            <IconSendHorizontal aria-hidden="true" />
-          </button>
-        </form>
-      </section>
-
-      <section class="floating-stats" aria-label="效率统计">
-        <article class="home-stat-card completion-stat-card">
-          <h2>今日完成率</h2>
-          <div class="completion-stat-body">
-            <div
-              class="completion-donut"
-              :style="{ '--completion': `${todayTaskProgress * 3.6}deg` }"
-              aria-label="今日完成率"
-            >
-              <div>
-                <strong>{{ todayTaskProgress }}%</strong>
-                <span>{{ todayCompletionSummary }}</span>
-              </div>
-            </div>
-            <div class="completion-copy">
-              <strong
-                >待处理 <em>{{ todayPendingEvents.length }}</em> 项</strong
-              >
-              <span>任务总数 {{ todayEvents.length }} 项</span>
-            </div>
-          </div>
-        </article>
-
-        <article class="home-stat-card trend-stat-card">
-          <header>
-            <h2>本周趋势</h2>
+        <div class="home-todo-body">
+          <div class="home-todo-stats" aria-label="今日待办统计">
             <button
               type="button"
-              @click.stop="trendStatMode = trendStatMode === 'week' ? 'month' : 'week'"
+              class="home-todo-stat pending-stat"
+              aria-label="查看今日待处理待办"
+              @click.stop="openDayPreviewWithStatusFilter(todayDate, 'pending')"
             >
-              {{ trendStatMode === 'week' ? '本周' : '本月' }}
+              <span class="home-todo-stat-icon" aria-hidden="true">
+                <IconBell />
+              </span>
+              <span class="home-todo-stat-copy">
+                <span>待处理</span>
+                <strong>{{ todayPendingEvents.length }}</strong>
+              </span>
             </button>
-          </header>
-          <div ref="trendChartRef" class="home-trend-chart" aria-label="完成趋势"></div>
-        </article>
+            <button
+              type="button"
+              class="home-todo-stat done-stat"
+              aria-label="查看今日已完成待办"
+              @click.stop="openDayPreviewWithStatusFilter(todayDate, 'done')"
+            >
+              <span class="home-todo-stat-icon" aria-hidden="true">
+                <IconSquareCheck />
+              </span>
+              <span class="home-todo-stat-copy">
+                <span>已完成</span>
+                <strong>{{ todayCompletedCount }}</strong>
+              </span>
+            </button>
+            <button
+              type="button"
+              class="home-todo-stat meeting-stat"
+              aria-label="查看今日会议"
+              @click.stop="openDayPreviewWithTypeFilter(todayDate, 'meeting')"
+            >
+              <span class="home-todo-stat-icon" aria-hidden="true">
+                <IconPresentation />
+              </span>
+              <span class="home-todo-stat-copy">
+                <span>会议</span>
+                <strong>{{ todayMeetingCount }}</strong>
+              </span>
+            </button>
+          </div>
+
+          <div class="home-todo-list-shell">
+            <div class="home-todo-list" aria-label="今日待办列表">
+              <p v-if="!todayPreviewTasks.length" class="home-todo-empty">今日暂无待办</p>
+              <article
+                v-for="task in todayPreviewTasks"
+                :key="task.id"
+                class="home-todo-item"
+                :class="{ 'is-done': task.status === 'done' }"
+              >
+                <button
+                  type="button"
+                  class="home-todo-check"
+                  :class="{ checked: task.status === 'done' }"
+                  :aria-label="task.status === 'done' ? '撤销完成' : '标记完成'"
+                  :disabled="task.completable === false"
+                  @click.stop="toggleTodayTaskStatus(task)"
+                >
+                  <IconCheck v-if="task.status === 'done'" aria-hidden="true" />
+                </button>
+                <button type="button" class="home-todo-item-main" @click.stop="openTodayTask(task)">
+                  <span class="home-todo-item-title">{{ task.title }}</span>
+                  <time>{{ formatHomeTodoMeta(task) }}</time>
+                </button>
+              </article>
+            </div>
+
+            <form class="home-todo-quick-create" @submit.prevent.stop="submitHomeQuickTodo">
+              <input
+                id="home-quick-todo"
+                v-model="homeQuickTodoText"
+                type="text"
+                autocomplete="off"
+                aria-label="一句话新增"
+                placeholder="一句话新增待办..."
+              />
+              <button
+                type="submit"
+                :disabled="!canSubmitHomeQuickTodo"
+                aria-label="解析并新增待办"
+              >
+                <IconSendHorizontal aria-hidden="true" />
+              </button>
+            </form>
+          </div>
+        </div>
       </section>
     </section>
   </div>
@@ -879,12 +752,7 @@ defineExpose({
 
 <style scoped>
 .calendar-workspace {
-  --home-module-height: clamp(190px, 19.6vh, 224px);
-  --home-glass-border: rgba(255, 255, 255, 0.66);
-  --home-glass-bg: linear-gradient(145deg, rgba(255, 255, 255, 0.5), rgba(242, 248, 255, 0.34)),
-    rgba(248, 252, 255, 0.4);
-  --home-glass-shadow: 0 16px 36px -32px rgba(8, 30, 64, 0.34),
-    inset 0 1px 0 rgba(255, 255, 255, 0.78);
+  --home-module-height: clamp(440px, 50vh, 520px);
   --home-ink: #13203a;
   --home-muted: #6d7c93;
   position: relative;
@@ -897,17 +765,6 @@ defineExpose({
   overflow: hidden;
 }
 
-.left-preview-scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  width: auto;
-  border-radius: 0;
-  background: rgba(15, 23, 42, 0.12);
-  box-shadow: none;
-  pointer-events: auto;
-}
-
 .left-column {
   position: absolute;
   inset: 0;
@@ -917,7 +774,6 @@ defineExpose({
 }
 
 .home-main-panel,
-.floating-stats,
 .day-preview-popover {
   pointer-events: auto;
 }
@@ -926,193 +782,388 @@ defineExpose({
   position: absolute;
   right: clamp(32px, 2.4vw, 48px);
   bottom: clamp(24px, 3.2vh, 40px);
-  width: clamp(640px, 38vw, 800px);
+  width: clamp(520px, 32vw, 660px);
   height: var(--home-module-height);
   box-sizing: border-box;
-  border: 1px solid var(--home-glass-border);
-  border-radius: 20px;
-  background: var(--home-glass-bg);
-  padding: 14px 16px;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) 36px;
-  gap: 10px;
-  overflow: hidden;
-  box-shadow: var(--home-glass-shadow);
-  backdrop-filter: blur(25px) saturate(1.16);
-  -webkit-backdrop-filter: blur(25px) saturate(1.16);
-}
-
-.home-stat-card h2 {
-  margin: 0;
-  color: var(--home-ink);
-  letter-spacing: 0;
-}
-
-.home-main-head {
-  min-height: 0;
-  height: 100%;
-  display: grid;
-  grid-template-columns: minmax(0, 1.26fr) minmax(280px, 0.9fr);
-  gap: 10px;
-}
-
-.home-title-metrics {
-  min-width: 0;
-  min-height: 0;
+  border: 1px solid rgba(255, 255, 255, var(--glass-border-opacity, 0.64));
+  border-radius: 24px;
+  background: radial-gradient(
+      circle at 22% 20%,
+      rgba(255, 255, 255, var(--glass-highlight-opacity, 0.7)),
+      rgba(255, 255, 255, 0) 34%
+    ),
+    linear-gradient(
+      145deg,
+      rgba(255, 255, 255, var(--glass-gradient-start, 0.28)),
+      rgba(238, 246, 255, var(--glass-gradient-end, 0.2))
+    ),
+    rgba(248, 252, 255, var(--glass-base-opacity, 0.18));
+  padding: 10px 10px 6px;
   display: flex;
   flex-direction: column;
-}
-
-.home-summary-grid {
-  flex: 1 1 auto;
-  min-height: 0;
-  border: 1px solid rgba(255, 255, 255, 0.54);
-  border-radius: 14px;
-  background: rgba(229, 241, 250, 0.72);
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
   overflow: hidden;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.66);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 20px 36px -30px rgba(18, 38, 72, 0.4);
+  backdrop-filter: blur(var(--glass-blur, 24px)) saturate(var(--glass-saturate, 1.16));
+  -webkit-backdrop-filter: blur(var(--glass-blur, 24px)) saturate(var(--glass-saturate, 1.16));
 }
 
-.home-summary-card {
+.home-todo-calendar-header {
+  flex: 0 0 auto;
+}
+
+.home-todo-calendar-card {
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.58);
+  min-height: 108px;
+  padding: 16px 16px 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+.home-todo-calendar-left {
   min-width: 0;
-  border: 0;
-  border-right: 1px solid rgba(196, 212, 228, 0.66);
-  background: transparent;
-  color: var(--home-ink);
-  padding: 6px 4px 4px;
   display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+}
+
+.home-todo-calendar-left > strong {
+  color: var(--home-ink);
+  font-size: 15px;
+  line-height: 1;
+  font-weight: 950;
+}
+
+.home-todo-calendar-actions {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.home-todo-add-btn {
+  height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #5a9bff 0%, #438bff 100%);
+  color: #ffffff;
+  padding: 0 14px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow:
+    0 10px 22px -12px rgba(67, 139, 255, 0.88),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  transition:
+    background 0.18s ease,
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.home-todo-add-btn:hover {
+  background: linear-gradient(180deg, #6aa5ff 0%, #4f93ff 100%);
+  transform: translateY(-1px);
+  box-shadow:
+    0 14px 26px -10px rgba(67, 139, 255, 0.95),
+    inset 0 1px 0 rgba(255, 255, 255, 0.34);
+}
+
+.home-todo-add-btn svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2.5px;
+}
+
+.home-todo-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.58);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+.home-todo-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.home-todo-stat {
+  min-width: 0;
+  border: 0;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
   transition:
     background 0.18s ease,
     transform 0.18s ease;
 }
 
-.home-summary-card:last-child {
-  border-right: 0;
-}
-
-.home-summary-card:hover {
-  background: rgba(255, 255, 255, 0.28);
+.home-todo-stat:hover {
+  background: rgba(255, 255, 255, 0.92);
   transform: translateY(-1px);
 }
 
-.home-summary-icon {
-  width: 16px;
-  height: 16px;
+.home-todo-stat-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: 0 0 auto;
 }
 
-.home-summary-label {
-  color: #56657d;
-  font-size: 11px;
-  line-height: 1;
-  font-weight: 900;
-  white-space: nowrap;
+.home-todo-stat-icon svg {
+  width: 16px;
+  height: 16px;
 }
 
-.home-summary-value {
-  color: var(--home-ink);
-  font-size: clamp(14px, 1.05vw, 16px);
-  line-height: 1;
-  font-weight: 950;
-}
-
-.meeting-card .home-summary-icon {
+.pending-stat .home-todo-stat-icon {
+  background: rgba(67, 139, 255, 0.14);
   color: #438bff;
 }
 
-.pending-card .home-summary-icon {
-  color: #ff8a4c;
-}
-
-.completed-card .home-summary-icon {
+.done-stat .home-todo-stat-icon {
+  background: rgba(40, 200, 121, 0.14);
   color: #28c879;
 }
 
-.all-card .home-summary-icon {
-  color: #6d7c93;
+.meeting-stat .home-todo-stat-icon {
+  background: rgba(139, 92, 246, 0.14);
+  color: #8b5cf6;
 }
 
-.home-week-card {
+.home-todo-stat-copy {
   min-width: 0;
-  min-height: 0;
-  border: 1px solid rgba(255, 255, 255, 0.58);
-  border-radius: 14px;
-  background: rgba(226, 239, 249, 0.72);
-  padding: 8px 10px 6px;
-  display: grid;
-  grid-template-rows: 22px minmax(0, 1fr);
-  gap: 6px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.66);
-}
-
-.home-week-head,
-.home-week-head > div,
-.home-week-actions {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.home-week-head {
-  justify-content: space-between;
-  gap: 12px;
+.home-todo-stat-copy > span {
+  color: #6d7c93;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 850;
 }
 
-.home-week-head > div:first-child {
-  min-width: 0;
-  gap: 6px;
-}
-
-.home-week-head svg {
-  width: 16px;
-  height: 16px;
-  color: #438bff;
-  flex: 0 0 auto;
-}
-
-.home-week-head strong {
-  overflow: hidden;
+.home-todo-stat-copy strong {
   color: var(--home-ink);
-  font-size: 13px;
+  font-size: 20px;
   line-height: 1;
   font-weight: 950;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.home-week-actions {
+.home-todo-list-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.home-todo-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+}
+
+.home-todo-quick-create {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 4px 5px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   gap: 6px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
 }
 
-.home-week-actions button {
+.home-todo-quick-create input {
+  min-width: 0;
+  height: 32px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #26334f;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.home-todo-quick-create input::placeholder {
+  color: #8b99ae;
+}
+
+.home-todo-quick-create button {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(67, 139, 255, 0.14);
+  color: #438bff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.18s ease;
+}
+
+.home-todo-quick-create button:hover:not(:disabled) {
+  background: rgba(67, 139, 255, 0.22);
+}
+
+.home-todo-quick-create button:disabled {
+  color: rgba(67, 139, 255, 0.4);
+  cursor: not-allowed;
+}
+
+.home-todo-quick-create button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.home-todo-empty {
+  margin: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 4px;
+  color: #8b99ae;
+  font-size: 13px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.home-todo-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 33.3333%;
+  min-height: 56px;
+  box-sizing: border-box;
+  padding: 0 2px;
+  border-top: 1px solid rgba(196, 212, 228, 0.58);
+}
+
+.home-todo-item:first-child {
+  border-top: 0;
+}
+
+.home-todo-check {
   width: 22px;
   height: 22px;
-  border: 0;
-  border-radius: 999px;
-  background: rgba(210, 226, 240, 0.82);
-  color: #6d7c93;
+  border: 2px solid rgba(148, 163, 184, 0.72);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #ffffff;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease;
 }
 
-.home-week-actions button svg {
-  width: 13px;
-  height: 13px;
-  color: currentColor;
+.home-todo-check.checked {
+  border-color: #438bff;
+  background: #438bff;
+}
+
+.home-todo-check:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.home-todo-check svg {
+  width: 12px;
+  height: 12px;
+}
+
+.home-todo-item-main {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.home-todo-item-title {
+  min-width: 0;
+  overflow: hidden;
+  color: #1f2f4d;
+  font-size: 15px;
+  font-weight: 850;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-todo-item time {
+  flex: 0 0 auto;
+  color: #8b99ae;
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.home-todo-item.is-done .home-todo-item-title {
+  color: #9aa6b8;
+  text-decoration: line-through;
+}
+
+.home-todo-item.is-done time {
+  color: #28c879;
 }
 
 .home-week-strip {
-  min-height: 0;
+  min-width: 0;
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   align-items: stretch;
@@ -1122,12 +1173,11 @@ defineExpose({
 .home-week-strip button {
   min-width: 0;
   min-height: 0;
-  height: 100%;
   border: 0;
   border-radius: 10px;
   background: transparent;
   color: #8b99ae;
-  padding: 3px 2px;
+  padding: 4px 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1138,8 +1188,8 @@ defineExpose({
 }
 
 .home-week-strip button strong {
-  width: 20px;
-  height: 20px;
+  width: 28px;
+  height: 28px;
   border-radius: 999px;
   display: inline-flex;
   align-items: center;
@@ -1160,205 +1210,71 @@ defineExpose({
 .home-week-strip button.active strong {
   background: #438bff;
   color: #ffffff;
-  box-shadow: 0 9px 18px -10px rgba(67, 139, 255, 0.84);
+  box-shadow: 0 8px 16px -10px rgba(67, 139, 255, 0.84);
 }
 
-.home-main-quick-create {
-  min-height: 0;
-  height: 100%;
-  box-sizing: border-box;
-  border: 1px solid rgba(255, 255, 255, 0.62);
-  border-radius: 14px;
-  background: rgba(232, 242, 251, 0.74);
-  padding: 4px 6px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 6px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
-}
-
-.home-main-quick-create input {
-  min-width: 0;
-  height: 32px;
+.home-todo-view-all {
+  height: 36px;
   border: 0;
-  outline: 0;
-  background: rgba(255, 255, 255, 0.7);
-  border-radius: 999px;
-  color: #26334f;
-  padding: 0 14px;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 850;
-}
-
-.home-main-quick-create input::placeholder {
-  color: #7c8ba3;
-}
-
-.home-main-quick-create button {
-  width: 32px;
-  height: 32px;
-  border: 0;
-  border-radius: 10px;
-  background: rgba(208, 226, 247, 0.86);
+  border-radius: 12px;
+  background: rgba(67, 139, 255, 0.12);
   color: #438bff;
+  padding: 0 14px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
-}
-
-.home-main-quick-create button:disabled {
-  color: rgba(67, 139, 255, 0.44);
-  cursor: not-allowed;
-}
-
-.home-main-quick-create button svg {
-  width: 18px;
-  height: 18px;
-}
-
-.floating-stats {
-  position: absolute;
-  right: calc(clamp(32px, 2.4vw, 48px) + clamp(640px, 38vw, 800px) + 16px);
-  bottom: clamp(24px, 3.2vh, 40px);
-  width: clamp(620px, 35.5vw, 720px);
-  height: var(--home-module-height);
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-}
-
-.home-stat-card {
-  min-width: 0;
-  min-height: 0;
-  box-sizing: border-box;
-  border: 1px solid rgba(255, 255, 255, 0.66);
-  border-radius: 20px;
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.5), rgba(242, 248, 255, 0.34)),
-    rgba(248, 252, 255, 0.4);
-  padding: 20px 22px;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.78),
-    0 16px 36px -32px rgba(8, 30, 64, 0.34);
-  backdrop-filter: blur(22px) saturate(1.12);
-  -webkit-backdrop-filter: blur(22px) saturate(1.12);
-}
-
-.home-stat-card h2 {
-  font-size: 19px;
-  line-height: 1;
-  font-weight: 950;
-}
-
-.completion-stat-body {
-  height: calc(100% - 25px);
-  min-height: 0;
-  display: grid;
-  grid-template-columns: 132px minmax(0, 1fr);
-  align-items: center;
-  gap: 26px;
-}
-
-.completion-donut {
-  width: 116px;
-  height: 116px;
-  border-radius: 999px;
-  background: conic-gradient(#438bff var(--completion), rgba(205, 218, 234, 0.8) 0);
-  padding: 10px;
-  box-sizing: border-box;
-}
-
-.completion-donut > div {
-  width: 100%;
-  height: 100%;
-  border-radius: inherit;
-  background: rgba(231, 242, 251, 0.96);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.completion-donut strong {
-  color: #438bff;
-  font-size: 29px;
-  line-height: 1;
-  font-weight: 950;
-}
-
-.completion-donut span {
-  color: #3e4d66;
-  font-size: 11px;
-  line-height: 1;
-  font-weight: 950;
-}
-
-.completion-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  color: #31405a;
-  font-size: 15px;
-  font-weight: 950;
-}
-
-.completion-copy em {
-  color: #27bd74;
-  font-style: normal;
-}
-
-.trend-stat-card {
-  display: grid;
-  grid-template-rows: 30px minmax(0, 1fr);
-}
-
-.trend-stat-card header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.trend-stat-card header button {
-  height: 30px;
-  border: 1px solid rgba(255, 255, 255, 0.58);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.3);
-  color: #53627a;
-  padding: 0 12px;
+  gap: 2px;
   font: inherit;
   font-size: 12px;
-  font-weight: 950;
+  font-weight: 900;
+  white-space: nowrap;
   cursor: pointer;
+  transition:
+    background 0.18s ease,
+    transform 0.18s ease;
 }
 
-.home-trend-chart {
-  min-width: 0;
-  min-height: 0;
-  height: 100%;
+.home-todo-view-all:hover {
+  background: rgba(67, 139, 255, 0.18);
+  transform: translateY(-1px);
+}
+
+.home-todo-view-all svg {
+  width: 16px;
+  height: 16px;
 }
 
 .day-preview-popover {
   position: absolute;
   z-index: 999;
-  top: calc(50% + 28px);
-  right: calc(clamp(32px, 2.4vw, 48px) + clamp(640px, 38vw, 800px) + 22px);
+  top: auto;
+  bottom: clamp(24px, 3.2vh, 40px);
+  right: calc(clamp(32px, 2.4vw, 48px) + clamp(520px, 32vw, 660px) + 22px);
   width: min(530px, calc(100vw - 870px));
   height: min(680px, calc(100% - 96px));
   min-width: 460px;
   box-sizing: border-box;
-  border: 1px solid rgba(226, 232, 240, 0.92);
+  border: 1px solid rgba(255, 255, 255, var(--glass-border-opacity, 0.64));
   border-radius: 26px;
-  background: rgba(255, 255, 255, 0.96);
+  background: radial-gradient(
+      circle at 22% 20%,
+      rgba(255, 255, 255, var(--glass-highlight-opacity, 0.7)),
+      rgba(255, 255, 255, 0) 34%
+    ),
+    linear-gradient(
+      145deg,
+      rgba(255, 255, 255, var(--glass-gradient-start, 0.28)),
+      rgba(238, 246, 255, var(--glass-gradient-end, 0.2))
+    ),
+    rgba(248, 252, 255, var(--glass-base-opacity, 0.18));
   padding: 24px;
   overflow: hidden;
-  box-shadow: 0 28px 72px -36px rgba(15, 23, 42, 0.58);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  transform: translateY(-50%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 20px 36px -30px rgba(18, 38, 72, 0.4);
+  backdrop-filter: blur(var(--glass-blur, 24px)) saturate(var(--glass-saturate, 1.16));
+  -webkit-backdrop-filter: blur(var(--glass-blur, 24px)) saturate(var(--glass-saturate, 1.16));
+  transform: none;
 }
 
 .day-preview-popover :deep(.preview-panel) {
@@ -1375,17 +1291,12 @@ defineExpose({
 .day-preview-float-enter-from,
 .day-preview-float-leave-to {
   opacity: 0;
-  transform: translate(12px, -50%);
+  transform: translate(12px, 0);
 }
 
 @media (max-width: 1280px) {
   .home-main-panel {
-    width: min(720px, calc(100vw - 64px));
-  }
-
-  .floating-stats {
-    width: min(620px, calc(100vw - 64px));
-    right: calc(32px + min(720px, calc(100vw - 64px)) + 16px);
+    width: min(600px, calc(100vw - 64px));
   }
 }
 
@@ -1403,23 +1314,16 @@ defineExpose({
     pointer-events: auto;
   }
 
-  .home-main-panel,
-  .floating-stats {
+  .home-main-panel {
     position: relative;
     top: auto;
     right: auto;
     bottom: auto;
     left: auto;
     width: 100%;
-  }
-
-  .home-main-panel {
     min-height: 0;
-    height: 230px;
-  }
-
-  .floating-stats {
-    height: 230px;
+    height: auto;
+    min-height: 440px;
   }
 
   .day-preview-popover {
@@ -1436,35 +1340,25 @@ defineExpose({
 @media (max-width: 760px) {
   .home-main-panel {
     height: auto;
-    grid-template-rows: auto 36px;
+    min-height: 0;
     padding: 16px;
   }
 
-  .home-main-head {
-    grid-template-columns: 1fr;
-    height: auto;
-    max-height: none;
-  }
-
-  .home-summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .home-summary-card:nth-child(2) {
-    border-right: 0;
-  }
-
-  .home-summary-card:nth-child(-n + 2) {
-    border-bottom: 1px solid rgba(196, 212, 228, 0.66);
-  }
-
-  .floating-stats {
-    height: auto;
+  .home-todo-stats {
     grid-template-columns: 1fr;
   }
 
-  .home-stat-card {
-    min-height: 210px;
+  .home-todo-calendar-card {
+    grid-template-columns: 1fr;
+  }
+
+  .home-todo-calendar-actions {
+    flex-direction: row;
+  }
+
+  .home-todo-add-btn,
+  .home-todo-view-all {
+    flex: 1 1 0;
   }
 }
 </style>

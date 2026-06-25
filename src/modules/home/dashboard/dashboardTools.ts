@@ -22,7 +22,7 @@ export type DashboardToolTarget = Pick<DashboardTool, 'routeName' | 'agentKey' |
 
 export const dashboardTools: DashboardTool[] = [
   { name: '图文分析', icon: IconImage, tone: 'orange', agentKey: 'image-analysis' },
-  { name: '办事咨询', icon: IconMessageCircle, tone: 'blue', routeName: 'LeaderBoard' },
+  { name: '力宝百问', icon: IconMessageCircle, tone: 'blue', routeName: 'LeaderBoard' },
   { name: '会议纪要', icon: IconFileText, tone: 'green', agentKey: 'meeting-notes' },
   { name: 'PPT创作', icon: IconPresentation, tone: 'violet', agentKey: 'ppt-creator' },
   { name: '智体工坊', icon: IconBox, tone: 'purple', agentKey: 'agent-workshop' },

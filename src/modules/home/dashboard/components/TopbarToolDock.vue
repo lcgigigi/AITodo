@@ -47,17 +47,11 @@ function selectTool(tool: DashboardTool) {
   max-width: 100%;
   min-height: 44px;
   box-sizing: border-box;
-  border: 1px solid rgba(255, 255, 255, 0.68);
-  border-radius: 999px;
-  background: rgba(227, 240, 252, 0.66);
-  padding: 4px 7px;
+  padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.66),
-    0 12px 26px -24px rgba(15, 32, 61, 0.42);
+  gap: 4px;
   overflow: hidden;
 }
 

@@ -670,6 +670,7 @@ function openEventDetailById(id: string) {
 }
 
 defineExpose({
+  openCreateForm,
   openEventDetailById,
   showDiscardWarning,
   applyStatusFilter,
@@ -978,7 +979,7 @@ defineExpose({
 
       <section
         class="inline-section todo-details-section"
-        :class="{ 'has-parse-scrim': isParsing, 'is-readonly': isViewMode }"
+        :class="{ 'is-readonly': isViewMode }"
         :aria-disabled="isFormReadonly"
       >
         <div class="basic-info-layout" :inert="isFormReadonly">
@@ -1983,30 +1984,6 @@ p {
 
 .todo-details-section {
   position: relative;
-}
-
-.todo-details-section.has-parse-scrim {
-  z-index: 1;
-}
-
-.todo-details-section.has-parse-scrim::before {
-  content: '';
-  position: absolute;
-  z-index: 2;
-  inset: -10px -2px -6px;
-  border-radius: 16px;
-  background: rgba(248, 250, 252, 0.58);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.58);
-  pointer-events: auto;
-  cursor: wait;
-}
-
-@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .todo-details-section.has-parse-scrim::before {
-    background: rgba(248, 250, 252, 0.46);
-    -webkit-backdrop-filter: blur(1px);
-    backdrop-filter: blur(1px);
-  }
 }
 
 .ai-inline-section {

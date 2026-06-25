@@ -1,6 +1,5 @@
 export type CalendarEventType = 'meeting' | 'task' | 'approval' | 'ai'
 export type CalendarEventStatus = 'todo' | 'done'
-export type CalendarEventPriority = 'normal' | 'urgent'
 export type CalendarUserRole = 'leader' | 'employee'
 export type CalendarTodoScope = 'self' | 'assigned_by_me' | 'assigned_to_me'
 export type CalendarTodoFormMode = 'scheduled' | 'deadline'
@@ -19,7 +18,6 @@ export interface CalendarEvent {
   type: CalendarEventType
   owner: string
   status: CalendarEventStatus
-  priority?: CalendarEventPriority
   source?: string
   creatorId?: string
   creatorName?: string

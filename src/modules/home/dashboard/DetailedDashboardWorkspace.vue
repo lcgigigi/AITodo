@@ -2,10 +2,12 @@
 import { computed, onMounted, ref } from 'vue'
 import type { Component } from 'vue'
 import IconAlarmClock from '~icons/lucide/alarm-clock'
+import IconArrowUpRight from '~icons/lucide/arrow-up-right'
 import IconCheck from '~icons/lucide/check'
+import IconChevronDown from '~icons/lucide/chevron-down'
 import IconChevronLeft from '~icons/lucide/chevron-left'
 import IconChevronRight from '~icons/lucide/chevron-right'
-import IconFlag from '~icons/lucide/flag'
+import IconCircle from '~icons/lucide/circle'
 import IconSendHorizontal from '~icons/lucide/send-horizontal'
 import { routeConfig } from '@/config/route.config'
 import { useFeedbackStore } from '@/stores/feedback.store'
@@ -23,7 +25,7 @@ import {
 import { useDashboardTodos } from './useDashboardTodos'
 
 type DetailMode = 'simple' | 'detail'
-type DetailFilter = 'all' | 'pending' | 'done' | 'urgent' | 'overdue'
+type DetailFilter = 'all' | 'pending' | 'done' | 'overdue'
 type DetailTone = 'blue' | 'green' | 'orange' | 'violet' | 'cyan' | 'slate'
 
 type FilterItem = {
@@ -39,14 +41,6 @@ type MonthDay = {
   isToday: boolean
   isSelected: boolean
   dots: DetailTone[]
-}
-
-type TrendPoint = {
-  key: string
-  label: string
-  value: number
-  x: number
-  y: number
 }
 
 const emit = defineEmits<{
@@ -84,7 +78,6 @@ const filters: FilterItem[] = [
   { value: 'all', label: '全部' },
   { value: 'pending', label: '待处理' },
   { value: 'done', label: '已完成' },
-  { value: 'urgent', label: '高优先级', icon: IconFlag },
   { value: 'overdue', label: '逾期', icon: IconAlarmClock },
 ]
 
@@ -95,16 +88,8 @@ const pendingEvents = computed(() =>
 const doneCount = computed(
   () => selectedDateEvents.value.filter((event) => event.status === 'done').length,
 )
-const urgentCount = computed(
-  () => selectedDateEvents.value.filter((event) => event.priority === 'urgent').length,
-)
 const overdueCount = computed(
   () => selectedDateEvents.value.filter((event) => isOverdueEvent(event)).length,
-)
-const completionRate = computed(() =>
-  selectedDateEvents.value.length
-    ? Math.round((doneCount.value / selectedDateEvents.value.length) * 100)
-    : 0,
 )
 const selectedDateLabel = computed(() => formatDateTitle(selectedDate.value))
 const selectedDateShortLabel = computed(() => formatDateShortTitle(selectedDate.value))
@@ -113,9 +98,6 @@ const filteredTasks = computed(() => {
   if (activeFilter.value === 'pending') return pendingEvents.value
   if (activeFilter.value === 'done') {
     return selectedDateEvents.value.filter((event) => event.status === 'done')
-  }
-  if (activeFilter.value === 'urgent') {
-    return selectedDateEvents.value.filter((event) => event.priority === 'urgent')
   }
   if (activeFilter.value === 'overdue') {
     return selectedDateEvents.value.filter((event) => isOverdueEvent(event))
@@ -127,16 +109,11 @@ const filterCounts = computed<Record<DetailFilter, number>>(() => ({
   all: selectedDateEvents.value.length,
   pending: pendingEvents.value.length,
   done: doneCount.value,
-  urgent: urgentCount.value,
   overdue: overdueCount.value,
 }))
 
 const monthDays = computed(() => buildMonthDays())
 const scheduleEvents = computed(() => selectedDateEvents.value)
-const trendPoints = computed(() => buildTrendPoints())
-const trendPolyline = computed(() =>
-  trendPoints.value.map((point) => `${point.x},${point.y}`).join(' '),
-)
 
 onMounted(() => {
   void initializeDetailData()
@@ -319,44 +296,6 @@ function buildMonthDays(): MonthDay[] {
   })
 }
 
-function buildTrendPoints(): TrendPoint[] {
-  const weekDates = getWeekDates(selectedDate.value)
-  const counts = weekDates.map((date) => completedEventCountByDate(date))
-  const maxCount = Math.max(...counts, 1)
-  const labels = weekDates.map((date) => {
-    const value = new Date(`${date}T12:00:00`)
-    return ['日', '一', '二', '三', '四', '五', '六'][value.getDay()]
-  })
-
-  return weekDates.map((date, index) => {
-    const x = 16 + index * 29
-    const y = 104 - (counts[index] / maxCount) * 58
-    return {
-      key: date,
-      label: labels[index],
-      value: counts[index],
-      x,
-      y,
-    }
-  })
-}
-
-function getWeekDates(anchorDate: string) {
-  const start = new Date(`${anchorDate}T12:00:00`)
-  const offset = (start.getDay() + 6) % 7
-  start.setDate(start.getDate() - offset)
-
-  return Array.from({ length: 7 }, (_, index) => {
-    const date = new Date(start)
-    date.setDate(start.getDate() + index)
-    return ymd(date)
-  })
-}
-
-function completedEventCountByDate(date: string) {
-  return (eventMap.value.get(date) ?? []).filter((event) => event.status === 'done').length
-}
-
 function getDayDots(dayEvents: CalendarEvent[]): DetailTone[] {
   const tones: DetailTone[] = []
 
@@ -396,7 +335,6 @@ function getTaskTone(event: CalendarEvent): DetailTone {
   if (event.type === 'meeting') return 'blue'
   if (event.type === 'approval') return 'green'
   if (event.type === 'ai') return 'cyan'
-  if (event.priority === 'urgent') return 'orange'
   if (event.status === 'done') return 'green'
   if (isRejectedEvent(event)) return 'slate'
   return 'violet'
@@ -444,7 +382,7 @@ function monthLabel(date: Date) {
 <template>
   <section class="detail-workspace" aria-label="首页详细模式">
     <!-- Left Column -->
-    <aside class="detail-left-panel" aria-label="快捷入口和统计">
+    <aside class="detail-left-panel" aria-label="快捷入口">
       <nav class="detail-tool-panel" aria-label="AI工具">
         <button
           v-for="tool in dashboardTools"
@@ -457,36 +395,12 @@ function monthLabel(date: Date) {
           <span class="detail-tool-icon" aria-hidden="true">
             <component :is="tool.icon" />
           </span>
-          <span>{{ tool.name }}</span>
+          <span class="detail-tool-name">{{ tool.name }}</span>
+          <span class="detail-tool-go" aria-hidden="true">
+            <IconArrowUpRight />
+          </span>
         </button>
       </nav>
-      <div class="floating-stats">
-        <article class="mini-stat completion-card side-content-card">
-          <h2>今日完成率</h2>
-          <div
-            class="completion-ring"
-            :style="{ '--completion': `${completionRate * 3.6}deg` }"
-            aria-label="当日完成率"
-          >
-            <div>
-              <strong>{{ completionRate }}%</strong>
-              <span>{{ doneCount }}/{{ selectedDateEvents.length }} 已完成</span>
-            </div>
-          </div>
-        </article>
-
-        <article class="mini-stat trend-card side-content-card">
-          <header>
-            <h2>本周趋势</h2>
-          </header>
-          <svg class="trend-svg" viewBox="0 0 210 128" role="img" aria-label="本周完成趋势">
-            <polyline v-if="trendPolyline" :points="trendPolyline" />
-            <g>
-              <circle v-for="point in trendPoints" :key="point.key" :cx="point.x" :cy="point.y" />
-            </g>
-          </svg>
-        </article>
-      </div>
     </aside>
 
     <!-- 中右一体 -->
@@ -503,10 +417,6 @@ function monthLabel(date: Date) {
               已完成 <span class="num">{{ filterCounts.done }}</span>
               <span class="divider">|</span>
               待处理 <span class="num">{{ filterCounts.pending }}</span>
-              <span class="divider">|</span>
-              <span class="text-urgent"
-                >高优先级 <span class="num">{{ filterCounts.urgent }}</span></span
-              >
             </p>
           </header>
 
@@ -521,7 +431,6 @@ function monthLabel(date: Date) {
               class="filter-pill"
               :class="{
                 active: activeFilter === filter.value,
-                'is-urgent': filter.value === 'urgent',
               }"
               :aria-pressed="activeFilter === filter.value"
               @click="activeFilter = filter.value"
@@ -568,8 +477,7 @@ function monthLabel(date: Date) {
                 </div>
 
                 <div class="task-right">
-                  <span v-if="task.priority === 'urgent'" class="task-priority-text">高优先级</span>
-                  <span v-else-if="task.status === 'done'" class="task-done-text">已完成</span>
+                  <span v-if="task.status === 'done'" class="task-done-text">已完成</span>
                 </div>
               </div>
 
@@ -617,29 +525,52 @@ function monthLabel(date: Date) {
       </main>
 
       <aside class="detail-side-panel" aria-label="日历和日程">
-        <div class="mode-segment-wrapper">
-          <div class="mode-segment" role="group" aria-label="首页模式">
-            <button type="button" @click="emit('switch-mode', 'simple')">总览模式</button>
-            <button type="button" class="active">工作模式</button>
+        <div class="detail-side-toolbar">
+          <div class="mode-segment-wrapper">
+            <div class="mode-segment" role="group" aria-label="首页模式">
+              <button type="button" @click="emit('switch-mode', 'simple')">总览模式</button>
+              <button type="button" class="active">工作模式</button>
+            </div>
+          </div>
+
+          <div class="view-control-cluster" aria-label="日历视图">
+            <button type="button" class="calendar-menu-btn" aria-label="展开日历视图选项">
+              <IconChevronDown aria-hidden="true" />
+            </button>
+            <div class="calendar-range-segment" role="group" aria-label="日历范围">
+              <button type="button" class="active" aria-pressed="true">月</button>
+              <button type="button" aria-pressed="false" disabled>周</button>
+            </div>
           </div>
         </div>
 
         <section class="calendar-card side-content-card" aria-label="月历">
           <header class="calendar-header-mock">
-            <button
-              type="button"
-              aria-label="上个月"
-              @click="changeMonth(-1)"
-              class="month-nav-btn"
-            >
-              <IconChevronLeft aria-hidden="true" />
-            </button>
-            <h2 @click="goToday" style="cursor: pointer" title="回到今天">
-              {{ monthLabel(currentMonth) }}
-            </h2>
-            <button type="button" aria-label="下个月" @click="changeMonth(1)" class="month-nav-btn">
-              <IconChevronRight aria-hidden="true" />
-            </button>
+            <div class="calendar-month-group">
+              <h2 @click="goToday" title="回到今天">{{ monthLabel(currentMonth) }}</h2>
+              <button
+                type="button"
+                aria-label="上个月"
+                @click="changeMonth(-1)"
+                class="month-nav-btn"
+              >
+                <IconChevronLeft aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                aria-label="下个月"
+                @click="changeMonth(1)"
+                class="month-nav-btn"
+              >
+                <IconChevronRight aria-hidden="true" />
+              </button>
+            </div>
+            <div class="calendar-action-group">
+              <button type="button" class="today-chip" @click="goToday">今天</button>
+              <button type="button" class="today-ring-btn" aria-label="回到今天" @click="goToday">
+                <IconCircle aria-hidden="true" />
+              </button>
+            </div>
           </header>
 
           <div class="calendar-placeholder-wrapper">
@@ -696,6 +627,12 @@ function monthLabel(date: Date) {
               <span :class="`tone-${getTaskTone(task)}`">{{ getTaskTypeLabel(task) }}</span>
             </article>
           </div>
+
+          <footer v-if="scheduleEvents.length" class="schedule-footer">
+            <button type="button" @click="activeFilter = 'all'">
+              查看全部日程（{{ scheduleEvents.length }}）<IconChevronRight aria-hidden="true" />
+            </button>
+          </footer>
         </section>
       </aside>
     </section>
@@ -720,10 +657,12 @@ function monthLabel(date: Date) {
   --content-card-blur: blur(20px) saturate(1.14);
   position: relative;
   isolation: isolate;
+  width: calc(100% - clamp(48px, 3.8vw, 76px));
   height: 100%;
   min-height: 0;
   box-sizing: border-box;
-  padding: clamp(12px, 1.2vw, 20px) clamp(6px, 0.6vw, 12px);
+  margin: 0 auto;
+  padding: clamp(12px, 1.2vw, 20px) 0;
   display: grid;
   grid-template-columns: minmax(264px, 336px) minmax(0, 1fr);
   gap: clamp(16px, 1.4vw, 24px);
@@ -744,7 +683,7 @@ function monthLabel(date: Date) {
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(403px, 490px);
+  grid-template-columns: minmax(0, 1fr) minmax(456px, 43%);
   gap: 0;
   overflow: hidden;
   border: 1px solid var(--home-glass-border);
@@ -779,7 +718,7 @@ function monthLabel(date: Date) {
 .detail-left-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
   min-height: 0;
 }
 
@@ -787,19 +726,18 @@ function monthLabel(date: Date) {
   flex: 1;
   min-height: 0;
   box-sizing: border-box;
-  padding: 14px;
-  border: 1px solid var(--home-glass-border);
-  border-radius: var(--home-glass-radius);
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.38), rgba(242, 248, 255, 0.24)),
-    rgba(248, 252, 255, 0.32);
-  box-shadow: var(--home-glass-shadow);
-  backdrop-filter: var(--home-glass-blur);
-  -webkit-backdrop-filter: var(--home-glass-blur);
+  padding: 0 2px 6px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-auto-rows: auto;
   align-content: start;
-  gap: 12px;
+  gap: 16px;
   overflow: auto;
   scrollbar-width: none;
 }
@@ -809,56 +747,159 @@ function monthLabel(date: Date) {
 }
 
 .detail-tool-item {
+  position: relative;
+  overflow: hidden;
   min-width: 0;
   aspect-ratio: 1;
-  border: 1px solid var(--content-card-border);
-  border-radius: 16px;
-  background: var(--content-card-bg);
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  border-radius: 24px;
+  background: radial-gradient(
+      circle at 22% 20%,
+      rgba(255, 255, 255, 0.96),
+      rgba(255, 255, 255, 0) 34%
+    ),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.66), rgba(238, 246, 255, 0.46)),
+    rgba(248, 252, 255, 0.42);
   color: #243656;
-  padding: 14px 10px 12px;
+  padding: 18px 12px 16px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 12px;
   font: inherit;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 900;
   line-height: 1.2;
   text-align: center;
   white-space: normal;
   cursor: pointer;
-  box-shadow: var(--content-card-shadow);
-  backdrop-filter: var(--content-card-blur);
-  -webkit-backdrop-filter: var(--content-card-blur);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 20px 36px -30px rgba(18, 38, 72, 0.46);
+  backdrop-filter: blur(18px) saturate(1.12);
+  -webkit-backdrop-filter: blur(18px) saturate(1.12);
   transition:
     background 0.18s ease,
     transform 0.18s ease,
+    border-color 0.18s ease,
     box-shadow 0.18s ease;
+}
+
+.detail-tool-item::before {
+  position: absolute;
+  right: -22px;
+  top: -22px;
+  width: 74px;
+  height: 74px;
+  border-radius: 999px;
+  background: var(--tool-glow, rgba(47, 124, 255, 0.16));
+  opacity: 0.84;
+  content: '';
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.detail-tool-item::after {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: 13px;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--tool-accent, #2f7cff), transparent);
+  opacity: 0.16;
+  content: '';
 }
 
 .detail-tool-item:hover,
 .detail-tool-item:focus-visible {
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.62), rgba(248, 250, 252, 0.46));
-  transform: translateY(-1px);
-  box-shadow: 0 14px 32px -20px rgba(15, 23, 42, 0.16);
+  border-color: rgba(255, 255, 255, 0.96);
+  background: radial-gradient(circle at 22% 20%, rgba(255, 255, 255, 1), rgba(255, 255, 255, 0) 36%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.82), rgba(238, 246, 255, 0.58)),
+    rgba(248, 252, 255, 0.5);
+  transform: translateY(-4px) rotate(var(--hover-tilt, -0.8deg));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 22px 38px -26px rgba(18, 38, 72, 0.58);
   outline: none;
 }
 
+.detail-tool-item:hover::before,
+.detail-tool-item:focus-visible::before {
+  opacity: 1;
+  transform: scale(1.18);
+}
+
 .detail-tool-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
+  position: relative;
+  z-index: 1;
+  width: 46px;
+  height: 46px;
+  border-radius: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.68),
+    0 14px 26px -22px currentColor;
 }
 
 .detail-tool-icon svg {
-  width: 16px;
-  height: 16px;
+  width: 22px;
+  height: 22px;
+  stroke-width: 2.3;
+}
+
+.detail-tool-name {
+  position: relative;
+  z-index: 1;
+  max-width: 100%;
+  color: #1b2b4c;
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.detail-tool-go {
+  position: absolute;
+  z-index: 1;
+  right: 12px;
+  top: 12px;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.54);
+  color: rgba(80, 96, 125, 0.74);
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transform: translate(-4px, 4px);
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.detail-tool-go svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.6;
+}
+
+.detail-tool-item:hover .detail-tool-go,
+.detail-tool-item:focus-visible .detail-tool-go {
+  opacity: 1;
+  transform: translate(0, 0);
+}
+
+.detail-tool-item:nth-child(2n) {
+  --hover-tilt: 0.8deg;
+}
+
+.detail-tool-item:nth-child(3n) {
+  --hover-tilt: -1.1deg;
 }
 
 .tone-orange .detail-tool-icon {
@@ -866,14 +907,29 @@ function monthLabel(date: Date) {
   color: #ff7a3d;
 }
 
+.tone-orange.detail-tool-item {
+  --tool-accent: #ff7a3d;
+  --tool-glow: rgba(255, 122, 61, 0.2);
+}
+
 .tone-blue .detail-tool-icon {
   background: #dbeafe;
   color: #2f7cff;
 }
 
+.tone-blue.detail-tool-item {
+  --tool-accent: #2f7cff;
+  --tool-glow: rgba(47, 124, 255, 0.2);
+}
+
 .tone-green .detail-tool-icon {
   background: #d9f8e7;
   color: #20bb77;
+}
+
+.tone-green.detail-tool-item {
+  --tool-accent: #20bb77;
+  --tool-glow: rgba(32, 187, 119, 0.2);
 }
 
 .tone-violet .detail-tool-icon,
@@ -882,9 +938,20 @@ function monthLabel(date: Date) {
   color: #8b5cf6;
 }
 
+.tone-violet.detail-tool-item,
+.tone-purple.detail-tool-item {
+  --tool-accent: #8b5cf6;
+  --tool-glow: rgba(139, 92, 246, 0.18);
+}
+
 .tone-cyan .detail-tool-icon {
   background: #d7f7ff;
   color: #09b6d7;
+}
+
+.tone-cyan.detail-tool-item {
+  --tool-accent: #09b6d7;
+  --tool-glow: rgba(9, 182, 215, 0.2);
 }
 
 .tone-sky .detail-tool-icon {
@@ -892,91 +959,19 @@ function monthLabel(date: Date) {
   color: #26a4e8;
 }
 
+.tone-sky.detail-tool-item {
+  --tool-accent: #26a4e8;
+  --tool-glow: rgba(38, 164, 232, 0.2);
+}
+
 .tone-slate .detail-tool-icon {
   background: #e7edf5;
   color: #70819a;
 }
 
-.floating-stats {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  height: 160px;
-}
-
-.mini-stat {
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-}
-
-.mini-stat h2 {
-  margin: 0 0 12px;
-  color: #172340;
-  font-size: 15px;
-  font-weight: 900;
-}
-
-.completion-ring {
-  --completion: 0deg;
-  width: 76px;
-  height: 76px;
-  margin: 0 auto;
-  border-radius: 50%;
-  background: conic-gradient(var(--detail-blue) var(--completion), rgba(189, 210, 232, 0.4) 0);
-  display: grid;
-  place-items: center;
-  position: relative;
-}
-
-.completion-ring::before {
-  width: 56px;
-  height: 56px;
-  border-radius: inherit;
-  background: rgba(255, 255, 255, 0.48);
-  content: '';
-}
-
-.completion-ring > div {
-  position: absolute;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.completion-ring strong {
-  color: var(--detail-blue);
-  font-size: 22px;
-  line-height: 1;
-  font-weight: 900;
-}
-
-.completion-ring span {
-  margin-top: 4px;
-  color: #60708d;
-  font-size: 10px;
-  font-weight: 800;
-}
-
-.trend-card .trend-svg {
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-
-.trend-svg polyline {
-  fill: none;
-  stroke: var(--detail-blue);
-  stroke-width: 3;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.trend-svg circle {
-  r: 4;
-  fill: #ffffff;
-  stroke: var(--detail-blue);
-  stroke-width: 2.5;
+.tone-slate.detail-tool-item {
+  --tool-accent: #70819a;
+  --tool-glow: rgba(112, 129, 154, 0.16);
 }
 
 .detail-main-header {
@@ -1009,13 +1004,6 @@ function monthLabel(date: Date) {
   font-weight: 800;
 }
 
-.text-urgent {
-  color: #ef4444;
-}
-.text-urgent .num {
-  color: #ef4444;
-}
-
 .filter-row {
   display: flex;
   align-items: center;
@@ -1046,16 +1034,6 @@ function monthLabel(date: Date) {
   background: var(--detail-blue);
   color: white;
   box-shadow: 0 4px 12px rgba(47, 124, 255, 0.3);
-}
-
-.filter-pill.is-urgent {
-  color: #ef4444;
-}
-
-.filter-pill.active.is-urgent {
-  background: #ef4444;
-  color: white;
-  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
 }
 
 .task-list {
@@ -1202,11 +1180,6 @@ function monthLabel(date: Date) {
   align-items: center;
 }
 
-.task-priority-text {
-  color: #ef4444;
-  font-size: 13px;
-  font-weight: 900;
-}
 .task-done-text {
   color: #10b981;
   font-size: 13px;
@@ -1286,10 +1259,10 @@ function monthLabel(date: Date) {
 .detail-side-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
   min-height: 0;
   min-width: 0;
-  padding: 14px;
+  padding: 18px 18px 18px 8px;
   box-sizing: border-box;
   background: transparent;
 }
@@ -1304,156 +1277,435 @@ function monthLabel(date: Date) {
 }
 
 .calendar-card {
-  padding: 16px;
-  flex: 0 0 auto;
+  flex: 0 0 clamp(390px, 40vh, 520px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 24px 26px 26px;
+  border-radius: 24px;
+  background: linear-gradient(142deg, rgba(255, 255, 255, 0.64), rgba(239, 247, 255, 0.42)),
+    rgba(249, 252, 255, 0.56);
+  border-color: rgba(255, 255, 255, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.86),
+    0 18px 38px -30px rgba(20, 48, 92, 0.36);
 }
 
 .schedule-card {
   flex: 1;
   min-height: 0;
-  padding: 16px;
+  padding: 24px 26px 22px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  border-radius: 24px;
+  background: linear-gradient(142deg, rgba(255, 255, 255, 0.62), rgba(239, 247, 255, 0.42)),
+    rgba(249, 252, 255, 0.54);
+  border-color: rgba(255, 255, 255, 0.7);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.84),
+    0 18px 38px -30px rgba(20, 48, 92, 0.32);
+}
+
+.detail-side-toolbar {
+  flex: 0 0 auto;
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
 }
 
 .mode-segment-wrapper {
-  flex: 0 0 auto;
-  margin-bottom: 0;
+  width: min(288px, 50%);
+  flex: 0 1 288px;
 }
 .mode-segment {
   display: flex;
-  background: rgba(255, 255, 255, 0.28);
-  border: 1px solid rgba(255, 255, 255, 0.48);
+  width: 100%;
+  min-width: 0;
+  background: rgba(238, 246, 255, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.68);
   border-radius: 999px;
-  padding: 4px;
-  backdrop-filter: blur(12px) saturate(1.06);
-  -webkit-backdrop-filter: blur(12px) saturate(1.06);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42);
+  padding: 5px;
+  backdrop-filter: blur(18px) saturate(1.12);
+  -webkit-backdrop-filter: blur(18px) saturate(1.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.76),
+    0 14px 28px -24px rgba(20, 48, 92, 0.38);
 }
 .mode-segment button {
   flex: 1;
-  height: 36px;
+  min-width: 0;
+  height: 38px;
   border: none;
   border-radius: 999px;
   background: transparent;
-  color: #60708d;
+  color: #5f7192;
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 900;
   cursor: pointer;
+  transition:
+    background 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
 }
 .mode-segment button.active {
-  background: var(--detail-blue);
+  background: linear-gradient(180deg, #3e8aff, #2575f5);
   color: white;
-  box-shadow: 0 4px 12px rgba(47, 124, 255, 0.3);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.32),
+    0 9px 18px -10px rgba(37, 117, 245, 0.7);
+}
+
+.mode-segment button:focus-visible,
+.calendar-menu-btn:focus-visible,
+.calendar-range-segment button:focus-visible,
+.month-nav-btn:focus-visible,
+.today-chip:focus-visible,
+.today-ring-btn:focus-visible,
+.all-schedule-btn:focus-visible,
+.schedule-footer button:focus-visible {
+  outline: 2px solid rgba(47, 124, 255, 0.65);
+  outline-offset: 2px;
+}
+
+.view-control-cluster {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.calendar-menu-btn {
+  width: 46px;
+  height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.66);
+  border-radius: 16px;
+  background: rgba(238, 246, 255, 0.56);
+  color: #5f7192;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(16px) saturate(1.1);
+  -webkit-backdrop-filter: blur(16px) saturate(1.1);
+}
+
+.calendar-menu-btn svg {
+  width: 17px;
+  height: 17px;
+}
+
+.calendar-range-segment {
+  width: 140px;
+  height: 40px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.66);
+  border-radius: 17px;
+  background: rgba(238, 246, 255, 0.56);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(16px) saturate(1.1);
+  -webkit-backdrop-filter: blur(16px) saturate(1.1);
+}
+
+.calendar-range-segment button {
+  flex: 1;
+  height: 30px;
+  border: none;
+  border-radius: 11px;
+  background: transparent;
+  color: #6a7b98;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.calendar-range-segment button.active {
+  background: linear-gradient(180deg, #3e8aff, #2575f5);
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.32),
+    0 8px 16px -10px rgba(37, 117, 245, 0.72);
+}
+
+.calendar-range-segment button:disabled {
+  cursor: default;
+  opacity: 1;
 }
 
 .calendar-header-mock {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 16px;
-  margin-bottom: 16px;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 20px;
 }
+
+.calendar-month-group {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
 .calendar-header-mock h2 {
   margin: 0;
-  font-size: 16px;
+  color: #142142;
+  font-size: 19px;
   font-weight: 900;
-  color: #101936;
+  white-space: nowrap;
+  cursor: pointer;
 }
 .month-nav-btn {
   border: none;
   background: transparent;
-  color: #60708d;
+  color: #273b65;
   cursor: pointer;
   display: grid;
   place-items: center;
-  padding: 4px;
-  border-radius: 4px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 10px;
+  transition:
+    background 160ms ease,
+    color 160ms ease;
 }
 .month-nav-btn:hover {
-  background: rgba(0, 0, 0, 0.05);
+  background: rgba(47, 124, 255, 0.1);
+  color: var(--detail-blue);
 }
 .month-nav-btn svg {
-  width: 16px;
-  height: 16px;
+  width: 19px;
+  height: 19px;
+  stroke-width: 2.4;
+}
+
+.calendar-action-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.today-chip,
+.today-ring-btn {
+  height: 36px;
+  border: 1px solid rgba(199, 216, 241, 0.78);
+  background: rgba(248, 251, 255, 0.62);
+  color: #2f7cff;
+  font: inherit;
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.74);
+}
+
+.today-chip {
+  min-width: 58px;
+  border-radius: 12px;
+  padding: 0 12px;
+  font-size: 14px;
+}
+
+.today-ring-btn {
+  width: 42px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  color: #6980a1;
+}
+
+.today-ring-btn svg {
+  width: 17px;
+  height: 17px;
+  stroke-width: 2.6;
 }
 
 .calendar-placeholder-wrapper {
-  border-radius: 12px;
-  padding: 4px 0 0;
+  flex: 1;
+  min-height: 0;
+  border-radius: 14px;
+  padding: 0;
   background: transparent;
 }
 
 .calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 8px;
+  grid-template-rows: 44px repeat(6, minmax(0, 1fr));
+  height: 100%;
+  column-gap: 0;
+  row-gap: 0;
   text-align: center;
 }
 .week-label {
-  font-size: 12px;
-  color: #60708d;
-  font-weight: 800;
-  margin-bottom: 8px;
+  min-width: 0;
+  height: 44px;
+  border-bottom: 1px solid rgba(166, 186, 214, 0.24);
+  color: #687999;
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  font-weight: 900;
 }
 .month-day {
-  height: 32px;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
   border: none;
   background: transparent;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 800;
-  color: #101936;
+  border-radius: 14px;
+  color: #162442;
   cursor: pointer;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 3px;
+  font: inherit;
+  transition:
+    color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.month-day:hover {
+  background: rgba(47, 124, 255, 0.08);
+}
+
+.month-day strong {
+  position: relative;
+  z-index: 1;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1;
+  transition:
+    background 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
 }
 .month-day.muted {
-  color: #a0aec0;
+  color: #a9b6c9;
 }
-.month-day.today {
-  background: var(--detail-blue);
+.month-day.today:not(.selected) strong {
+  color: var(--detail-blue);
+  box-shadow: inset 0 0 0 1px rgba(47, 124, 255, 0.24);
+}
+
+.month-day.selected {
   color: white;
 }
+
+.month-day.selected strong {
+  width: 50px;
+  height: 50px;
+  color: #fff;
+  background: linear-gradient(180deg, #4c8dff, #2879ff);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 10px 22px -12px rgba(40, 121, 255, 0.82);
+}
 .day-dots {
+  position: relative;
+  z-index: 2;
+  min-height: 6px;
   display: flex;
-  gap: 2px;
-  margin-top: 2px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 0;
 }
 .day-dots i {
-  width: 4px;
-  height: 4px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
+}
+
+.month-day.selected .day-dots {
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  transform: translateX(-50%);
+}
+
+.month-day.selected .day-dots i {
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.dot-blue {
+  background: #2f7cff;
+}
+
+.dot-green {
+  background: #20bb77;
+}
+
+.dot-orange {
+  background: #f59e0b;
+}
+
+.dot-violet {
+  background: #8b5cf6;
+}
+
+.dot-cyan {
+  background: #09b6d7;
+}
+
+.dot-slate {
+  background: #94a3b8;
 }
 
 .side-card-header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 20px;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 0;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(166, 186, 214, 0.2);
+}
+
+.schedule-title-area {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+  min-width: 0;
 }
 .schedule-title-area h2 {
   margin: 0;
-  font-size: 16px;
+  color: #142142;
+  font-size: 18px;
   font-weight: 900;
-  color: #101936;
+  white-space: nowrap;
 }
 .schedule-title-area p {
-  margin: 4px 0 0;
-  font-size: 13px;
-  color: #60708d;
+  margin: 0;
+  color: #6d7e9b;
+  font-size: 14px;
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .all-schedule-btn {
-  border: 1px solid rgba(255, 255, 255, 0.58);
-  background: rgba(255, 255, 255, 0.3);
-  border-radius: 999px;
-  padding: 4px 12px;
-  font-size: 12px;
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  border-radius: 12px;
+  padding: 6px 0 6px 10px;
+  font: inherit;
+  font-size: 14px;
   font-weight: 800;
   color: var(--detail-blue);
   display: flex;
@@ -1462,16 +1714,19 @@ function monthLabel(date: Date) {
   cursor: pointer;
 }
 .all-schedule-btn svg {
-  width: 14px;
-  height: 14px;
+  width: 17px;
+  height: 17px;
+  stroke-width: 2.5;
 }
 
 .schedule-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   scrollbar-width: none;
   display: flex;
   flex-direction: column;
+  padding-top: 6px;
 }
 .schedule-list::-webkit-scrollbar {
   display: none;
@@ -1480,50 +1735,121 @@ function monthLabel(date: Date) {
 .schedule-item {
   position: relative;
   display: grid;
-  grid-template-columns: 20px 44px 1fr auto;
-  gap: 8px;
-  padding: 16px 0;
+  grid-template-columns: 24px 72px minmax(0, 1fr) auto;
+  gap: 14px;
+  min-height: 78px;
+  padding: 18px 0;
   cursor: pointer;
-  align-items: start;
+  align-items: center;
+  border-bottom: 1px solid rgba(166, 186, 214, 0.18);
+  transition:
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.schedule-item:hover {
+  background: rgba(47, 124, 255, 0.05);
 }
 .schedule-item::after {
   content: '';
   position: absolute;
-  left: 3px;
-  top: 36px;
-  bottom: -16px;
+  left: 11px;
+  top: 44px;
+  bottom: -18px;
   width: 2px;
-  background: rgba(0, 0, 0, 0.05);
+  background: linear-gradient(180deg, rgba(47, 124, 255, 0.34), rgba(47, 124, 255, 0.08));
 }
 .schedule-item:last-child::after {
   display: none;
 }
 
 .schedule-dot {
-  width: 8px;
-  height: 8px;
+  position: relative;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
-  background: white;
-  border: 2px solid var(--detail-blue);
-  margin-top: 4px;
+  background: var(--detail-blue);
+  border: 3px solid rgba(235, 244, 255, 0.98);
+  box-shadow: 0 0 0 1px rgba(47, 124, 255, 0.22);
+  justify-self: center;
 }
 
 .schedule-item time {
-  font-size: 13px;
+  color: #172440;
+  font-size: 16px;
   font-weight: 900;
-  color: #101936;
+  white-space: nowrap;
+}
+
+.schedule-info {
+  min-width: 0;
 }
 
 .schedule-info strong {
   display: block;
-  font-size: 14px;
+  overflow: hidden;
+  color: #172440;
+  font-size: 16px;
   font-weight: 900;
-  color: #101936;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .schedule-info p {
-  margin: 4px 0 0;
-  font-size: 12px;
-  color: #60708d;
+  margin: 7px 0 0;
+  overflow: hidden;
+  color: #76869f;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-item > span {
+  align-self: center;
+  border-radius: 8px;
+  padding: 5px 9px;
+  font-size: 13px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.schedule-empty {
+  margin-top: 18px;
+  color: #233454;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.schedule-footer {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: center;
+  padding-top: 16px;
+  border-top: 1px solid rgba(166, 186, 214, 0.18);
+}
+
+.schedule-footer button {
+  border: none;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--detail-blue);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.schedule-footer svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.5;
 }
 
 @media (max-width: 1440px) {
@@ -1532,7 +1858,7 @@ function monthLabel(date: Date) {
   }
 
   .detail-board {
-    grid-template-columns: minmax(0, 1fr) minmax(374px, 432px);
+    grid-template-columns: minmax(0, 1fr) minmax(420px, 42%);
   }
 }
 
@@ -1551,6 +1877,12 @@ function monthLabel(date: Date) {
 
   .detail-main-panel {
     border-bottom: 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .detail-workspace {
+    width: calc(100% - 28px);
   }
 }
 </style>

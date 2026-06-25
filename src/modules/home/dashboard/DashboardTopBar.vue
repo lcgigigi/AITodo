@@ -7,6 +7,7 @@ import IconChevronDown from '~icons/lucide/chevron-down'
 import IconExternalLink from '~icons/lucide/external-link'
 import IconLogOut from '~icons/lucide/log-out'
 import IconSettings from '~icons/lucide/settings'
+import IconSlidersHorizontal from '~icons/lucide/sliders-horizontal'
 import IconTrash2 from '~icons/lucide/trash-2'
 import IconX from '~icons/lucide/x'
 import girlImage from '@/assets/libao.png'
@@ -42,6 +43,7 @@ import {
   navigateDashboardTool,
   type DashboardToolTarget,
 } from '@/modules/home/dashboard/dashboardTools'
+import { useDashboardGlassSettings } from '@/modules/home/dashboard/useDashboardGlassSettings'
 import type { CalendarEvent, CalendarUser } from '@/modules/home/dashboard/types'
 import { useFeedbackStore } from '@/stores/feedback.store'
 import { useUserStore } from '@/stores/user.store'
@@ -68,8 +70,14 @@ type PendingActionMode = 'reject' | null
 type NotificationTab = 'sys-message' | 'pending-todo'
 
 const SYS_MESSAGE_PAGE_SIZE = 10
+
 const notificationPanelRef = ref<HTMLElement | null>(null)
 const userMenuPanelRef = ref<HTMLElement | null>(null)
+const glassTriggerRef = ref<HTMLElement | null>(null)
+const glassPanelRef = ref<HTMLElement | null>(null)
+const glassPanelPosition = ref({ top: 0, right: 16 })
+const { glassSettings, glassStyle, resetGlassSettings } = useDashboardGlassSettings()
+const isGlassPanelOpen = ref(false)
 const isNotificationPanelOpen = ref(false)
 const isUserMenuOpen = ref(false)
 const isLoggingOut = ref(false)
@@ -550,6 +558,7 @@ function handleOpenTodo(event: CalendarEvent) {
 async function toggleNotificationPanel() {
   if (!isNotificationPanelOpen.value) {
     closeUserMenu()
+    closeGlassPanel()
     await Promise.all([refreshSysMessages(), refreshPendingTodos()])
   }
   isNotificationPanelOpen.value = !isNotificationPanelOpen.value
@@ -562,6 +571,7 @@ function closeNotificationPanel() {
 function toggleUserMenu() {
   if (!isUserMenuOpen.value) {
     closeNotificationPanel()
+    closeGlassPanel()
   }
   isUserMenuOpen.value = !isUserMenuOpen.value
 }
@@ -570,9 +580,34 @@ function closeUserMenu() {
   isUserMenuOpen.value = false
 }
 
+function closeGlassPanel() {
+  isGlassPanelOpen.value = false
+}
+
+function updateGlassPanelPosition() {
+  const trigger = glassTriggerRef.value
+  if (!trigger) return
+
+  const rect = trigger.getBoundingClientRect()
+  glassPanelPosition.value = {
+    top: rect.bottom + 12,
+    right: Math.max(16, window.innerWidth - rect.right),
+  }
+}
+
+function toggleGlassPanel() {
+  if (!isGlassPanelOpen.value) {
+    closeNotificationPanel()
+    closeUserMenu()
+    updateGlassPanelPosition()
+  }
+  isGlassPanelOpen.value = !isGlassPanelOpen.value
+}
+
 function openTopbarTool(tool: DashboardToolTarget) {
   closeNotificationPanel()
   closeUserMenu()
+  closeGlassPanel()
   void navigateDashboardTool(router, tool)
 }
 
@@ -599,6 +634,7 @@ async function handleLogout() {
 function handleDocumentPointerDown(event: PointerEvent) {
   const notificationElement = notificationPanelRef.value
   const userMenuElement = userMenuPanelRef.value
+  const glassElement = glassPanelRef.value
 
   if (notificationElement && !notificationElement.contains(event.target as Node)) {
     closeNotificationPanel()
@@ -607,12 +643,22 @@ function handleDocumentPointerDown(event: PointerEvent) {
   if (userMenuElement && !userMenuElement.contains(event.target as Node)) {
     closeUserMenu()
   }
+
+  const glassTriggerElement = glassTriggerRef.value
+  const glassTarget = event.target as Node
+  const insideGlassController =
+    glassElement?.contains(glassTarget) || glassTriggerElement?.contains(glassTarget)
+
+  if (isGlassPanelOpen.value && !insideGlassController) {
+    closeGlassPanel()
+  }
 }
 
 function handleDocumentKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape') {
     closeNotificationPanel()
     closeUserMenu()
+    closeGlassPanel()
   }
 }
 
@@ -647,6 +693,7 @@ onBeforeUnmount(() => {
   <header
     class="dashboard-topbar"
     :class="{ 'without-tools': !props.showToolDock }"
+    :style="glassStyle"
     aria-label="顶部导航"
   >
     <div class="brand-block" aria-label="华力企业级AI平台">
@@ -934,6 +981,122 @@ onBeforeUnmount(() => {
         <IconSettings />
       </button>
 
+      <div ref="glassTriggerRef" class="glass-controller-wrap">
+        <button
+          class="icon-button"
+          type="button"
+          aria-label="磨砂效果调节"
+          aria-controls="dashboard-glass-controller"
+          :aria-expanded="isGlassPanelOpen"
+          title="磨砂效果调节"
+          @click.stop="toggleGlassPanel"
+        >
+          <IconSlidersHorizontal />
+        </button>
+      </div>
+
+      <Teleport to="body">
+        <Transition name="glass-controller-popover">
+          <section
+            v-if="isGlassPanelOpen"
+            id="dashboard-glass-controller"
+            ref="glassPanelRef"
+            class="glass-controller-panel is-portal"
+            :style="{
+              top: `${glassPanelPosition.top}px`,
+              right: `${glassPanelPosition.right}px`,
+            }"
+            aria-label="Topbar 磨砂效果调节"
+            @click.stop
+          >
+            <header class="glass-controller-panel__header">
+              <div>
+                <strong>磨砂效果</strong>
+                <span>同步调节 Topbar 与简约模式右下角模块</span>
+              </div>
+              <button type="button" aria-label="关闭" title="关闭" @click="closeGlassPanel">
+                <IconX />
+              </button>
+            </header>
+
+            <label class="glass-controller-field">
+              <span>模糊强度 <em>{{ glassSettings.blur }}px</em></span>
+              <input v-model.number="glassSettings.blur" type="range" min="0" max="40" step="1" />
+            </label>
+
+            <label class="glass-controller-field">
+              <span>饱和度 <em>{{ glassSettings.saturate.toFixed(2) }}</em></span>
+              <input
+                v-model.number="glassSettings.saturate"
+                type="range"
+                min="0.5"
+                max="2"
+                step="0.02"
+              />
+            </label>
+
+            <label class="glass-controller-field">
+              <span>底色透明度 <em>{{ glassSettings.baseOpacity.toFixed(2) }}</em></span>
+              <input
+                v-model.number="glassSettings.baseOpacity"
+                type="range"
+                min="0"
+                max="0.6"
+                step="0.01"
+              />
+            </label>
+
+            <label class="glass-controller-field">
+              <span>高光强度 <em>{{ glassSettings.highlightOpacity.toFixed(2) }}</em></span>
+              <input
+                v-model.number="glassSettings.highlightOpacity"
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+              />
+            </label>
+
+            <label class="glass-controller-field">
+              <span>渐变起点 <em>{{ glassSettings.gradientStart.toFixed(2) }}</em></span>
+              <input
+                v-model.number="glassSettings.gradientStart"
+                type="range"
+                min="0"
+                max="0.8"
+                step="0.01"
+              />
+            </label>
+
+            <label class="glass-controller-field">
+              <span>渐变终点 <em>{{ glassSettings.gradientEnd.toFixed(2) }}</em></span>
+              <input
+                v-model.number="glassSettings.gradientEnd"
+                type="range"
+                min="0"
+                max="0.8"
+                step="0.01"
+              />
+            </label>
+
+            <label class="glass-controller-field">
+              <span>边框透明度 <em>{{ glassSettings.borderOpacity.toFixed(2) }}</em></span>
+              <input
+                v-model.number="glassSettings.borderOpacity"
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+              />
+            </label>
+
+            <button type="button" class="glass-controller-reset" @click="resetGlassSettings">
+              恢复默认
+            </button>
+          </section>
+        </Transition>
+      </Teleport>
+
       <div ref="userMenuPanelRef" class="user-menu-wrap">
         <button
           class="user-chip"
@@ -984,7 +1147,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .dashboard-topbar::before {
+  .dashboard-topbar {
     background: linear-gradient(90deg, rgba(215, 232, 255, 0.38), rgba(244, 249, 255, 0.2)),
       linear-gradient(180deg, rgba(255, 255, 255, 0.58), rgba(241, 247, 255, 0));
   }
@@ -1041,12 +1204,146 @@ onBeforeUnmount(() => {
 }
 
 .notification-wrap,
-.user-menu-wrap {
+.user-menu-wrap,
+.glass-controller-wrap {
   position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
+}
+
+.glass-controller-panel {
+  width: min(300px, calc(100vw - 28px));
+  box-sizing: border-box;
+  border: 1px solid rgba(226, 232, 240, 0.92);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(24px);
+  box-shadow:
+    0 26px 58px -28px rgba(15, 23, 42, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
+  padding: 14px;
+}
+
+.glass-controller-panel.is-portal {
+  position: fixed;
+  z-index: 120;
+}
+
+.glass-controller-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.glass-controller-panel__header div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.glass-controller-panel__header strong {
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.glass-controller-panel__header span {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.2;
+}
+
+.glass-controller-panel__header button {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(241, 245, 249, 0.92);
+  color: #64748b;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.glass-controller-panel__header button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.glass-controller-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.glass-controller-field span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.glass-controller-field em {
+  color: #2563eb;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.glass-controller-field input[type='range'] {
+  width: 100%;
+  accent-color: #2563eb;
+  cursor: pointer;
+}
+
+.glass-controller-reset {
+  width: 100%;
+  min-height: 34px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(241, 245, 249, 0.92);
+  color: #334155;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 850;
+  cursor: pointer;
+  margin-top: 4px;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease;
+}
+
+.glass-controller-reset:hover {
+  background: rgba(219, 234, 254, 0.92);
+  color: #1d4ed8;
+}
+
+.glass-controller-popover-enter-active,
+.glass-controller-popover-leave-active {
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.glass-controller-popover-enter-from,
+.glass-controller-popover-leave-to {
+  opacity: 0;
+  transform: translateY(-6px) scale(0.98);
 }
 
 .icon-button.has-badge span {
@@ -1727,9 +2024,24 @@ onBeforeUnmount(() => {
   position: relative;
   z-index: 60;
   box-sizing: border-box;
-  border: none;
-  box-shadow: none;
-  background: transparent;
+  border: 1px solid rgba(255, 255, 255, var(--glass-border-opacity, 0.64));
+  border-radius: 20px;
+  background: radial-gradient(
+      circle at 22% 20%,
+      rgba(255, 255, 255, var(--glass-highlight-opacity, 0.7)),
+      rgba(255, 255, 255, 0) 34%
+    ),
+    linear-gradient(
+      145deg,
+      rgba(255, 255, 255, var(--glass-gradient-start, 0.28)),
+      rgba(238, 246, 255, var(--glass-gradient-end, 0.2))
+    ),
+    rgba(248, 252, 255, var(--glass-base-opacity, 0.18));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 20px 36px -30px rgba(18, 38, 72, 0.4);
+  backdrop-filter: blur(var(--glass-blur, 24px)) saturate(var(--glass-saturate, 1.16));
+  -webkit-backdrop-filter: blur(var(--glass-blur, 24px)) saturate(var(--glass-saturate, 1.16));
   justify-content: space-between;
   width: calc(100% - clamp(48px, 3.8vw, 76px));
   height: 60px;
@@ -1742,36 +2054,8 @@ onBeforeUnmount(() => {
   gap: 18px;
 }
 
-.dashboard-topbar::before {
-  position: absolute;
-  z-index: -1;
-  pointer-events: none;
-  border: none;
-  content: '';
-  inset: 0;
-  border-radius: 20px;
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.5), rgba(242, 248, 255, 0.34)),
-    rgba(248, 252, 255, 0.4);
-
-  backdrop-filter: blur(22px) saturate(1.12);
-  -webkit-backdrop-filter: blur(22px) saturate(1.12);
-  -webkit-mask-image: none;
-  mask-image: none;
-}
-
 .dashboard-topbar.without-tools {
   grid-template-columns: minmax(270px, 1fr) auto;
-}
-
-.dashboard-topbar::after {
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0) 72%),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.2), transparent 28%, rgba(255, 255, 255, 0.12));
-  content: '';
-  display: none;
 }
 
 .brand-block {
@@ -1937,9 +2221,10 @@ onBeforeUnmount(() => {
     padding: 0 14px;
   }
 
-  .dashboard-topbar::before {
-    inset: 0;
+  .dashboard-topbar {
     border-radius: 0;
+    border-left: none;
+    border-right: none;
   }
 
   .brand-copy span {
