@@ -39,6 +39,18 @@
 |  13 | `GET /smart-todo/month-list?startDate=&endDate=` | `loadTodos()`                           | 日历月/周待办使用，切换月份或周时按可见范围传参 |
 |  14 | `POST /smart-todo/accept`                        | `acceptTodos()`                         | 已添加服务方法                                  |
 |  15 | `POST /smart-todo/transfer`                      | `transferTodos()`                       | 已添加服务方法                                  |
+|  16 | `GET /smart-todo/today-list?status=&type=`       | `loadTodayTodos()`                      | 已添加服务方法，查询当天待办                    |
+
+## Token 用量接口
+
+来源：后台同事提供的 `token-usage-today-todo-api.md`。
+
+|   # | HTTP 接口                        | 服务层方法                    | 页面使用状态     |
+| --: | -------------------------------- | ----------------------------- | ---------------- |
+|   1 | `GET /token-usage/current-user`  | `loadCurrentUserTokenUsage()` | 已添加服务方法   |
+|   2 | `GET /token-usage/admin-dashboard` | `loadAdminTokenDashboard()` | 已添加服务方法，需 admin 角色 |
+
+服务文件：`src/modules/token-usage/token-usage.service.ts`。开发代理：`vite.config.ts` 将 `/token-usage` 代理到 `http://192.168.0.210:8066`。
 
 ## 字段映射
 

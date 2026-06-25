@@ -42,11 +42,7 @@ const toastMeta: Record<FeedbackType, { title: string; icon: Component }> = {
         </div>
       </Transition>
 
-      <div
-        class="global-toast-region"
-        aria-live="polite"
-        aria-relevant="additions text"
-      >
+      <div class="global-toast-region" aria-live="polite" aria-relevant="additions text">
         <Transition name="global-toast" mode="out-in">
           <article
             v-if="currentToast"
@@ -62,8 +58,14 @@ const toastMeta: Record<FeedbackType, { title: string; icon: Component }> = {
             </span>
             <span class="global-toast__content">
               <strong>{{ toastMeta[currentToast.type].title }}</strong>
-              <span v-if="currentToast.message" class="global-toast__divider" aria-hidden="true"></span>
-              <span v-if="currentToast.message" class="global-toast__message">{{ currentToast.message }}</span>
+              <span
+                v-if="currentToast.message"
+                class="global-toast__divider"
+                aria-hidden="true"
+              ></span>
+              <span v-if="currentToast.message" class="global-toast__message">{{
+                currentToast.message
+              }}</span>
             </span>
             <Button
               type="button"

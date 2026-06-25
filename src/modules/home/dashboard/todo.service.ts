@@ -8,6 +8,7 @@ import type {
   CalendarTodoUpdate,
   CalendarUser,
   ParsedTodoDraft,
+  SmartTodoKind,
 } from './types'
 import { compareEvents, ymd } from './todoDisplay'
 
@@ -60,19 +61,35 @@ interface SmartTodoBackendItem {
   id?: string | number
   title?: string
   timeType?: 1 | 2
+  startDate?: string | null
+  endDate?: string | null
   startDateShow?: string | null
   endDateShow?: string | null
   content?: string | null
   assigneeId?: string | number | null
+  assigneeIds?: string | null
   remark?: string | null
   creatorId?: string | number | null
   creatorName?: string | null
   createTime?: string | null
   status?: 0 | 3 | 6 | 9 | 99
   currentHandlerId?: string | number | null
+  handlerId?: string | number | null
   handlerIds?: string | null
   receiveStatus?: number | null
   handleDesc?: string | null
+  source?: string | null
+  thirdId?: string | number | null
+  fid?: string | number | null
+  type?: number | string
+}
+
+export type TodayTodoStatus = 0 | 3 | 6 | 9
+export type TodayTodoType = 1 | 2
+
+export interface TodayTodoQuery {
+  status?: TodayTodoStatus
+  type?: TodayTodoType
 }
 
 interface SmartTodoAnalyzeData {
@@ -86,7 +103,9 @@ interface SmartTodoAnalyzeData {
   startDateShow?: string
   endDateShow?: string
   assigneeId?: string | number
+  assigneeIds?: string
   remark?: string
+  type?: number | string
 }
 
 interface SmartTodoPayload {
@@ -98,6 +117,17 @@ interface SmartTodoPayload {
   content: string
   assigneeId?: string
   remark: string
+}
+
+interface SmartTodoCreatePayload {
+  title: string
+  timeType: 1 | 2
+  startDateShow: string
+  endDateShow?: string
+  content: string
+  assigneeIds?: string
+  remark: string
+  type: SmartTodoKind
 }
 
 export interface SmartTodoLoginCredentials {
@@ -181,6 +211,16 @@ function normalizeFormTime(time?: string | null, preserveMidnight = false) {
   const backendTime = normalizeBackendTime(time)
   if (!preserveMidnight && backendTime === '00:00:00') return undefined
   return backendTime.slice(0, 5)
+}
+
+function normalizeIsoDateTimeShow(value?: string | null) {
+  const trimmed = value?.trim()
+  if (!trimmed) return undefined
+
+  return trimmed
+    .replace('T', ' ')
+    .replace(/\.\d{3}Z?$/, '')
+    .replace(/Z$/, '')
 }
 
 function parseDateTimeShow(value?: string | null, preserveMidnight = false) {
@@ -294,6 +334,18 @@ function normalizeAnalyzeSchedule(data: SmartTodoAnalyzeData) {
   }
 }
 
+function resolveTodoKind(value?: number | string | null): SmartTodoKind {
+  const normalized = typeof value === 'string' ? value.trim() : value
+  if (normalized === 2 || normalized === '2' || normalized === 'meeting') return 2
+  return 1
+}
+
+function resolveAssigneeIds(assigneeId?: string | number | null, assigneeIds?: string | null) {
+  if (assigneeIds?.trim()) return assigneeIds.trim()
+  if (assigneeId) return toId(assigneeId)
+  return ''
+}
+
 function resolveRole(roles: string[] = []): CalendarUser['role'] {
   return roles.some((role) => ['admin', 'leader'].includes(role)) ? 'leader' : 'employee'
 }
@@ -317,6 +369,10 @@ function mapBackendStatus(status?: SmartTodoBackendItem['status']): CalendarEven
   return status === 6 ? 'done' : 'todo'
 }
 
+function mapBackendEventType(value?: number | string | null): CalendarEvent['type'] {
+  return resolveTodoKind(value) === 2 ? 'meeting' : 'task'
+}
+
 function normalizeBackendTodo(
   item: SmartTodoBackendItem,
   currentUser: CalendarUser,
@@ -324,20 +380,31 @@ function normalizeBackendTodo(
 ): CalendarEvent {
   const userMap = createUserMap(users)
   const id = toId(item.id) || `todo-${Date.now()}-${Math.random().toString(36).slice(2)}`
-  const assigneeId = toId(item.assigneeId)
+  const assigneeId = resolveAssigneeIds(item.assigneeId, item.assigneeIds)
   const creatorId = toId(item.creatorId)
-  const currentHandlerId = toId(item.currentHandlerId)
-  const assignee = userMap.get(assigneeId)
+  const currentHandlerId = toId(item.currentHandlerId) || toId(item.handlerId)
+  const primaryAssigneeId = assigneeId.split(',')[0]?.trim() || ''
+  const assignee = userMap.get(primaryAssigneeId)
   const creator = userMap.get(creatorId)
-  const assigneeName = assignee?.name || assigneeId || '未指定'
+  const assigneeName =
+    assignee?.name ||
+    (assigneeId.includes(',')
+      ? assigneeId
+          .split(',')
+          .map((value) => userMap.get(value.trim())?.name || value.trim())
+          .join('、')
+      : assigneeId) ||
+    '未指定'
   const creatorName =
     item.creatorName?.trim() ||
     creator?.name ||
     (creatorId === currentUser.id ? currentUser.name : '')
   const timeType = item.timeType === 2 ? 2 : 1
   const preserveMidnight = timeType === 2
-  const start = parseDateTimeShow(item.startDateShow, preserveMidnight)
-  const end = parseDateTimeShow(item.endDateShow, preserveMidnight)
+  const startDateShow = item.startDateShow || normalizeIsoDateTimeShow(item.startDate)
+  const endDateShow = item.endDateShow || normalizeIsoDateTimeShow(item.endDate)
+  const start = parseDateTimeShow(startDateShow, preserveMidnight)
+  const end = parseDateTimeShow(endDateShow, preserveMidnight)
   const date = start.date || todayDate()
   const endDate = timeType === 2 ? end.date || date : undefined
   const title = item.title?.trim() || item.content?.trim() || '未命名待办'
@@ -354,7 +421,7 @@ function normalizeBackendTodo(
     time: start.time,
     endTime: timeType === 2 ? end.time : undefined,
     title,
-    type: 'task',
+    type: mapBackendEventType(item.type),
     owner: assigneeName,
     status,
     source: item.remark?.trim() || item.content?.trim() || undefined,
@@ -384,6 +451,36 @@ function normalizeBackendTodos(
     .filter((item) => item.status !== 99)
     .map((item) => normalizeBackendTodo(item, currentUser, users))
     .sort(compareEvents)
+}
+
+function findAssignees(
+  assigneeId: string | number | undefined,
+  assigneeIds: string | undefined,
+  currentUser: CalendarUser,
+  assignableUsers: CalendarUser[],
+  fallback: ParsedTodoDraft,
+) {
+  const rawIds = resolveAssigneeIds(assigneeId, assigneeIds)
+  const ids = rawIds
+    ? rawIds
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : []
+
+  if (ids.length === 0) {
+    return findAssignee(assigneeId, currentUser, assignableUsers, fallback)
+  }
+
+  const matched = ids.map((id) => {
+    const user = assignableUsers.find((item) => item.id === id)
+    return user ?? { id, name: id }
+  })
+
+  return {
+    id: matched.map((user) => user.id).join(','),
+    name: matched.map((user) => user.name).join('、'),
+  }
 }
 
 function findAssignee(
@@ -418,7 +515,13 @@ function normalizeAnalyzeData(
   const schedule = normalizeAnalyzeSchedule(data)
   const date = schedule.date || fallback.date
   const endDate = schedule.isRange ? schedule.endDate || date : undefined
-  const assignee = findAssignee(data.assigneeId, currentUser, assignableUsers, fallback)
+  const assignee = findAssignees(
+    data.assigneeId,
+    data.assigneeIds,
+    currentUser,
+    assignableUsers,
+    fallback,
+  )
 
   return {
     mode: schedule.isRange ? 'deadline' : 'scheduled',
@@ -431,6 +534,7 @@ function normalizeAnalyzeData(
     assigneeId: assignee.id,
     assigneeName: assignee.name,
     source: data.remark?.trim() || fallback.source || 'AI预填',
+    type: resolveTodoKind(data.type ?? fallback.type),
   }
 }
 
@@ -462,6 +566,21 @@ function buildSmartTodoPayload(payload: CalendarTodoDraft | CalendarTodoUpdate):
     content: title,
     assigneeId: payload.assigneeId?.trim() || undefined,
     remark: payload.source?.trim() || '',
+  }
+}
+
+function buildSmartTodoCreatePayload(payload: CalendarTodoDraft): SmartTodoCreatePayload {
+  const base = buildSmartTodoPayload(payload)
+
+  return {
+    title: base.title,
+    timeType: base.timeType,
+    startDateShow: base.startDateShow,
+    endDateShow: base.endDateShow,
+    content: base.content,
+    assigneeIds: payload.assigneeId?.trim() || undefined,
+    remark: base.remark,
+    type: resolveTodoKind(payload.type),
   }
 }
 
@@ -694,6 +813,26 @@ export async function loadPendingTodos(currentUser: CalendarUser, users: Calenda
   return normalizeBackendTodos(items, currentUser, users)
 }
 
+export async function loadTodayTodos(
+  currentUser: CalendarUser,
+  users: CalendarUser[] = [],
+  query: TodayTodoQuery = {},
+) {
+  const items = await requestSmartTodoData<SmartTodoBackendItem[]>(
+    {
+      method: 'GET',
+      url: '/smart-todo/today-list',
+      params: {
+        status: query.status,
+        type: query.type,
+      },
+    },
+    '查询当天待办失败',
+  )
+
+  return normalizeBackendTodos(items, currentUser, users)
+}
+
 export async function loadTodoDetail(
   id: string,
   currentUser: CalendarUser,
@@ -715,7 +854,7 @@ export async function createTodo(payload: CalendarTodoDraft) {
     {
       method: 'POST',
       url: '/smart-todo/create',
-      data: buildSmartTodoPayload(payload),
+      data: buildSmartTodoCreatePayload(payload),
     },
     '创建待办事项失败',
   )
@@ -839,7 +978,7 @@ export async function cancelTodoComplete(id: string, handleDesc = '撤销完成'
 export async function revokeTodoComplete(
   id: string,
   _currentUser?: CalendarUser,
-  _users: CalendarUser[] = [],
+  _users?: CalendarUser[],
   handleDesc = '撤销完成',
 ) {
   return cancelTodoComplete(id, handleDesc)

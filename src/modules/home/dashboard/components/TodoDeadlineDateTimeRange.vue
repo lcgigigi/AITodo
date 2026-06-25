@@ -1,7 +1,16 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from 'vue'
 import { getLocalTimeZone, parseDate, today } from '@internationalized/date'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, useAttrs, watch } from 'vue'
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  shallowRef,
+  useAttrs,
+  watch,
+} from 'vue'
 import IconCalendarDays from '~icons/lucide/calendar-days'
 import IconCheck from '~icons/lucide/check'
 import type { DateValue } from 'reka-ui'
@@ -51,7 +60,7 @@ const anchorRef = ref<HTMLElement | null>(null)
 const popoverWidth = ref('')
 let resizeObserver: ResizeObserver | null = null
 const popoverAlign = computed(() => (activeField.value === 'end' ? 'end' : 'start'))
-const calendarPlaceholder = ref(today(getLocalTimeZone()) as any)
+const calendarPlaceholder = shallowRef<DateValue>(today(getLocalTimeZone()))
 const hourTouched = ref(false)
 const minuteTouched = ref(false)
 const externalClass = computed(() => attrs.class as HTMLAttributes['class'])

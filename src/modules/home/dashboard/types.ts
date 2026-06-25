@@ -4,6 +4,8 @@ export type CalendarEventPriority = 'normal' | 'urgent'
 export type CalendarUserRole = 'leader' | 'employee'
 export type CalendarTodoScope = 'self' | 'assigned_by_me' | 'assigned_to_me'
 export type CalendarTodoFormMode = 'scheduled' | 'deadline'
+/** 1 普通待办，2 会议 */
+export type SmartTodoKind = 1 | 2
 
 export type CalendarSpecialDayType = 'holiday' | 'workday' | 'solar-term'
 
@@ -45,6 +47,7 @@ export interface CalendarTodoDraft {
   source?: string
   assigneeId?: string
   assigneeName?: string
+  type?: SmartTodoKind
 }
 
 export interface CalendarTodoUpdate {
@@ -58,6 +61,7 @@ export interface CalendarTodoUpdate {
   source?: string
   assigneeId?: string
   assigneeName?: string
+  type?: SmartTodoKind
 }
 
 export interface CalendarTodoForm {
@@ -71,6 +75,7 @@ export interface CalendarTodoForm {
   assigneeId: string
   assigneeName: string
   source: string
+  type: SmartTodoKind
 }
 
 export interface CalendarUser {
@@ -94,6 +99,7 @@ export interface ParsedTodoDraft {
   assigneeId?: string
   assigneeName?: string
   source?: string
+  type?: SmartTodoKind
 }
 
 export interface CalendarDay {

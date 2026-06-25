@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from 'vue'
 import { getLocalTimeZone, parseDate, today } from '@internationalized/date'
-import { computed, ref, useAttrs, watch } from 'vue'
+import { computed, ref, shallowRef, useAttrs, watch } from 'vue'
 import IconCalendarDays from '~icons/lucide/calendar-days'
 import type { DateValue } from 'reka-ui'
 import { Button } from '@/components/ui/button'
@@ -36,7 +36,7 @@ const emit = defineEmits<{
 
 const attrs = useAttrs()
 const open = ref(false)
-const calendarPlaceholder = ref(today(getLocalTimeZone()) as any)
+const calendarPlaceholder = shallowRef<DateValue>(today(getLocalTimeZone()))
 const externalClass = computed(() => attrs.class as HTMLAttributes['class'])
 
 const selectedDate = computed<DateValue | undefined>({

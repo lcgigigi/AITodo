@@ -1,1 +1,0 @@
-export { leaderBoardRoutes } from './routes'

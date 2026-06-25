@@ -1,26 +1,18 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import * as echarts from 'echarts'
-import IconBox from '~icons/lucide/box'
 import IconCalendarDays from '~icons/lucide/calendar-days'
 import IconCalendarRange from '~icons/lucide/calendar-range'
+import IconChevronLeft from '~icons/lucide/chevron-left'
+import IconChevronRight from '~icons/lucide/chevron-right'
 import IconClipboardList from '~icons/lucide/clipboard-list'
-import IconCode from '~icons/lucide/code'
-import IconCompass from '~icons/lucide/compass'
-import IconFileText from '~icons/lucide/file-text'
-import IconImage from '~icons/lucide/image'
-import IconMessageCircle from '~icons/lucide/message-circle'
+import IconSquareCheck from '~icons/lucide/square-check'
 import IconPresentation from '~icons/lucide/presentation'
-import IconTrendingUp from '~icons/lucide/trending-up'
-import IconUsers from '~icons/lucide/users'
-import libaoImage from '@/assets/libao.png'
-import campusImage from '@/assets/modelone.png'
+import IconSendHorizontal from '~icons/lucide/send-horizontal'
 import { routeConfig } from '@/config/route.config'
 import { useFeedbackStore } from '@/stores/feedback.store'
 import { useUserStore } from '@/stores/user.store'
-import CalendarMonth from './CalendarMonth.vue'
 import DayPreviewPanel from './DayPreviewPanel.vue'
 import type {
   CalendarDay,
@@ -31,7 +23,7 @@ import type {
   CalendarTodoUpdate,
   CalendarUser,
 } from './types'
-import { compareEvents, dateRange, formatEventTime } from './todoDisplay'
+import { compareEvents, dateRange } from './todoDisplay'
 import {
   createTodo as serviceCreateTodo,
   deleteTodo as serviceDeleteTodo,
@@ -40,42 +32,20 @@ import {
   loadAssignableUsers as serviceLoadAssignableUsers,
   getTodoMonthRange,
   getTodoWeekRange,
+  loadTodoDetail,
   loadTodos,
-  syncCalendar as serviceSyncCalendar,
   updateTodo as serviceUpdateTodo,
   updateTodoStatus as serviceUpdateTodoStatus,
 } from './todo.service'
 
-type CampusTool = {
-  name: string
-  icon: Component
-  tone: string
-  position: string
-  agentKey?: string
-  isMore?: boolean
-  simulated?: boolean
-}
-
-type MetricTone = 'blue' | 'green' | 'violet'
-
-type DashboardMetric = {
-  label: string
-  value: number
-  unit: string
-  detail: string
-  progress: number
-  icon: Component
-  tone: MetricTone
-  variant: 'today' | 'week' | 'month'
-  pending: number
-  completed: number
-  nextText?: string
-  statusItems?: Array<{ label: string; value: number }>
-  heatCells?: Array<{ key: string; label: string; intensity: number; isToday: boolean }>
-}
+type TodoStatusFilter = 'all' | 'pending' | 'done'
+type TodoTypeFilter = 'all' | 'task' | 'meeting'
 
 type DayPreviewPanelExpose = {
   showDiscardWarning: (onConfirm?: () => void) => void
+  openEventDetailById: (id: string) => boolean
+  applyStatusFilter: (filter: TodoStatusFilter) => void
+  applyTypeFilter: (filter: TodoTypeFilter) => void
 }
 
 const now = ref(new Date())
@@ -84,29 +54,22 @@ const currentMonth = ref(new Date(now.value.getFullYear(), now.value.getMonth(),
 const allEvents = ref<CalendarEvent[]>([])
 const backendAssignableUsers = ref<CalendarUser[]>([])
 const isDashboardLoading = ref(false)
-const isProfileDialogOpen = ref(false)
 const isDayPreviewOpen = ref(false)
-const isTodayBubbleVisible = ref(true)
-const isTodayBubbleManualClosed = ref(false)
-const isTodayBubbleAutoHidden = ref(false)
 const quickCreatePrompt = ref('')
+const homeQuickTodoText = ref('')
 const quickCreateKey = ref(0)
 const presetCreateTime = ref('')
 const presetCreateKey = ref(0)
 const isDayPreviewFormDirty = ref(false)
-const isSyncingCalendar = ref(false)
 const dayPreviewPanelRef = ref<DayPreviewPanelExpose | null>(null)
 const trendChartRef = ref<HTMLElement | null>(null)
 const calendarViewMode = ref<'month' | 'week'>('month')
-const taskMetricMode = ref<'week' | 'month'>('month')
 const trendStatMode = ref<'week' | 'month'>('week')
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const feedbackStore = useFeedbackStore()
 let clockTimer: ReturnType<typeof setInterval> | undefined
-let todayBubbleTimer: ReturnType<typeof setTimeout> | undefined
-let panelCloseRestoreTimer: ReturnType<typeof setTimeout> | undefined
 let trendChart: echarts.ECharts | undefined
 let trendChartResizeObserver: ResizeObserver | undefined
 let isConsumingDesktopTodoText = false
@@ -131,77 +94,10 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (clockTimer) clearInterval(clockTimer)
-  clearTodayBubbleTimer()
-  clearPanelCloseRestoreTimer()
   disposeTrendChart()
 })
 
 let hasInitializedTodoRange = false
-
-const campusTools: CampusTool[] = [
-  {
-    name: '力宝百问',
-    icon: IconMessageCircle,
-    tone: 'blue',
-    position: 'qa',
-    agentKey: 'policy-qa',
-  },
-  {
-    name: '会议纪要',
-    icon: IconFileText,
-    tone: 'green',
-    position: 'meeting',
-    agentKey: 'meeting-notes',
-  },
-  {
-    name: 'PPT创作',
-    icon: IconPresentation,
-    tone: 'violet',
-    position: 'ppt',
-    agentKey: 'ppt-creator',
-  },
-  {
-    name: '图文分析',
-    icon: IconImage,
-    tone: 'orange',
-    position: 'image',
-    agentKey: 'image-analysis',
-  },
-  {
-    name: '面试中心',
-    icon: IconUsers,
-    tone: 'sky',
-    position: 'interview',
-    agentKey: 'interview-center',
-  },
-  {
-    name: '代码辅助',
-    icon: IconCode,
-    tone: 'cyan',
-    position: 'code',
-    agentKey: 'code-assistant',
-  },
-  {
-    name: '智体工坊',
-    icon: IconBox,
-    tone: 'violet',
-    position: 'workshop',
-    agentKey: 'agent-workshop',
-  },
-  {
-    name: '查看更多',
-    icon: IconCompass,
-    tone: 'slate',
-    position: 'more',
-    isMore: true,
-  },
-]
-
-const pointStats = [
-  { label: '积分', value: '2,480' },
-  { label: '本周使用', value: '18' },
-  { label: '连续活跃', value: '7天' },
-]
 
 const specialDays: CalendarSpecialDay[] = [
   { date: '2026-01-01', name: '元旦', type: 'holiday' },
@@ -277,6 +173,14 @@ function getDaysInMonth(year: number, month: number) {
   return new Date(year, month + 1, 0).getDate()
 }
 
+function getMonthGridCellCount(year: number, month: number) {
+  const start = new Date(year, month, 1)
+  const offset = (start.getDay() + 6) % 7
+  const dayCount = getDaysInMonth(year, month)
+  const rowCount = Math.ceil((offset + dayCount) / 7)
+  return rowCount * 7
+}
+
 function completedEventCountByDate(date: string) {
   return events.value.filter(
     (event) => event.status === 'done' && dateRange(event.date, event.endDate).includes(date),
@@ -319,13 +223,15 @@ const currentUser = computed<CalendarUser>(() => ({
   leaderId: userStore.profile?.leaderId,
   teamMemberIds: userStore.profile?.teamMemberIds,
 }))
+
 const assignableUsers = computed(() => {
   if (backendAssignableUsers.value.length) return backendAssignableUsers.value
 
   return currentUser.value.id ? [currentUser.value] : []
 })
-const events = computed(() => listTodos(allEvents.value, currentUser.value))
 const todayDate = computed(() => ymd(now.value))
+const events = computed(() => listTodos(allEvents.value, currentUser.value))
+const canSubmitHomeQuickTodo = computed(() => Boolean(homeQuickTodoText.value.trim()))
 
 const days = computed<CalendarDay[]>(() => {
   const result: CalendarDay[] = []
@@ -334,8 +240,9 @@ const days = computed<CalendarDay[]>(() => {
   const start = new Date(year, month, 1)
   const offset = (start.getDay() + 6) % 7
   const cursor = new Date(year, month, 1 - offset)
+  const cellCount = getMonthGridCellCount(year, month)
 
-  for (let i = 0; i < 42; i += 1) {
+  for (let i = 0; i < cellCount; i += 1) {
     const date = ymd(cursor)
     result.push({
       date,
@@ -377,31 +284,14 @@ const weekDays = computed<CalendarDay[]>(() => {
   return result
 })
 
-const monthLabel = computed(
-  () => `${currentMonth.value.getFullYear()} 年 ${currentMonth.value.getMonth() + 1} 月`,
-)
-const weekLabel = computed(() => {
-  const activeDays = weekDays.value.filter((day) => day.inActiveWeek)
-  const first = activeDays[0]
-  const last = activeDays[activeDays.length - 1]
-  if (!first || !last) return monthLabel.value
-
-  const start = new Date(`${first.date}T12:00:00`)
-  const end = new Date(`${last.date}T12:00:00`)
-  const startLabel = `${start.getMonth() + 1}月${start.getDate()}日`
-  const endLabel = `${end.getMonth() + 1}月${end.getDate()}日`
-
-  return `${start.getFullYear()} 年 ${startLabel} - ${endLabel}`
-})
-const visibleCalendarDays = computed(() =>
-  calendarViewMode.value === 'week' ? weekDays.value : days.value,
-)
-const isTodoOperating = computed(() => isDayPreviewOpen.value)
 const selectedEvents = computed(() => eventMap.value.get(selectedDate.value) ?? [])
 const selectedSpecialDays = computed(() => specialDayMap.value.get(selectedDate.value) ?? [])
 const todayEvents = computed(() => eventMap.value.get(todayDate.value) ?? [])
 const todayPendingEvents = computed(() =>
   todayEvents.value.filter((event) => event.status !== 'done'),
+)
+const todayMeetingCount = computed(
+  () => todayEvents.value.filter((event) => event.type === 'meeting').length,
 )
 const todayCompletedCount = computed(
   () => todayEvents.value.length - todayPendingEvents.value.length,
@@ -417,13 +307,6 @@ const currentWeekDates = computed(() => {
     return ymd(date)
   })
 })
-const currentMonthDates = computed(() => {
-  const year = currentMonth.value.getFullYear()
-  const month = currentMonth.value.getMonth()
-  const dayCount = getDaysInMonth(year, month)
-
-  return Array.from({ length: dayCount }, (_, index) => ymd(new Date(year, month, index + 1)))
-})
 const todoLoadRangeKey = computed(() => {
   const range =
     calendarViewMode.value === 'week'
@@ -432,138 +315,32 @@ const todoLoadRangeKey = computed(() => {
 
   return `${range.startDate}:${range.endDate}`
 })
-const weekEvents = computed(() =>
-  events.value.filter((event) => eventIntersectsDates(event, currentWeekDates.value)),
+const homeWeekDays = computed(() =>
+  currentWeekDates.value.map((date) => {
+    const value = new Date(`${date}T12:00:00`)
+    return {
+      date,
+      day: value.getDate(),
+      weekday: ['日', '一', '二', '三', '四', '五', '六'][value.getDay()],
+      isToday: date === todayDate.value,
+      isSelected: date === selectedDate.value,
+    }
+  }),
 )
-const weekPendingEvents = computed(() =>
-  weekEvents.value.filter((event) => event.status !== 'done'),
-)
-const weekCompletedCount = computed(() => weekEvents.value.length - weekPendingEvents.value.length)
-const monthEvents = computed(() =>
-  events.value.filter((event) => eventIntersectsDates(event, currentMonthDates.value)),
-)
-const monthPendingEvents = computed(() =>
-  monthEvents.value.filter((event) => event.status !== 'done'),
-)
-const monthCompletedCount = computed(
-  () => monthEvents.value.length - monthPendingEvents.value.length,
-)
-const nextTodayEvent = computed(() => todayPendingEvents.value[0])
-const userName = computed(() => currentUser.value.name)
-const userDepartment = computed(
-  () =>
-    `${currentUser.value.department ?? 'AI平台'} · ${currentUser.value.role === 'leader' ? '领导' : '员工'}`,
-)
-const avatarUrl = computed(() => libaoImage)
-const greeting = computed(() => {
-  const hour = now.value.getHours()
-  if (hour < 6) return '夜深了'
-  if (hour < 12) return '早上好'
-  if (hour < 18) return '下午好'
-  return '晚上好'
+const homeDateLabel = computed(() => {
+  const date = new Date(`${selectedDate.value}T12:00:00`)
+  const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()]
+  return `${date.getFullYear()} 年 ${date.getMonth() + 1} 月 ${date.getDate()} 日 ${weekday}`
 })
+const todayCompletionSummary = computed(() =>
+  todayEvents.value.length
+    ? `${todayCompletedCount.value} / ${todayEvents.value.length} 已完成`
+    : '0 / 0 已完成',
+)
 const todayTaskProgress = computed(() =>
   todayEvents.value.length
     ? Math.round((todayCompletedCount.value / todayEvents.value.length) * 100)
     : 0,
-)
-const profileTaskInsight = computed(() => {
-  const todayCount = todayPendingEvents.value.length
-  const weekCount = weekPendingEvents.value.length
-
-  return {
-    todayCount,
-    weekCount,
-    nextText: nextTodayEvent.value
-      ? `下一项 ${formatEventTime(nextTodayEvent.value)} 处理「${nextTodayEvent.value.title}」`
-      : '可以补充新的重点安排',
-  }
-})
-const weekTaskProgress = computed(() =>
-  weekEvents.value.length
-    ? Math.round((weekCompletedCount.value / weekEvents.value.length) * 100)
-    : 0,
-)
-const monthTaskProgress = computed(() =>
-  monthEvents.value.length
-    ? Math.round((monthCompletedCount.value / monthEvents.value.length) * 100)
-    : 0,
-)
-const weekSpanningEventCount = computed(
-  () => weekEvents.value.filter((event) => event.endDate && event.endDate !== event.date).length,
-)
-const monthHeatCells = computed(() =>
-  currentMonthDates.value.map((date) => {
-    const dayEvents = eventMap.value.get(date) ?? []
-    const intensity = Math.min(dayEvents.length, 4)
-    const day = new Date(`${date}T12:00:00`).getDate()
-
-    return {
-      key: date,
-      label: String(day),
-      intensity,
-      isToday: date === todayDate.value,
-    }
-  }),
-)
-const dashboardMetrics = computed<DashboardMetric[]>(() => [
-  {
-    label: '今日待办',
-    value: todayEvents.value.length,
-    unit: '项',
-    detail: `待处理 ${todayPendingEvents.value.length} 项 · 已完成 ${todayCompletedCount.value} 项`,
-    progress: todayTaskProgress.value,
-    icon: IconCalendarDays,
-    tone: 'blue',
-    variant: 'today',
-    pending: todayPendingEvents.value.length,
-    completed: todayCompletedCount.value,
-    nextText: nextTodayEvent.value
-      ? `${formatEventTime(nextTodayEvent.value)} · ${nextTodayEvent.value.title}`
-      : '今天暂无待处理事项',
-  },
-  {
-    label: '本周任务',
-    value: weekEvents.value.length,
-    unit: '项',
-    detail: `待处理 ${weekPendingEvents.value.length} 项 · 已完成 ${weekCompletedCount.value} 项`,
-    progress: weekTaskProgress.value,
-    icon: IconClipboardList,
-    tone: 'green',
-    variant: 'week',
-    pending: weekPendingEvents.value.length,
-    completed: weekCompletedCount.value,
-    statusItems: [
-      { label: '待办', value: weekPendingEvents.value.length },
-      { label: '完成', value: weekCompletedCount.value },
-      { label: '跨天', value: weekSpanningEventCount.value },
-    ],
-  },
-  {
-    label: '本月任务',
-    value: monthEvents.value.length,
-    unit: '项',
-    detail: `待处理 ${monthPendingEvents.value.length} 项 · 已完成 ${monthCompletedCount.value} 项`,
-    progress: monthTaskProgress.value,
-    icon: IconCalendarRange,
-    tone: 'violet',
-    variant: 'month',
-    pending: monthPendingEvents.value.length,
-    completed: monthCompletedCount.value,
-    heatCells: monthHeatCells.value,
-  },
-])
-const todayMetric = computed(() =>
-  dashboardMetrics.value.find((metric) => metric.variant === 'today'),
-)
-const weekMetric = computed(() =>
-  dashboardMetrics.value.find((metric) => metric.variant === 'week'),
-)
-const monthMetric = computed(() =>
-  dashboardMetrics.value.find((metric) => metric.variant === 'month'),
-)
-const periodMetric = computed(() =>
-  taskMetricMode.value === 'week' ? weekMetric.value : monthMetric.value,
 )
 const trendSeries = computed(() =>
   trendStatMode.value === 'week' ? weekTrendSeries.value : monthTrendSeries.value,
@@ -589,20 +366,6 @@ const monthTrendSeries = computed(() => {
 
   return rows
 })
-const trendTotal = computed(() => trendSeries.value.reduce((total, item) => total + item.value, 0))
-const trendInsight = computed(() => {
-  if (!trendTotal.value)
-    return trendStatMode.value === 'week' ? '本周暂无完成记录' : '本月暂无完成记录'
-
-  const peak = trendSeries.value.reduce(
-    (currentPeak, item) => (item.value > currentPeak.value ? item : currentPeak),
-    trendSeries.value[0],
-  )
-  const average = (trendTotal.value / Math.max(trendSeries.value.length, 1)).toFixed(1)
-
-  return `峰值 ${peak.label} ${peak.value} 项 · 平均 ${average} 项`
-})
-
 function createTrendChartOption(): echarts.EChartsOption {
   const series = trendSeries.value
   const accent = '#7c3aed'
@@ -692,11 +455,6 @@ const selectedDateLabel = computed(() => {
   return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${weekday}`
 })
 
-function eventIntersectsDates(event: CalendarEvent, targetDates: string[]) {
-  const targetDateSet = new Set(targetDates)
-  return dateRange(event.date, event.endDate).some((date) => targetDateSet.has(date))
-}
-
 function selectDate(date: string, syncMonth = true) {
   selectedDate.value = date
   const nextDate = new Date(`${date}T12:00:00`)
@@ -709,25 +467,17 @@ function selectDate(date: string, syncMonth = true) {
   }
 }
 
-function toggleDayPreview(date: string, time?: string) {
-  if (time) {
-    const openTimedCreate = () => {
-      isDayPreviewFormDirty.value = false
-      quickCreatePrompt.value = ''
-      presetCreateTime.value = time
-      presetCreateKey.value += 1
-      selectDate(date, calendarViewMode.value === 'week')
-      openTodoPanel()
-    }
+function changeHomeWeek(delta: number) {
+  const nextDate = new Date(`${selectedDate.value}T12:00:00`)
+  nextDate.setDate(nextDate.getDate() + delta * 7)
+  selectDate(ymd(nextDate))
+}
 
-    if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges(openTimedCreate)) return
-
-    openTimedCreate()
-    return
-  }
-
-  if (isDayPreviewOpen.value && selectedDate.value === date) {
-    return
+function openDayPreviewWithStatusFilter(date: string, filter: TodoStatusFilter) {
+  const applyFilter = () => {
+    void nextTick(() => {
+      dayPreviewPanelRef.value?.applyStatusFilter(filter)
+    })
   }
 
   const openSelectedDay = () => {
@@ -736,6 +486,52 @@ function toggleDayPreview(date: string, time?: string) {
     presetCreateTime.value = ''
     selectDate(date, calendarViewMode.value === 'week')
     openTodoPanel()
+    applyFilter()
+  }
+
+  if (isDayPreviewOpen.value && selectedDate.value === date) {
+    const switchFilter = () => {
+      isDayPreviewFormDirty.value = false
+      applyFilter()
+    }
+
+    if (!confirmDiscardPreviewChanges(switchFilter)) return
+
+    switchFilter()
+    return
+  }
+
+  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges(openSelectedDay)) return
+
+  openSelectedDay()
+}
+
+function openDayPreviewWithTypeFilter(date: string, filter: TodoTypeFilter) {
+  const applyFilter = () => {
+    void nextTick(() => {
+      dayPreviewPanelRef.value?.applyTypeFilter(filter)
+    })
+  }
+
+  const openSelectedDay = () => {
+    isDayPreviewFormDirty.value = false
+    quickCreatePrompt.value = ''
+    presetCreateTime.value = ''
+    selectDate(date, calendarViewMode.value === 'week')
+    openTodoPanel()
+    applyFilter()
+  }
+
+  if (isDayPreviewOpen.value && selectedDate.value === date) {
+    const switchFilter = () => {
+      isDayPreviewFormDirty.value = false
+      applyFilter()
+    }
+
+    if (!confirmDiscardPreviewChanges(switchFilter)) return
+
+    switchFilter()
+    return
   }
 
   if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges(openSelectedDay)) return
@@ -747,7 +543,6 @@ function closeDayPreview() {
   const closePreview = () => {
     isDayPreviewOpen.value = false
     isDayPreviewFormDirty.value = false
-    scheduleTodayBubbleAfterPanelClose()
   }
 
   if (!confirmDiscardPreviewChanges(closePreview)) return
@@ -755,32 +550,8 @@ function closeDayPreview() {
   closePreview()
 }
 
-function closeTodayBubble() {
-  clearTodayBubbleTimer()
-  clearPanelCloseRestoreTimer()
-  isTodayBubbleVisible.value = false
-  isTodayBubbleAutoHidden.value = false
-  isTodayBubbleManualClosed.value = true
-}
-
 function openTodoPanel() {
-  clearTodayBubbleTimer()
-  clearPanelCloseRestoreTimer()
-  isTodayBubbleVisible.value = false
-  isTodayBubbleAutoHidden.value = false
   isDayPreviewOpen.value = true
-}
-
-function clearTodayBubbleTimer() {
-  if (!todayBubbleTimer) return
-  clearTimeout(todayBubbleTimer)
-  todayBubbleTimer = undefined
-}
-
-function clearPanelCloseRestoreTimer() {
-  if (!panelCloseRestoreTimer) return
-  clearTimeout(panelCloseRestoreTimer)
-  panelCloseRestoreTimer = undefined
 }
 
 function showToast(message: string, type: 'success' | 'error' | 'info' = 'success') {
@@ -878,21 +649,6 @@ async function refreshTodos() {
   )
 }
 
-async function syncCalendarFromEmail() {
-  if (isSyncingCalendar.value) return
-
-  isSyncingCalendar.value = true
-  try {
-    await serviceSyncCalendar()
-    await refreshTodos()
-    showToast('邮箱日程同步成功')
-  } catch {
-    feedbackStore.error('同步邮箱日程失败')
-  } finally {
-    isSyncingCalendar.value = false
-  }
-}
-
 watch(todoLoadRangeKey, () => {
   if (!hasInitializedTodoRange) return
   void refreshTodos()
@@ -912,53 +668,6 @@ function confirmDiscardPreviewChanges(onConfirm?: () => void) {
   return false
 }
 
-function tryShowTodayBubble() {
-  if (
-    isTodayBubbleManualClosed.value ||
-    isTodoOperating.value ||
-    calendarViewMode.value !== 'month'
-  )
-    return
-
-  isTodayBubbleVisible.value = true
-  isTodayBubbleAutoHidden.value = false
-}
-
-function resetTodayBubbleTimer() {
-  clearTodayBubbleTimer()
-  todayBubbleTimer = setTimeout(tryShowTodayBubble, 3000)
-}
-
-function hideTodayBubbleTemporarily() {
-  if (
-    isTodayBubbleManualClosed.value ||
-    isTodoOperating.value ||
-    calendarViewMode.value !== 'month'
-  )
-    return
-
-  isTodayBubbleVisible.value = false
-  isTodayBubbleAutoHidden.value = true
-  resetTodayBubbleTimer()
-}
-
-function scheduleTodayBubbleAfterPanelClose() {
-  clearTodayBubbleTimer()
-  clearPanelCloseRestoreTimer()
-  if (isTodayBubbleManualClosed.value || calendarViewMode.value !== 'month') return
-
-  panelCloseRestoreTimer = setTimeout(() => {
-    if (
-      !isDayPreviewOpen.value &&
-      !isTodayBubbleManualClosed.value &&
-      calendarViewMode.value === 'month'
-    ) {
-      isTodayBubbleVisible.value = true
-      isTodayBubbleAutoHidden.value = false
-    }
-  }, 1000)
-}
-
 function quickCreateTodo(prompt: string, date: string) {
   const createFromPrompt = () => {
     isDayPreviewFormDirty.value = false
@@ -966,15 +675,22 @@ function quickCreateTodo(prompt: string, date: string) {
     presetCreateTime.value = ''
     quickCreateKey.value += 1
     selectDate(date)
-    if (date === todayDate.value) {
-      isTodayBubbleManualClosed.value = false
-    }
     openTodoPanel()
   }
 
-  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges(createFromPrompt)) return
+  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges(createFromPrompt)) return false
 
   createFromPrompt()
+  return true
+}
+
+function submitHomeQuickTodo() {
+  const prompt = homeQuickTodoText.value.trim()
+  if (!prompt) return
+
+  if (quickCreateTodo(prompt, todayDate.value)) {
+    homeQuickTodoText.value = ''
+  }
 }
 
 async function createTodo(payload: CalendarTodoDraft) {
@@ -1016,77 +732,37 @@ async function deleteTodo(id: string) {
   try {
     await serviceDeleteTodo(id)
     await refreshTodos()
-    closeDayPreview()
     showToast('待办已删除')
   } catch {
     // 全局拦截器已统一提示错误
   }
 }
 
-async function openTodoFromNotification(payload: { id: string; date: string }) {
+async function openTodoFromNotification(payload: { id: string; date?: string }) {
+  let targetDate = payload.date
+
+  if (!targetDate) {
+    try {
+      const detailEvent = await loadTodoDetail(payload.id, currentUser.value, assignableUsers.value)
+      targetDate = detailEvent.date
+    } catch {
+      showToast('查询消息关联待办失败', 'error')
+      return
+    }
+  }
+
   isDayPreviewFormDirty.value = false
-  selectDate(payload.date)
+  selectDate(targetDate)
   openTodoPanel()
   await refreshTodos()
+  await nextTick()
+  dayPreviewPanelRef.value?.openEventDetailById(payload.id)
 }
 
 defineExpose({
   refreshTodos,
   openTodoFromNotification,
 })
-
-function changePeriod(delta: number) {
-  const applyPeriodChange = () => {
-    isDayPreviewFormDirty.value = false
-    if (calendarViewMode.value === 'week') {
-      const selected = new Date(`${selectedDate.value}T12:00:00`)
-      selected.setDate(selected.getDate() + delta * 7)
-      selectedDate.value = ymd(selected)
-      currentMonth.value = new Date(selected.getFullYear(), selected.getMonth(), 1)
-      return
-    }
-
-    const selected = new Date(`${selectedDate.value}T12:00:00`)
-    const nextMonth = new Date(
-      currentMonth.value.getFullYear(),
-      currentMonth.value.getMonth() + delta,
-      1,
-    )
-    const nextDay = Math.min(
-      selected.getDate(),
-      getDaysInMonth(nextMonth.getFullYear(), nextMonth.getMonth()),
-    )
-
-    currentMonth.value = nextMonth
-    selectedDate.value = ymd(new Date(nextMonth.getFullYear(), nextMonth.getMonth(), nextDay))
-  }
-
-  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges(applyPeriodChange)) return
-
-  applyPeriodChange()
-}
-
-function openCampusTool(tool: CampusTool) {
-  if (tool.agentKey) {
-    openAgentList(tool.agentKey)
-    return
-  }
-
-  if (tool.isMore) {
-    openAgentList()
-    return
-  }
-
-  showToast(`${tool.name}模拟能力建设中，已打开智能体中心`)
-  openAgentList()
-}
-
-function openAgentList(agentKey?: string) {
-  router.push({
-    name: 'AgentCenter',
-    query: agentKey ? { agent: agentKey } : undefined,
-  })
-}
 </script>
 
 <template>
@@ -1096,241 +772,6 @@ function openAgentList(agentKey?: string) {
       class="left-preview-scrim"
       role="presentation"
       @click.stop="closeDayPreview"
-    ></div>
-
-    <section
-      class="profile-welcome-panel"
-      :class="{ 'has-profile-dialog': isProfileDialogOpen }"
-      aria-label="个人信息与欢迎区"
-    >
-      <section class="profile-panel">
-        <div class="profile-menu-anchor">
-          <button
-            class="profile-trigger"
-            type="button"
-            @click="isProfileDialogOpen = !isProfileDialogOpen"
-          >
-            <img class="avatar" :src="avatarUrl" alt="用户头像" />
-            <span class="profile-copy">
-              <strong>{{ greeting }}，{{ userName }}</strong>
-            </span>
-          </button>
-
-          <div class="profile-task-summary" aria-label="待办摘要">
-            <p>
-              今日 <strong>{{ profileTaskInsight.todayCount }}</strong> 项待办
-              <i></i>
-              本周 <strong>{{ profileTaskInsight.weekCount }}</strong> 项待推进
-            </p>
-            <span>{{ profileTaskInsight.nextText }}</span>
-          </div>
-
-          <section
-            v-if="isProfileDialogOpen"
-            class="profile-dialog"
-            role="dialog"
-            aria-modal="false"
-            aria-label="个人信息"
-          >
-            <header class="profile-dialog-head">
-              <div class="profile-dialog-user">
-                <img class="dialog-avatar" :src="avatarUrl" alt="用户头像" />
-                <div>
-                  <h2>{{ userName }}</h2>
-                  <p>{{ userDepartment }}</p>
-                </div>
-              </div>
-              <button
-                class="dialog-close"
-                type="button"
-                aria-label="关闭"
-                @click="isProfileDialogOpen = false"
-              >
-                ×
-              </button>
-            </header>
-
-            <div class="dialog-section">
-              <p class="dialog-label">身份</p>
-              <div class="point-grid" aria-label="真实登录身份">
-                <span>
-                  <strong>{{ currentUser.role === 'leader' ? '领导' : '员工' }}</strong>
-                  角色
-                </span>
-                <span>
-                  <strong>{{ currentUser.id || '未登录' }}</strong>
-                  账号
-                </span>
-              </div>
-            </div>
-
-            <div class="dialog-section">
-              <p class="dialog-label">数据</p>
-              <div class="point-grid">
-                <span v-for="item in pointStats" :key="item.label">
-                  <strong>{{ item.value }}</strong>
-                  {{ item.label }}
-                </span>
-              </div>
-            </div>
-          </section>
-        </div>
-      </section>
-
-      <section class="welcome-panel">
-        <div class="campus-visual">
-          <img :src="campusImage" alt="" />
-
-          <button
-            v-for="tool in campusTools"
-            :key="tool.name"
-            class="campus-tool"
-            :class="[`tone-${tool.tone}`, `position-${tool.position}`]"
-            type="button"
-            @click="openCampusTool(tool)"
-          >
-            <span class="campus-tool-content">
-              <span class="campus-tool-icon">
-                <component :is="tool.icon" />
-              </span>
-              <strong>{{ tool.name }}</strong>
-            </span>
-          </button>
-        </div>
-
-        <div class="quick-metrics">
-          <article
-            v-if="todayMetric"
-            class="metric-card metric-card-today"
-            :class="[`metric-card-${todayMetric.tone}`, `metric-card-${todayMetric.variant}`]"
-          >
-            <header class="today-card-head">
-              <span class="metric-icon">
-                <component :is="todayMetric.icon" />
-              </span>
-              <div class="today-card-title-block">
-                <div class="today-card-title-line">
-                  <span>{{ todayMetric.label }}</span>
-                  <strong>{{ todayMetric.value }}<em>项</em></strong>
-                </div>
-                <p class="today-card-subline">
-                  待处理 {{ todayMetric.pending }} · 已完成 {{ todayMetric.completed }}
-                </p>
-              </div>
-            </header>
-
-            <div class="today-card-focus">
-              <template v-if="nextTodayEvent">
-                <span class="today-focus-kicker">下一项</span>
-                <time>{{ formatEventTime(nextTodayEvent) }}</time>
-                <p>{{ nextTodayEvent.title }}</p>
-              </template>
-              <p v-else class="today-focus-empty">今天暂无待处理事项</p>
-            </div>
-          </article>
-
-          <article
-            v-if="periodMetric"
-            class="metric-card period-metric-card"
-            :class="[`metric-card-${periodMetric.tone}`, `metric-card-${periodMetric.variant}`]"
-          >
-            <header class="metric-card-head period-card-head">
-              <span class="metric-icon">
-                <component :is="periodMetric.icon" />
-              </span>
-              <div class="metric-title">
-                <span>{{ periodMetric.label }}</span>
-                <strong
-                  ><em>{{ periodMetric.value }}</em
-                  >{{ periodMetric.unit }}</strong
-                >
-              </div>
-              <div class="metric-period-switch" aria-label="任务周期">
-                <button
-                  type="button"
-                  :class="{ active: taskMetricMode === 'week' }"
-                  @click="taskMetricMode = 'week'"
-                >
-                  周
-                </button>
-                <button
-                  type="button"
-                  :class="{ active: taskMetricMode === 'month' }"
-                  @click="taskMetricMode = 'month'"
-                >
-                  月
-                </button>
-              </div>
-            </header>
-
-            <template v-if="taskMetricMode === 'week'">
-              <div class="week-progress period-week-progress">
-                <span :style="{ width: `${periodMetric.progress}%` }"></span>
-              </div>
-              <div class="metric-status-grid period-status-grid">
-                <span v-for="item in periodMetric.statusItems" :key="item.label">
-                  <strong>{{ item.value }}</strong>
-                  {{ item.label }}
-                </span>
-              </div>
-            </template>
-
-            <template v-else>
-              <div class="month-card-body">
-                <p>{{ periodMetric.detail }}</p>
-                <div class="month-heatmap" aria-label="本月任务分布">
-                  <span
-                    v-for="cell in periodMetric.heatCells"
-                    :key="cell.key"
-                    :class="[`heat-${cell.intensity}`, { 'is-today': cell.isToday }]"
-                    :title="`${cell.label}日 ${cell.intensity} 项`"
-                  ></span>
-                </div>
-              </div>
-            </template>
-          </article>
-
-          <article class="metric-card trend-metric-card">
-            <header class="trend-card-head">
-              <span class="metric-icon metric-icon-violet">
-                <IconTrendingUp />
-              </span>
-              <div class="trend-title">
-                <div class="trend-title-line">
-                  <span>趋势</span>
-                  <strong>{{ trendTotal }}<em>项</em></strong>
-                </div>
-                <p class="trend-insight">{{ trendInsight }}</p>
-              </div>
-              <div class="trend-switch" aria-label="统计周期">
-                <button
-                  type="button"
-                  :class="{ active: trendStatMode === 'week' }"
-                  @click="trendStatMode = 'week'"
-                >
-                  周
-                </button>
-                <button
-                  type="button"
-                  :class="{ active: trendStatMode === 'month' }"
-                  @click="trendStatMode = 'month'"
-                >
-                  月
-                </button>
-              </div>
-            </header>
-
-            <div ref="trendChartRef" class="trend-chart" aria-hidden="true"></div>
-          </article>
-        </div>
-      </section>
-    </section>
-
-    <div
-      v-if="isProfileDialogOpen"
-      class="profile-dialog-mask"
-      role="presentation"
-      @click="isProfileDialogOpen = false"
     ></div>
 
     <section class="layout-column left-column" aria-label="日历与待办" @click.stop>
@@ -1366,526 +807,619 @@ function openAgentList(agentKey?: string) {
         </aside>
       </Transition>
 
-      <section class="right-blank-panel today-todo-panel" aria-label="今日概览与待办">
-        <div class="today-overview-section">
-          <h2 class="overview-title">今日工作概览</h2>
-          <div class="overview-summary">
-            <div class="summary-card pending-card">
-              <div class="shape shape-tr"></div>
-              <div class="shape shape-bl"></div>
-              <strong>{{ todayPendingEvents.length }}</strong>
-              <span class="label">待处理</span>
-            </div>
-            <div class="summary-card completed-card">
-              <div class="shape shape-tl"></div>
-              <div class="shape shape-br"></div>
-              <strong>{{ todayCompletedCount }}</strong>
-              <span class="label">已完成</span>
-            </div>
-            <div class="summary-card total-card">
-              <div class="shape shape-tr"></div>
-              <div class="shape shape-bl"></div>
-              <strong>{{ todayEvents.length }}</strong>
-              <span class="label">总计</span>
+      <section class="home-main-panel" aria-label="今日待办">
+        <div class="home-main-head">
+          <div class="home-title-metrics">
+            <div class="home-summary-grid" aria-label="今日待办统计">
+              <button
+                type="button"
+                class="home-summary-card meeting-card"
+                aria-label="查看今日会议"
+                @click.stop="openDayPreviewWithTypeFilter(todayDate, 'meeting')"
+              >
+                <IconPresentation class="home-summary-icon" aria-hidden="true" />
+                <span class="home-summary-label">会议</span>
+                <strong class="home-summary-value">{{ todayMeetingCount }}</strong>
+              </button>
+              <button
+                type="button"
+                class="home-summary-card pending-card"
+                aria-label="查看今日待处理待办"
+                @click.stop="openDayPreviewWithStatusFilter(todayDate, 'pending')"
+              >
+                <IconClipboardList class="home-summary-icon" aria-hidden="true" />
+                <span class="home-summary-label">待处理</span>
+                <strong class="home-summary-value">{{ todayPendingEvents.length }}</strong>
+              </button>
+              <button
+                type="button"
+                class="home-summary-card completed-card"
+                aria-label="查看今日已完成待办"
+                @click.stop="openDayPreviewWithStatusFilter(todayDate, 'done')"
+              >
+                <IconSquareCheck class="home-summary-icon" aria-hidden="true" />
+                <span class="home-summary-label">已完成</span>
+                <strong class="home-summary-value">{{ todayCompletedCount }}</strong>
+              </button>
+              <button
+                type="button"
+                class="home-summary-card all-card"
+                aria-label="查看今日全部待办"
+                @click.stop="openDayPreviewWithStatusFilter(todayDate, 'all')"
+              >
+                <IconCalendarRange class="home-summary-icon" aria-hidden="true" />
+                <span class="home-summary-label">全部</span>
+                <strong class="home-summary-value">{{ todayEvents.length }}</strong>
+              </button>
             </div>
           </div>
-        </div>
 
-        <div class="today-list-section">
-          <header class="list-head">
-            <div class="list-title-group">
-              <h3 class="list-title">今日待办</h3>
-              <span class="list-count">{{ todayEvents.length }}</span>
-            </div>
-            <button type="button" class="btn-view-all" @click.stop="toggleDayPreview(todayDate)">
-              查看全部
-            </button>
-          </header>
-
-          <div v-if="todayEvents.length" class="new-todo-list">
-            <button
-              v-for="event in todayEvents"
-              :key="event.id"
-              type="button"
-              class="new-todo-item"
-              :class="{ 'is-done': event.status === 'done' }"
-              @click.stop="toggleDayPreview(todayDate)"
-            >
-              <div class="item-left">
-                <span class="status-dot" :class="event.status === 'done' ? 'dot-green' : 'dot-blue'"></span>
-                <time class="item-time">{{ formatEventTime(event) }}</time>
-                <span class="item-title">{{ event.title }}</span>
+          <section class="home-week-card" aria-label="本周日期">
+            <header class="home-week-head">
+              <div>
+                <IconCalendarDays aria-hidden="true" />
+                <strong>{{ homeDateLabel }}</strong>
               </div>
-              <span class="item-tag" :class="event.status === 'done' ? 'tag-gray' : 'tag-blue'">
-                {{ event.status === 'done' ? '已完成' : '待处理' }}
-              </span>
-            </button>
-          </div>
-          
-          <div v-else class="new-todo-empty">
-            <div class="empty-icon-wrapper">
-              <IconBox class="empty-icon" />
+              <div class="home-week-actions" aria-label="切换周">
+                <button type="button" aria-label="上一周" @click.stop="changeHomeWeek(-1)">
+                  <IconChevronLeft aria-hidden="true" />
+                </button>
+                <button type="button" aria-label="下一周" @click.stop="changeHomeWeek(1)">
+                  <IconChevronRight aria-hidden="true" />
+                </button>
+              </div>
+            </header>
+            <div class="home-week-strip">
+              <button
+                v-for="day in homeWeekDays"
+                :key="day.date"
+                type="button"
+                :class="{ active: day.isSelected, 'is-today': day.isToday }"
+                @click.stop="selectDate(day.date)"
+              >
+                <strong>{{ day.day }}</strong>
+                <span>{{ day.weekday }}</span>
+              </button>
             </div>
-            <span class="empty-text">今日暂无待办</span>
-          </div>
+          </section>
         </div>
+
+        <form class="home-main-quick-create" @submit.prevent.stop="submitHomeQuickTodo">
+          <input
+            id="home-quick-todo"
+            v-model="homeQuickTodoText"
+            type="text"
+            autocomplete="off"
+            aria-label="一句话新增"
+            placeholder="一句话新增待办..."
+          />
+          <button type="submit" :disabled="!canSubmitHomeQuickTodo" aria-label="解析并新增待办">
+            <IconSendHorizontal aria-hidden="true" />
+          </button>
+        </form>
       </section>
 
-      <div class="panel calendar-panel">
-        <CalendarMonth
-          v-model:view-mode="calendarViewMode"
-          :days="visibleCalendarDays"
-          :selected-date="selectedDate"
-          :month-label="monthLabel"
-          :week-label="weekLabel"
-          :today-date="todayDate"
-          :today-events="todayEvents"
-          :show-today-bubble="false"
-          :is-syncing-calendar="isSyncingCalendar"
-          @select="toggleDayPreview"
-          @calendar-interaction="hideTodayBubbleTemporarily"
-          @close-today-bubble="closeTodayBubble"
-          @quick-create-todo="quickCreateTodo"
-          @sync-calendar="syncCalendarFromEmail"
-          @open-agent-center="openAgentList"
-          @previous-period="changePeriod(-1)"
-          @next-period="changePeriod(1)"
-        />
-      </div>
+      <section class="floating-stats" aria-label="效率统计">
+        <article class="home-stat-card completion-stat-card">
+          <h2>今日完成率</h2>
+          <div class="completion-stat-body">
+            <div
+              class="completion-donut"
+              :style="{ '--completion': `${todayTaskProgress * 3.6}deg` }"
+              aria-label="今日完成率"
+            >
+              <div>
+                <strong>{{ todayTaskProgress }}%</strong>
+                <span>{{ todayCompletionSummary }}</span>
+              </div>
+            </div>
+            <div class="completion-copy">
+              <strong
+                >待处理 <em>{{ todayPendingEvents.length }}</em> 项</strong
+              >
+              <span>任务总数 {{ todayEvents.length }} 项</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="home-stat-card trend-stat-card">
+          <header>
+            <h2>本周趋势</h2>
+            <button
+              type="button"
+              @click.stop="trendStatMode = trendStatMode === 'week' ? 'month' : 'week'"
+            >
+              {{ trendStatMode === 'week' ? '本周' : '本月' }}
+            </button>
+          </header>
+          <div ref="trendChartRef" class="home-trend-chart" aria-label="完成趋势"></div>
+        </article>
+      </section>
     </section>
   </div>
 </template>
 
 <style scoped>
 .calendar-workspace {
+  --home-module-height: clamp(190px, 19.6vh, 224px);
+  --home-glass-border: rgba(255, 255, 255, 0.66);
+  --home-glass-bg: linear-gradient(145deg, rgba(255, 255, 255, 0.5), rgba(242, 248, 255, 0.34)),
+    rgba(248, 252, 255, 0.4);
+  --home-glass-shadow: 0 16px 36px -32px rgba(8, 30, 64, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.78);
+  --home-ink: #13203a;
+  --home-muted: #6d7c93;
   position: relative;
   isolation: isolate;
   height: 100%;
   min-height: 0;
   box-sizing: border-box;
-  padding: 5px;
-  display: grid;
-  grid-template-columns: repeat(20, minmax(0, 1fr));
-  grid-template-rows: minmax(370px, 1.5fr) minmax(240px, 1fr);
-  gap: 8px 18px;
+  padding: 0;
+  display: block;
   overflow: hidden;
 }
 
 .left-preview-scrim {
-  position: absolute;
+  position: fixed;
+  inset: 0;
   z-index: 80;
-  top: 22px;
-  left: 22px;
-  bottom: 22px;
-  width: calc(65% - 29px);
-  border-radius: 24px;
-  background: rgba(248, 250, 252, 0.22);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
-}
-
-.layout-column {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.panel,
-.profile-welcome-panel,
-.welcome-panel,
-.profile-panel {
-  min-width: 0;
-  border: 1px solid rgba(226, 232, 240, 0.82);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.86);
-  box-shadow: 0 18px 46px -34px rgba(15, 23, 42, 0.36);
-  backdrop-filter: blur(16px);
+  width: auto;
+  border-radius: 0;
+  background: rgba(15, 23, 42, 0.12);
+  box-shadow: none;
+  pointer-events: auto;
 }
 
 .left-column {
-  position: relative;
-  grid-column: 14 / 21;
-  grid-row: 1 / 3;
+  position: absolute;
+  inset: 0;
+  display: block;
   min-height: 0;
+  pointer-events: none;
 }
 
-.calendar-panel {
-  min-height: 0;
-  flex: 6 1 0;
+.home-main-panel,
+.floating-stats,
+.day-preview-popover {
+  pointer-events: auto;
 }
 
-.right-blank-panel {
-  min-height: 0;
-  flex: 4 1 0;
-}
-
-.today-todo-panel {
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  gap: 12px;
-}
-
-.today-overview-section {
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(226, 232, 240, 0.82);
-  border-radius: 16px;
-  padding: 10px 14px;
-  box-shadow: 0 4px 24px -12px rgba(15, 23, 42, 0.06);
-  flex: 0 0 auto;
-}
-
-.overview-title {
-  color: #0f172a;
-  font-size: 15px;
-  font-weight: 850;
-  margin-bottom: 8px;
-}
-
-.overview-summary {
+.home-main-panel {
+  position: absolute;
+  right: clamp(32px, 2.4vw, 48px);
+  bottom: clamp(24px, 3.2vh, 40px);
+  width: clamp(640px, 38vw, 800px);
+  height: var(--home-module-height);
+  box-sizing: border-box;
+  border: 1px solid var(--home-glass-border);
+  border-radius: 20px;
+  background: var(--home-glass-bg);
+  padding: 14px 16px;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: minmax(0, 1fr) 36px;
+  gap: 10px;
+  overflow: hidden;
+  box-shadow: var(--home-glass-shadow);
+  backdrop-filter: blur(25px) saturate(1.16);
+  -webkit-backdrop-filter: blur(25px) saturate(1.16);
+}
+
+.home-stat-card h2 {
+  margin: 0;
+  color: var(--home-ink);
+  letter-spacing: 0;
+}
+
+.home-main-head {
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1.26fr) minmax(280px, 0.9fr);
   gap: 10px;
 }
 
-.summary-card {
-  position: relative;
-  border-radius: 14px;
-  padding: 10px 8px;
+.home-title-metrics {
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+.home-summary-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  border: 1px solid rgba(255, 255, 255, 0.54);
+  border-radius: 14px;
+  background: rgba(229, 241, 250, 0.72);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.66);
+}
+
+.home-summary-card {
+  min-width: 0;
+  border: 0;
+  border-right: 1px solid rgba(196, 212, 228, 0.66);
+  background: transparent;
+  color: var(--home-ink);
+  padding: 6px 4px 4px;
+  display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
-  gap: 2px;
-  transition: transform 0.2s ease;
-}
-
-.summary-card:hover {
-  transform: translateY(-2px);
-}
-
-.summary-card strong {
-  font-size: 28px;
-  line-height: 1;
-  font-weight: 950;
-  position: relative;
-  z-index: 1;
-}
-
-.summary-card .label {
-  font-size: 12px;
-  font-weight: 800;
-  color: #94a3b8;
-  position: relative;
-  z-index: 1;
-}
-
-.summary-card .shape {
-  position: absolute;
-  border-radius: 50%;
-  z-index: 0;
-}
-
-.pending-card {
-  background: #fdfaf6;
-}
-.pending-card strong {
-  color: #d97736;
-}
-.pending-card .shape-tr {
-  top: -18px;
-  right: -16px;
-  width: 52px;
-  height: 52px;
-  background: #f5ece5;
-}
-.pending-card .shape-bl {
-  bottom: -12px;
-  left: -12px;
-  width: 36px;
-  height: 36px;
-  background: #f2e4da;
-}
-
-.completed-card {
-  background: #f8faff;
-}
-.completed-card strong {
-  color: #0f172a;
-}
-.completed-card .shape-tl {
-  top: -12px;
-  left: -12px;
-  width: 44px;
-  height: 44px;
-  background: #f0e6fa;
-}
-.completed-card .shape-br {
-  bottom: 8px;
-  right: 8px;
-  width: 16px;
-  height: 16px;
-  background: #f7ebfd;
-}
-
-.total-card {
-  background: #f4fdf8;
-}
-.total-card strong {
-  color: #059669;
-}
-.total-card .shape-tr {
-  top: -10px;
-  right: -10px;
-  width: 40px;
-  height: 40px;
-  background: #dcfce7;
-}
-.total-card .shape-bl {
-  bottom: -18px;
-  left: 14px;
-  width: 30px;
-  height: 30px;
-  background: #ccfbf1;
-}
-
-.today-list-section {
-  flex: 1 1 auto;
-  min-height: 200px;
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(226, 232, 240, 0.82);
-  border-radius: 16px;
-  padding: 14px 16px;
-  display: flex;
   flex-direction: column;
-  box-shadow: 0 4px 24px -12px rgba(15, 23, 42, 0.06);
-}
-
-.list-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-  flex: 0 0 auto;
-}
-
-.list-title-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.list-title {
-  color: #0f172a;
-  font-size: 15px;
-  font-weight: 850;
-}
-
-.list-count {
-  background: #eff6ff;
-  color: #2563eb;
-  font-size: 12px;
-  font-weight: 800;
-  padding: 2px 8px;
-  border-radius: 999px;
-}
-
-.btn-view-all {
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 800;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-  transition: color 0.2s;
-}
-
-.btn-view-all:hover {
-  color: #2563eb;
-}
-
-.new-todo-list {
-  min-height: 0;
-  flex: 1 1 auto;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-right: 4px;
-}
-
-.new-todo-list::-webkit-scrollbar {
-  width: 4px;
-}
-.new-todo-list::-webkit-scrollbar-thumb {
-  background: rgba(203, 213, 225, 0.6);
-  border-radius: 4px;
-}
-
-.new-todo-item {
-  width: 100%;
-  min-height: 44px;
-  border: none;
-  border-radius: 12px;
-  background: #f4f7fd; /* 极浅的蓝紫色/蓝色背景 */
-  padding: 0 12px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  text-align: left;
+  gap: 4px;
   font: inherit;
   cursor: pointer;
-  transition: background 0.2s, transform 0.2s;
+  transition:
+    background 0.18s ease,
+    transform 0.18s ease;
 }
 
-.new-todo-item:hover {
-  background: #eef2fa; /* 悬浮时轻微加深 */
+.home-summary-card:last-child {
+  border-right: 0;
+}
+
+.home-summary-card:hover {
+  background: rgba(255, 255, 255, 0.28);
   transform: translateY(-1px);
 }
 
-.new-todo-item.is-done {
-  background: #f4fdf8; /* 已完成使用极浅的薄荷绿背景 */
-  opacity: 0.8;
+.home-summary-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
 }
 
-.new-todo-item.is-done:hover {
-  background: #eafbf1;
+.home-summary-label {
+  color: #56657d;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 900;
+  white-space: nowrap;
 }
 
-.item-left {
+.home-summary-value {
+  color: var(--home-ink);
+  font-size: clamp(14px, 1.05vw, 16px);
+  line-height: 1;
+  font-weight: 950;
+}
+
+.meeting-card .home-summary-icon {
+  color: #438bff;
+}
+
+.pending-card .home-summary-icon {
+  color: #ff8a4c;
+}
+
+.completed-card .home-summary-icon {
+  color: #28c879;
+}
+
+.all-card .home-summary-icon {
+  color: #6d7c93;
+}
+
+.home-week-card {
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid rgba(255, 255, 255, 0.58);
+  border-radius: 14px;
+  background: rgba(226, 239, 249, 0.72);
+  padding: 8px 10px 6px;
+  display: grid;
+  grid-template-rows: 22px minmax(0, 1fr);
+  gap: 6px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.66);
+}
+
+.home-week-head,
+.home-week-head > div,
+.home-week-actions {
   display: flex;
   align-items: center;
+}
+
+.home-week-head {
+  justify-content: space-between;
   gap: 12px;
+}
+
+.home-week-head > div:first-child {
   min-width: 0;
+  gap: 6px;
 }
 
-.status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+.home-week-head svg {
+  width: 16px;
+  height: 16px;
+  color: #438bff;
   flex: 0 0 auto;
 }
 
-.dot-blue { background: #3b82f6; }
-.dot-green { background: #10b981; }
-
-.item-time {
-  color: #64748b;
-  font-size: 13px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  flex: 0 0 auto;
-}
-
-.item-title {
-  color: #0f172a;
-  font-size: 14px;
-  font-weight: 800;
-  white-space: nowrap;
+.home-week-head strong {
   overflow: hidden;
+  color: var(--home-ink);
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 950;
   text-overflow: ellipsis;
-}
-
-.item-tag {
-  font-size: 11px;
-  font-weight: 850;
-  padding: 4px 10px;
-  border-radius: 6px;
   white-space: nowrap;
-  flex: 0 0 auto;
 }
 
-.tag-blue {
-  background: #e6effd; /* 与卡片底色呼应的标签底色 */
-  color: #2563eb;
+.home-week-actions {
+  gap: 6px;
 }
 
-.tag-gray {
-  background: #e3f5eb; /* 与已完成卡片底色呼应的标签底色 */
-  color: #059669;
+.home-week-actions button {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(210, 226, 240, 0.82);
+  color: #6d7c93;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
 }
 
-.new-todo-item.is-done .item-title,
-.new-todo-item.is-done .item-time {
-  color: #64748b;
-  text-decoration: line-through;
+.home-week-actions button svg {
+  width: 13px;
+  height: 13px;
+  color: currentColor;
 }
 
-.new-todo-empty {
-  flex: 1 1 auto;
+.home-week-strip {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 4px;
+}
+
+.home-week-strip button {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #8b99ae;
+  padding: 3px 2px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  color: #94a3b8;
-  min-height: 120px;
+  gap: 4px;
+  font: inherit;
+  cursor: pointer;
 }
 
-.empty-icon-wrapper {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background: #f8fafc;
+.home-week-strip button strong {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #5f6e84;
+  font-size: 12px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.home-week-strip button span {
+  color: #9aa6b8;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.home-week-strip button.active strong {
+  background: #438bff;
+  color: #ffffff;
+  box-shadow: 0 9px 18px -10px rgba(67, 139, 255, 0.84);
+}
+
+.home-main-quick-create {
+  min-height: 0;
+  height: 100%;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  border-radius: 14px;
+  background: rgba(232, 242, 251, 0.74);
+  padding: 4px 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.home-main-quick-create input {
+  min-width: 0;
+  height: 32px;
+  border: 0;
+  outline: 0;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 999px;
+  color: #26334f;
+  padding: 0 14px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.home-main-quick-create input::placeholder {
+  color: #7c8ba3;
+}
+
+.home-main-quick-create button {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(208, 226, 247, 0.86);
+  color: #438bff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.home-main-quick-create button:disabled {
+  color: rgba(67, 139, 255, 0.44);
+  cursor: not-allowed;
+}
+
+.home-main-quick-create button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.floating-stats {
+  position: absolute;
+  right: calc(clamp(32px, 2.4vw, 48px) + clamp(640px, 38vw, 800px) + 16px);
+  bottom: clamp(24px, 3.2vh, 40px);
+  width: clamp(620px, 35.5vw, 720px);
+  height: var(--home-module-height);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.home-stat-card {
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.66);
+  border-radius: 20px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.5), rgba(242, 248, 255, 0.34)),
+    rgba(248, 252, 255, 0.4);
+  padding: 20px 22px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.78),
+    0 16px 36px -32px rgba(8, 30, 64, 0.34);
+  backdrop-filter: blur(22px) saturate(1.12);
+  -webkit-backdrop-filter: blur(22px) saturate(1.12);
+}
+
+.home-stat-card h2 {
+  font-size: 19px;
+  line-height: 1;
+  font-weight: 950;
+}
+
+.completion-stat-body {
+  height: calc(100% - 25px);
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  align-items: center;
+  gap: 26px;
+}
+
+.completion-donut {
+  width: 116px;
+  height: 116px;
+  border-radius: 999px;
+  background: conic-gradient(#438bff var(--completion), rgba(205, 218, 234, 0.8) 0);
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+.completion-donut > div {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: rgba(231, 242, 251, 0.96);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #cbd5e1;
-}
-
-.empty-icon {
-  width: 24px;
-  height: 24px;
-}
-
-.empty-text {
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.calendar-panel,
-.agent-panel,
-.right-blank-panel {
-  overflow: hidden;
-}
-
-.calendar-panel :deep(.calendar-board) {
-  height: 100%;
-  border: 0;
-  border-radius: 18px;
-  background: transparent;
-  box-shadow: none;
-}
-
-.calendar-panel :deep(.month-grid) {
+  flex-direction: column;
   gap: 8px;
 }
 
-.calendar-panel :deep(.day-cell) {
-  padding: 8px;
+.completion-donut strong {
+  color: #438bff;
+  font-size: 29px;
+  line-height: 1;
+  font-weight: 950;
+}
+
+.completion-donut span {
+  color: #3e4d66;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 950;
+}
+
+.completion-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  color: #31405a;
+  font-size: 15px;
+  font-weight: 950;
+}
+
+.completion-copy em {
+  color: #27bd74;
+  font-style: normal;
+}
+
+.trend-stat-card {
+  display: grid;
+  grid-template-rows: 30px minmax(0, 1fr);
+}
+
+.trend-stat-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.trend-stat-card header button {
+  height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.58);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.3);
+  color: #53627a;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.home-trend-chart {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
 }
 
 .day-preview-popover {
   position: absolute;
   z-index: 999;
-  top: calc(50% - 24px);
-  right: calc(100% + 16px);
-  width: min(550px, calc(60vw - 42px));
-  height: min(682px, calc(100% - 32px));
-  flex: 0 0 auto;
+  top: calc(50% + 28px);
+  right: calc(clamp(32px, 2.4vw, 48px) + clamp(640px, 38vw, 800px) + 22px);
+  width: min(530px, calc(100vw - 870px));
+  height: min(680px, calc(100% - 96px));
+  min-width: 460px;
   box-sizing: border-box;
   border: 1px solid rgba(226, 232, 240, 0.92);
   border-radius: 26px;
   background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 28px 72px -36px rgba(15, 23, 42, 0.58);
   padding: 24px;
   overflow: hidden;
+  box-shadow: 0 28px 72px -36px rgba(15, 23, 42, 0.58);
   backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
   transform: translateY(-50%);
 }
 
@@ -1906,1346 +1440,48 @@ function openAgentList(agentKey?: string) {
   transform: translate(12px, -50%);
 }
 
-.profile-welcome-panel {
-  position: relative;
-  isolation: isolate;
-  grid-column: 1 / 14;
-  grid-row: 1 / 3;
-  min-height: 0;
-  padding: 22px 24px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  overflow-x: clip;
-  overflow-y: visible;
-  border: none;
-  background: transparent;
-  box-shadow: none;
-  backdrop-filter: none;
-}
-
-.profile-welcome-panel::before {
-  display: none;
-}
-
-.profile-welcome-panel.has-profile-dialog {
-  z-index: 1100;
-}
-
-.profile-welcome-panel .profile-panel,
-.profile-welcome-panel .welcome-panel {
-  border: 0;
-  box-shadow: none;
-  backdrop-filter: none;
-}
-
-.profile-welcome-panel .profile-panel {
-  border-radius: 0;
-  background: transparent;
-  flex: 0 0 auto;
-}
-
-.profile-welcome-panel .welcome-panel {
-  position: relative;
-  z-index: 1;
-  border-radius: 0;
-}
-
-.welcome-panel {
-  min-height: 0;
-  flex: 1 1 auto;
-  padding: 0;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) 168px;
-  gap: 12px;
-  background: transparent;
-  color: #111827;
-}
-
-.eyebrow {
-  margin: 0 0 7px;
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 850;
-}
-
-.welcome-panel .eyebrow {
-  color: #6b7280;
-}
-
-h2,
-h3,
-p {
-  margin: 0;
-}
-
-.campus-visual {
-  container-type: inline-size;
-  position: relative;
-  grid-row: 1;
-  align-self: stretch;
-  min-height: 0;
-  overflow: visible;
-  border-radius: 0;
-}
-
-.campus-visual::before,
-.campus-visual::after {
-  position: absolute;
-  content: '';
-  pointer-events: none;
-}
-
-.campus-visual::after {
-  z-index: 3;
-  inset: auto -10% -46px;
-  height: 40%;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0), rgba(249, 251, 255, 0.98) 58%),
-    radial-gradient(ellipse at center, rgba(255, 255, 255, 0.94), transparent 74%);
-}
-
-.campus-visual img {
-  position: absolute;
-  z-index: 1;
-  left: 50%;
-  bottom: -7%;
-  width: min(148%, 1040px);
-  max-width: none;
-  height: auto;
-  max-height: 114%;
-  object-fit: contain;
-  transform: translateX(-50%);
-  filter: drop-shadow(0 28px 30px rgba(15, 23, 42, 0.08))
-    drop-shadow(0 0 24px rgba(37, 99, 235, 0.06));
-  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 12%, #000 78%, transparent 98%),
-    radial-gradient(ellipse 86% 74% at 50% 54%, #000 56%, rgba(0, 0, 0, 0.74) 72%, transparent 96%);
-  mask-image: linear-gradient(180deg, transparent 0%, #000 12%, #000 78%, transparent 98%),
-    radial-gradient(ellipse 86% 74% at 50% 54%, #000 56%, rgba(0, 0, 0, 0.74) 72%, transparent 96%);
-  -webkit-mask-composite: source-in;
-  mask-composite: intersect;
-}
-
-/* 仅当容器够宽、1040px 上限开始生效时，才改为按 148% 随容器缩放 */
-@container (min-width: 704px) {
-  .campus-visual img {
-    width: 148%;
+@media (max-width: 1280px) {
+  .home-main-panel {
+    width: min(720px, calc(100vw - 64px));
   }
-}
 
-.campus-tool {
-  --stem-h: 58px;
-  --stem-x: 50%;
-  position: absolute;
-  z-index: 4;
-  min-width: 118px;
-  min-height: 48px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: #10172c;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 900;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.campus-tool-content {
-  box-sizing: border-box;
-  width: 100%;
-  min-width: 118px;
-  min-height: 48px;
-  border: 1px solid rgba(226, 232, 240, 0.68);
-  border-radius: 15px;
-  background: rgba(255, 255, 255, 0.82);
-  padding: 8px 14px 8px 9px;
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.95),
-    0 14px 30px -27px rgba(15, 23, 42, 0.28);
-  transform-origin: center;
-  transition:
-    transform 0.18s ease,
-    box-shadow 0.18s ease,
-    border-color 0.18s ease;
-}
-
-.campus-tool::after,
-.campus-tool::before {
-  content: '';
-  position: absolute;
-  left: var(--stem-x);
-  pointer-events: none;
-  transform: translateX(-50%);
-}
-
-.campus-tool::after {
-  top: 100%;
-  width: 1.5px;
-  height: var(--stem-h);
-  background: linear-gradient(180deg, rgba(59, 130, 246, 0.12), rgba(59, 130, 246, 0.68));
-}
-
-.campus-tool::before {
-  top: calc(100% + var(--stem-h));
-  width: 9px;
-  height: 9px;
-  border: 3px solid rgba(255, 255, 255, 0.88);
-  border-radius: 999px;
-  background: #3b82f6;
-  box-shadow: 0 0 0 5px rgba(59, 130, 246, 0.12);
-}
-
-.position-interview::after,
-.position-code::after,
-.position-workshop::after {
-  top: auto;
-  bottom: 100%;
-  background: linear-gradient(0deg, rgba(59, 130, 246, 0.12), rgba(59, 130, 246, 0.68));
-}
-
-.position-interview::before,
-.position-code::before,
-.position-workshop::before {
-  top: auto;
-  bottom: calc(100% + var(--stem-h));
-}
-
-.campus-tool:hover .campus-tool-content {
-  transform: scale(1.06);
-  border-color: rgba(147, 197, 253, 0.9);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.98),
-    0 18px 38px -24px rgba(37, 99, 235, 0.4);
-}
-
-.campus-tool-icon {
-  width: 30px;
-  height: 30px;
-  border-radius: 10px;
-  color: #ffffff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
-}
-
-.campus-tool-icon svg {
-  width: 16px;
-  height: 16px;
-}
-
-.tone-blue .campus-tool-icon,
-.metric-card-blue .metric-icon {
-  background: linear-gradient(145deg, #1d7cff, #155eef);
-}
-
-.tone-green .campus-tool-icon,
-.metric-card-green .metric-icon {
-  background: linear-gradient(145deg, #19c785, #059669);
-}
-
-.tone-violet .campus-tool-icon,
-.metric-card-violet .metric-icon {
-  background: linear-gradient(145deg, #8b5cf6, #6d4df2);
-}
-
-.tone-orange .campus-tool-icon {
-  background: linear-gradient(145deg, #fb923c, #f97316);
-}
-
-.tone-sky .campus-tool-icon {
-  background: linear-gradient(145deg, #38bdf8, #0ea5e9);
-}
-
-.tone-cyan .campus-tool-icon {
-  background: linear-gradient(145deg, #2dd4bf, #06b6d4);
-}
-
-.tone-slate .campus-tool-icon {
-  background: linear-gradient(145deg, #64748b, #334155);
-}
-
-.position-image {
-  --stem-h: 68px;
-  --stem-x: 46%;
-  left: 9%;
-  top: 21%;
-}
-
-.position-qa {
-  --stem-h: 62px;
-  left: 33%;
-  top: 10%;
-}
-
-.position-meeting {
-  --stem-h: 62px;
-  left: 56%;
-  top: 8%;
-}
-
-.position-ppt {
-  --stem-h: 74px;
-  right: 4%;
-  top: 20%;
-}
-
-.position-interview,
-.position-code,
-.position-workshop,
-.position-more {
-  --stem-h: 40px;
-}
-
-.position-interview {
-  left: 21%;
-  bottom: 13%;
-}
-
-.position-code {
-  left: 48%;
-  bottom: 29%;
-}
-
-.position-workshop {
-  right: 3%;
-  bottom: 43%;
-}
-
-.position-more {
-  left: 26%;
-  bottom: 60%;
-}
-
-.quick-metrics {
-  position: relative;
-  z-index: 5;
-  grid-column: 1 / -1;
-  grid-row: 2;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.metric-card {
-  --metric-accent: #2563eb;
-  --metric-accent-dark: #1d4ed8;
-  --metric-soft: rgba(219, 234, 254, 0.58);
-  position: relative;
-  min-height: 168px;
-  box-sizing: border-box;
-  border: 1px solid rgba(226, 232, 240, 0.68);
-  border-radius: 18px;
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.95), rgba(248, 251, 255, 0.78)),
-    rgba(255, 255, 255, 0.7);
-  padding: 12px;
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 800;
-  overflow: hidden;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.88),
-    0 18px 34px -34px rgba(15, 23, 42, 0.26);
-  transition:
-    border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    transform 0.18s ease;
-}
-
-.metric-card::after {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  content: '';
-  background: linear-gradient(135deg, var(--metric-soft), transparent 42%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.2), transparent 58%);
-  opacity: 0.72;
-}
-
-.metric-card:hover {
-  border-color: color-mix(in srgb, var(--metric-accent) 28%, rgba(226, 232, 240, 0.78));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.94),
-    0 22px 40px -32px rgba(15, 23, 42, 0.34);
-  transform: translateY(-2px);
-}
-
-.metric-card > * {
-  position: relative;
-  z-index: 1;
-}
-
-.metric-card-green {
-  --metric-accent: #10b981;
-  --metric-accent-dark: #047857;
-  --metric-soft: rgba(209, 250, 229, 0.58);
-}
-
-.metric-card-violet,
-.trend-metric-card {
-  --metric-accent: #7c3aed;
-  --metric-accent-dark: #6d28d9;
-  --metric-soft: rgba(237, 233, 254, 0.62);
-}
-
-.period-metric-card {
-  grid-column: auto;
-}
-
-.metric-card-head {
-  min-width: 0;
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.period-card-head {
-  position: relative;
-  padding-right: 0;
-  align-items: center;
-}
-
-.metric-icon {
-  width: 30px;
-  height: 30px;
-  border-radius: 10px;
-  background: linear-gradient(145deg, var(--metric-accent), var(--metric-accent-dark));
-  color: #ffffff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.24),
-    0 12px 22px -17px rgba(15, 23, 42, 0.44);
-}
-
-.metric-icon svg {
-  width: 15px;
-  height: 15px;
-}
-
-.metric-title {
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.period-metric-card .metric-title {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.metric-title > span,
-.trend-title > span {
-  display: block;
-  overflow: hidden;
-  color: #334155;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  font-weight: 900;
-  line-height: 1.1;
-}
-
-.metric-title strong,
-.trend-title strong {
-  display: block;
-  margin-top: 7px;
-  margin-bottom: 0;
-  color: #0f172a;
-  font-size: 13px;
-  line-height: 1;
-  font-weight: 950;
-  white-space: nowrap;
-}
-
-.period-metric-card .metric-title strong {
-  margin-top: 0;
-}
-
-.metric-title strong em,
-.trend-title strong em {
-  margin-right: 4px;
-  color: var(--metric-accent);
-  font-style: normal;
-  font-size: 24px;
-  font-weight: 950;
-}
-
-.metric-period-switch {
-  position: absolute;
-  top: 38px;
-  right: 0;
-  flex: 0 0 auto;
-  padding: 2px;
-  border-radius: 999px;
-  background: rgba(241, 245, 249, 0.9);
-  display: inline-flex;
-  gap: 2px;
-}
-
-.metric-period-switch button {
-  width: 24px;
-  height: 22px;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: #64748b;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 900;
-  cursor: pointer;
-}
-
-.metric-period-switch button.active {
-  background: #ffffff;
-  color: var(--metric-accent);
-  box-shadow: 0 6px 14px -12px rgba(15, 23, 42, 0.4);
-}
-
-.metric-icon-violet {
-  background: linear-gradient(145deg, #8b5cf6, #6d28d9);
-}
-
-.metric-card p {
-  margin-top: 0;
-  color: #64748b;
-  font-size: 11px;
-  font-weight: 850;
-  line-height: 1.3;
-}
-
-.metric-card-today {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px 10px 10px;
-}
-
-.today-card-head {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 30px;
-}
-
-.today-card-title-block {
-  min-width: 0;
-  flex: 1 1 auto;
-  height: 30px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-
-.today-card-title-line {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-  line-height: 1;
-}
-
-.today-card-title-line > span {
-  overflow: hidden;
-  color: #334155;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 15px;
-  font-weight: 800;
-}
-
-.today-card-title-line strong {
-  margin: 0;
-  flex: 0 0 auto;
-  color: #0f172a;
-  font-size: 17px;
-  line-height: 1;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
-.today-card-title-line strong em {
-  margin-left: 2px;
-  color: var(--metric-accent);
-  font-style: normal;
-  font-size: 15px;
-  font-weight: 800;
-}
-
-.today-card-subline {
-  margin: 0;
-  overflow: hidden;
-  color: #94a3b8;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1;
-}
-
-.today-card-focus {
-  min-width: 0;
-  min-height: 58px;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 4px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: rgba(239, 246, 255, 0.72);
-  border: 1px solid rgba(147, 197, 253, 0.28);
-}
-
-.today-focus-kicker {
-  color: #94a3b8;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1;
-}
-
-.today-card-focus time {
-  color: var(--metric-accent);
-  font-size: 18px;
-  font-weight: 800;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-
-.today-card-focus p {
-  margin: 0;
-  overflow: hidden;
-  color: #334155;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.35;
-}
-
-.today-focus-empty {
-  margin: 0;
-  color: #94a3b8;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.4;
-  text-align: center;
-}
-
-.week-progress {
-  height: 8px;
-  margin-top: 14px;
-  border-radius: 999px;
-  background: rgba(226, 232, 240, 0.86);
-  overflow: hidden;
-}
-
-.period-week-progress {
-  margin-top: 34px;
-}
-
-.week-progress span {
-  display: block;
-  width: 0;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--metric-accent), #22c55e);
-  transition: width 0.24s ease;
-}
-
-.metric-status-grid {
-  margin-top: 10px;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 4px;
-}
-
-.metric-status-grid span {
-  min-width: 0;
-  min-height: 38px;
-  box-sizing: border-box;
-  border: 1px solid rgba(226, 232, 240, 0.68);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.58);
-  color: #64748b;
-  padding: 6px 1px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 4px;
-  text-align: center;
-  font-size: 9px;
-  font-weight: 850;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.metric-status-grid strong {
-  color: var(--metric-accent-dark);
-  font-size: 15px;
-  font-weight: 950;
-  line-height: 1;
-}
-
-.month-card-body {
-  margin-top: 9px;
-}
-
-.period-metric-card .month-card-body {
-  margin-top: 34px;
-}
-
-.month-card-body p {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.month-heatmap {
-  margin-top: 10px;
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 4px 3px;
-}
-
-.month-heatmap span {
-  height: 7px;
-  border-radius: 3px;
-  background: #e2e8f0;
-  outline: 0 solid transparent;
-}
-
-.month-heatmap .heat-1 {
-  background: rgba(124, 58, 237, 0.32);
-}
-
-.month-heatmap .heat-2 {
-  background: rgba(124, 58, 237, 0.48);
-}
-
-.month-heatmap .heat-3 {
-  background: rgba(124, 58, 237, 0.66);
-}
-
-.month-heatmap .heat-4 {
-  background: rgba(124, 58, 237, 0.86);
-}
-
-.month-heatmap .is-today {
-  outline: 1px solid #7c3aed;
-  outline-offset: 1px;
-}
-
-.trend-metric-card {
-  padding: 12px 10px 10px;
-  display: flex;
-  flex-direction: column;
-}
-
-.trend-card-head {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 7px;
-  min-height: 30px;
-  padding-right: 56px;
-}
-
-.trend-title {
-  min-width: 0;
-  flex: 1 1 auto;
-  height: 30px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-
-.trend-title-line {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-  line-height: 1;
-}
-
-.trend-title-line > span {
-  color: #334155;
-  font-size: 13px;
-  font-weight: 900;
-  line-height: 1.1;
-  white-space: nowrap;
-}
-
-.trend-title-line strong {
-  margin-top: 0;
-  display: inline;
-  color: #0f172a;
-  font-size: 13px;
-  line-height: 1;
-  font-weight: 950;
-  white-space: nowrap;
-}
-
-.trend-title strong {
-  color: #0f172a;
-}
-
-.trend-title strong em {
-  margin-left: 1px;
-  color: #0f172a;
-  font-size: 13px;
-  font-style: normal;
-}
-
-.trend-switch {
-  position: absolute;
-  top: 0;
-  right: 0;
-  flex: 0 0 auto;
-  padding: 2px;
-  border-radius: 999px;
-  background: rgba(241, 245, 249, 0.9);
-  display: inline-flex;
-  gap: 2px;
-}
-
-.trend-switch button {
-  width: 24px;
-  height: 20px;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: #64748b;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 900;
-  cursor: pointer;
-}
-
-.trend-switch button.active {
-  background: #ffffff;
-  color: var(--metric-accent);
-  box-shadow: 0 6px 14px -12px rgba(15, 23, 42, 0.4);
-}
-
-.trend-insight {
-  margin: 0;
-  overflow: hidden;
-  color: #64748b;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 10px;
-  font-weight: 850;
-  line-height: 1;
-}
-
-.trend-chart {
-  flex: 1 1 auto;
-  width: 100%;
-  min-height: 96px;
-  height: 96px;
-  margin-top: auto;
-}
-
-.agent-panel {
-  grid-column: 1 / 3;
-  grid-row: 2;
-  border-radius: 22px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(241, 245, 249, 0.56)),
-    rgba(255, 255, 255, 0.68);
-}
-
-.section-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.section-head h2 {
-  color: #111827;
-  font-size: 20px;
-  line-height: 1.15;
-}
-
-.section-head > span,
-.section-actions > span {
-  min-height: 28px;
-  padding: 0 10px;
-  border-radius: 999px;
-  background: #eef2ff;
-  color: #4338ca;
-  display: inline-flex;
-  align-items: center;
-  font-size: 12px;
-  font-weight: 850;
-  white-space: nowrap;
-}
-
-.section-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  flex: 0 0 auto;
-}
-
-.section-actions button {
-  min-height: 28px;
-  border: 1px solid #e5edf6;
-  border-radius: 999px;
-  background: #ffffff;
-  color: #475569;
-  padding: 0 11px;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 850;
-  cursor: pointer;
-  transition:
-    border-color 0.18s ease,
-    background 0.18s ease,
-    color 0.18s ease;
-}
-
-.section-actions button:hover {
-  border-color: #111827;
-  background: #111827;
-  color: #ffffff;
-}
-
-.agent-list {
-  min-height: 0;
-  overflow: auto;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  padding-right: 2px;
-  align-content: start;
-}
-
-.agent-list::-webkit-scrollbar,
-.day-preview-popover::-webkit-scrollbar {
-  width: 0;
-}
-
-.agent-card {
-  position: relative;
-  min-height: 108px;
-  box-sizing: border-box;
-  border: 1px solid rgba(226, 232, 240, 0.82);
-  border-radius: 16px;
-  background: linear-gradient(140deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.64)),
-    rgba(255, 255, 255, 0.72);
-  padding: 15px 14px 14px;
-  display: grid;
-  grid-template-columns: 46px minmax(0, 1fr);
-  grid-template-rows: auto auto;
-  align-items: start;
-  gap: 8px 12px;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.74),
-    0 16px 30px -30px rgba(15, 23, 42, 0.4);
-  transition:
-    border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    transform 0.18s ease;
-}
-
-.agent-card:hover {
-  transform: translateY(-2px);
-  border-color: rgba(147, 197, 253, 0.72);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.86),
-    0 20px 34px -28px rgba(37, 99, 235, 0.36);
-}
-
-.agent-icon {
-  width: 46px;
-  height: 46px;
-  border-radius: 15px;
-  color: #ffffff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  font-weight: 900;
-  box-shadow: 0 14px 24px -18px rgba(15, 23, 42, 0.42);
-}
-
-.agent-main {
-  min-width: 0;
-}
-
-.agent-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.agent-title h3 {
-  min-width: 0;
-  overflow: hidden;
-  color: #111827;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 15px;
-  line-height: 1.25;
-}
-
-.agent-main p,
-.profile-top p {
-  margin-top: 6px;
-  color: #64748b;
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.agent-main p {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.agent-badge {
-  grid-column: 2;
-  width: fit-content;
-  min-height: 20px;
-  padding: 0 8px;
-  border-radius: 999px;
-  background: rgba(241, 245, 249, 0.84);
-  color: #475569;
-  display: inline-flex;
-  align-items: center;
-  font-size: 11px;
-  font-weight: 850;
-  align-self: end;
-}
-
-.agent-menu {
-  position: absolute;
-  top: 13px;
-  right: 10px;
-  width: 24px;
-  height: 28px;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: #94a3b8;
-  font: inherit;
-  font-size: 22px;
-  line-height: 1;
-  cursor: pointer;
-  transition:
-    background 0.18s ease,
-    color 0.18s ease;
-}
-
-.agent-menu:hover {
-  background: rgba(241, 245, 249, 0.86);
-  color: #334155;
-}
-
-.profile-panel {
-  position: relative;
-  z-index: 25;
-  grid-column: 1;
-  grid-row: 1;
-  align-self: start;
-  top: auto;
-  left: auto;
-  padding: 0;
-  background: transparent;
-}
-
-.profile-welcome-panel.has-profile-dialog .profile-panel {
-  z-index: 1110;
-}
-
-.profile-menu-anchor {
-  position: relative;
-  width: min(100%, 520px);
-  max-width: 100%;
-}
-
-.profile-trigger {
-  width: fit-content;
-  max-width: 100%;
-  border: 0;
-  border-radius: 18px;
-  background: transparent;
-  padding: 0;
-  color: inherit;
-  font: inherit;
-  display: inline-flex;
-  align-items: center;
-  gap: 13px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.profile-trigger:focus-visible {
-  outline: 2px solid rgba(37, 99, 235, 0.36);
-  outline-offset: 6px;
-}
-
-.profile-task-summary {
-  max-width: min(100%, 520px);
-  color: #64748b;
-  transform: translate(10px, 20px);
-}
-
-.profile-task-summary p {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 7px;
-  color: #475569;
-  font-size: 13px;
-  font-weight: 850;
-  line-height: 1.35;
-}
-
-.profile-task-summary strong {
-  color: #2563eb;
-  font-size: 15px;
-  font-weight: 950;
-  line-height: 1;
-}
-
-.profile-task-summary i {
-  width: 4px;
-  height: 4px;
-  border-radius: 999px;
-  background: #cbd5e1;
-}
-
-.profile-task-summary span {
-  display: -webkit-box;
-  max-width: 100%;
-  margin-top: 5px;
-  overflow: hidden;
-  color: #94a3b8;
-  font-size: 12px;
-  font-weight: 800;
-  line-height: 1.45;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.avatar {
-  width: 42px;
-  height: 42px;
-  border: 1px solid rgba(226, 232, 240, 0.76);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.42);
-  object-fit: cover;
-  flex: 0 0 auto;
-}
-
-.profile-copy {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.profile-copy strong {
-  color: #111827;
-  font-size: clamp(18px, 1.28vw, 22px);
-  font-weight: 900;
-  line-height: 1.08;
-  letter-spacing: 0;
-}
-
-.role-switch {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.role-switch button {
-  min-height: 44px;
-  border: 1px solid #e5edf6;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.4);
-  color: #64748b;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 850;
-  cursor: pointer;
-}
-
-.role-switch button.active {
-  border-color: #111827;
-  background: #111827;
-  color: #ffffff;
-}
-
-.point-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.point-grid span {
-  min-height: 86px;
-  border: 1px solid rgba(226, 232, 240, 0.88);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.34);
-  padding: 13px 8px;
-  color: #64748b;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  font-size: 13px;
-  font-weight: 800;
-  text-align: center;
-}
-
-.point-grid strong {
-  margin-bottom: 7px;
-  color: #0f172a;
-  font-size: 27px;
-  line-height: 1;
-}
-
-.profile-dialog-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 1090;
-  background: transparent;
-}
-
-.profile-dialog {
-  position: absolute;
-  top: calc(100% + 14px);
-  left: 0;
-  z-index: 1111;
-  width: min(390px, calc(100vw - 44px));
-  border: 1px solid rgba(226, 232, 240, 0.92);
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 26px 70px -36px rgba(15, 23, 42, 0.58);
-  padding: 22px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.profile-dialog-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 14px;
-}
-
-.profile-dialog-user {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 13px;
-}
-
-.dialog-avatar {
-  width: 58px;
-  height: 58px;
-  border-radius: 18px;
-  background: #dbeafe;
-  object-fit: cover;
-  flex: 0 0 auto;
-}
-
-.profile-dialog-user h2 {
-  color: #111827;
-  font-size: 22px;
-  line-height: 1.15;
-}
-
-.profile-dialog-user p {
-  margin-top: 6px;
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 750;
-}
-
-.dialog-close {
-  width: 32px;
-  height: 32px;
-  border: 1px solid #e5edf6;
-  border-radius: 999px;
-  background: #ffffff;
-  color: #64748b;
-  font: inherit;
-  font-size: 20px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.dialog-section {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.dialog-label {
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 900;
+  .floating-stats {
+    width: min(620px, calc(100vw - 64px));
+    right: calc(32px + min(720px, calc(100vw - 64px)) + 16px);
+  }
 }
 
 @media (max-width: 1120px) {
   .calendar-workspace {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: auto;
     overflow: auto;
-  }
-
-  .profile-welcome-panel,
-  .left-column {
-    grid-column: 1 / -1;
-    grid-row: auto;
-  }
-
-  .profile-welcome-panel {
-    min-height: 720px;
-  }
-}
-
-@media (max-width: 900px) {
-  .calendar-workspace {
-    display: flex;
-    flex-direction: column;
-    grid-template-columns: 1fr;
     padding: 16px;
   }
 
-  .left-column,
-  .profile-welcome-panel {
+  .left-column {
+    position: relative;
     display: flex;
     flex-direction: column;
+    gap: 16px;
+    pointer-events: auto;
   }
 
-  .calendar-panel {
-    min-height: 540px;
+  .home-main-panel,
+  .floating-stats {
+    position: relative;
+    top: auto;
+    right: auto;
+    bottom: auto;
+    left: auto;
+    width: 100%;
   }
 
-  .right-blank-panel {
-    min-height: 260px;
+  .home-main-panel {
+    min-height: 0;
+    height: 230px;
   }
 
-  .left-preview-scrim {
-    display: none;
+  .floating-stats {
+    height: 230px;
   }
 
   .day-preview-popover {
@@ -3253,206 +1489,44 @@ p {
     top: auto;
     right: auto;
     width: 100%;
-    height: 462px;
-    margin-bottom: 0;
-    border-radius: 18px;
+    min-width: 0;
+    height: 580px;
     transform: none;
-  }
-
-  .profile-welcome-panel {
-    min-height: 680px;
   }
 }
 
-@media (max-width: 620px) {
-  .calendar-workspace {
-    padding: 12px;
-    gap: 12px;
-    overflow-x: hidden;
-  }
-
-  .layout-column {
-    gap: 12px;
-  }
-
-  .welcome-panel,
-  .profile-panel,
-  .day-preview-popover {
-    padding: 14px;
-    border-radius: 16px;
-  }
-
-  .profile-welcome-panel {
+@media (max-width: 760px) {
+  .home-main-panel {
     height: auto;
-    min-height: auto;
-    padding: 14px 12px;
-    overflow: visible;
-    overflow-x: clip;
+    grid-template-rows: auto 36px;
+    padding: 16px;
   }
 
-  .profile-panel {
-    position: relative;
-    top: auto;
-    left: auto;
-    padding: 0 0 12px;
-  }
-
-  .welcome-panel {
-    min-height: 0;
-    display: grid;
-    grid-template-rows: 390px auto;
-    gap: 14px;
-  }
-
-  .section-head {
-    flex-direction: row;
-    align-items: center;
-  }
-
-  .campus-visual {
-    width: 100%;
-    min-height: 390px;
-    padding-top: 0;
-    overflow: hidden;
-  }
-
-  .campus-visual img {
-    left: 50%;
-    right: auto;
-    bottom: 12px;
-    width: 760px;
-    max-height: 340px;
-    transform: translateX(-48%);
-  }
-
-  .campus-visual::before {
-    inset: 12px 8px 14px;
-  }
-
-  .campus-visual::after {
-    inset: auto -8% -2px;
-    width: auto;
-  }
-
-  .campus-tool {
-    min-width: 112px;
-    min-height: 46px;
-    font-size: 12px;
-  }
-
-  .campus-tool-content {
-    min-width: 112px;
-    min-height: 46px;
-    border-radius: 14px;
-    padding: 8px 12px 8px 9px;
-    gap: 8px;
-  }
-
-  .campus-tool-icon {
-    width: 28px;
-    height: 28px;
-    border-radius: 9px;
-  }
-
-  .campus-tool-icon svg {
-    width: 15px;
-    height: 15px;
-  }
-
-  .position-image {
-    left: 1%;
-    top: 30%;
-  }
-
-  .position-qa {
-    left: 21%;
-    top: 12%;
-  }
-
-  .position-meeting {
-    left: 48%;
-    top: 7%;
-  }
-
-  .position-ppt {
-    right: 1%;
-    top: 24%;
-  }
-
-  .position-interview {
-    left: 3%;
-    bottom: 10%;
-  }
-
-  .position-code {
-    left: 36%;
-    bottom: 7%;
-  }
-
-  .position-workshop {
-    right: 1%;
-    bottom: 10%;
-  }
-
-  .quick-metrics {
+  .home-main-head {
     grid-template-columns: 1fr;
+    height: auto;
+    max-height: none;
   }
 
-  .metric-card {
-    min-height: 136px;
-    padding: 14px;
-  }
-
-  .period-metric-card {
-    grid-column: auto;
-  }
-
-  .metric-status-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .month-heatmap span {
-    height: 8px;
-  }
-
-  .calendar-panel {
-    min-height: 500px;
-  }
-
-  .right-blank-panel {
-    min-height: 220px;
-  }
-
-  .agent-list {
+  .home-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .agent-card {
-    min-height: 132px;
-    grid-template-columns: 42px minmax(0, 1fr);
-    padding: 14px 12px;
+  .home-summary-card:nth-child(2) {
+    border-right: 0;
   }
 
-  .agent-icon {
-    width: 42px;
-    height: 42px;
+  .home-summary-card:nth-child(-n + 2) {
+    border-bottom: 1px solid rgba(196, 212, 228, 0.66);
   }
 
-  .agent-title h3 {
-    font-size: 14px;
-  }
-
-  .agent-main p {
-    -webkit-line-clamp: 3;
-  }
-
-  .agent-badge {
-    grid-column: 2;
-    width: fit-content;
-  }
-
-  .point-grid {
+  .floating-stats {
+    height: auto;
     grid-template-columns: 1fr;
+  }
+
+  .home-stat-card {
+    min-height: 210px;
   }
 }
 </style>

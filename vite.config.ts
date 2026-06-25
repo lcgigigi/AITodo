@@ -44,6 +44,15 @@ export default defineConfig({
         target: smartTodoApiTarget,
         changeOrigin: true,
       },
+      '/sys-message': {
+        target: smartTodoApiTarget,
+        changeOrigin: true,
+      },
+      '/websocket': {
+        target: smartTodoApiTarget,
+        changeOrigin: true,
+        ws: true,
+      },
       '/api': {
         target: 'http://127.0.0.1:8080',
         changeOrigin: true,

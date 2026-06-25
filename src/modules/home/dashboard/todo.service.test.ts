@@ -11,6 +11,7 @@ import {
   loadAssignableUsers,
   loadCurrentUser,
   loadPendingTodos,
+  loadTodayTodos,
   loadTodoDetail,
   getTodoMonthRange,
   getTodoWeekRange,
@@ -142,7 +143,8 @@ describe('todo.service real backend adapter', () => {
           task: '项目复盘',
           timeType: 1,
           startDateShow: '2026-06-07 17:00:00',
-          assigneeId: '1102080',
+          assigneeIds: '1102080',
+          type: 1,
           remark: '',
         }) as never
       }
@@ -165,6 +167,23 @@ describe('todo.service real backend adapter', () => {
         ]) as never
       }
 
+      if (config.url === '/smart-todo/today-list') {
+        return backendResponse([
+          {
+            id: 456,
+            title: '今日复盘',
+            timeType: 1,
+            startDate: '2026-06-22T17:00:00',
+            startDateShow: '2026-06-22 17:00:00',
+            status: 3,
+            assigneeIds: '1102080',
+            handlerId: '1102080',
+            creatorId: '1101001',
+            type: 1,
+          },
+        ]) as never
+      }
+
       if (config.url === '/smart-todo/123' && config.method === 'GET') {
         return backendResponse({
           id: 123,
@@ -182,6 +201,8 @@ describe('todo.service real backend adapter', () => {
           title: '项目复盘',
           timeType: 1,
           startDateShow: '2026-06-07 17:00:00',
+          assigneeIds: '1102080',
+          type: 1,
         })
         return backendResponse(123) as never
       }
@@ -199,6 +220,7 @@ describe('todo.service real backend adapter', () => {
       time: '17:00',
       title: '项目复盘',
       assigneeId: '1102080',
+      type: 1,
     })
     await analyzeTodoTextByGet('明天下午5点项目复盘', currentUser, assignableUsers, {
       date: '2026-06-06',
@@ -218,6 +240,19 @@ describe('todo.service real backend adapter', () => {
       },
     ])
     await expect(loadPendingTodos(currentUser, assignableUsers)).resolves.toHaveLength(1)
+    await expect(
+      loadTodayTodos(currentUser, assignableUsers, { status: 3, type: 1 }),
+    ).resolves.toMatchObject([
+      {
+        id: '456',
+        date: '2026-06-22',
+        time: '17:00',
+        title: '今日复盘',
+        assigneeId: '1102080',
+        assigneeName: '李四',
+        completable: true,
+      },
+    ])
     await expect(loadTodoDetail('123', currentUser, assignableUsers)).resolves.toMatchObject({
       id: '123',
       assigneeName: '李四',
@@ -228,6 +263,7 @@ describe('todo.service real backend adapter', () => {
         time: '17:00',
         title: '项目复盘',
         assigneeId: '1102080',
+        type: 1,
       }),
     ).resolves.toBe(123)
     await expect(
@@ -256,6 +292,7 @@ describe('todo.service real backend adapter', () => {
         { method: 'GET', url: '/smart-todo/user-list' },
         { method: 'GET', url: '/smart-todo/month-list' },
         { method: 'GET', url: '/smart-todo/pending-list' },
+        { method: 'GET', url: '/smart-todo/today-list' },
         { method: 'GET', url: '/smart-todo/123' },
         { method: 'POST', url: '/smart-todo/create' },
         { method: 'PUT', url: '/smart-todo' },
@@ -267,6 +304,64 @@ describe('todo.service real backend adapter', () => {
         { method: 'POST', url: '/smart-todo/transfer' },
       ]),
     )
+  })
+
+  it('maps analyze result type and multiple assigneeIds', async () => {
+    vi.mocked(httpClient.request).mockResolvedValueOnce({
+      data: {
+        code: 200,
+        msg: '操作成功',
+        data: {
+          task: '产品评审会',
+          timeType: 1,
+          startDateShow: '2026-06-12 10:00:00',
+          assigneeIds: '1102080,1102081',
+          type: 2,
+          remark: '会议室A',
+        },
+      },
+    })
+
+    const parsed = await analyzeTodoText(
+      '周五上午产品评审会',
+      currentUser,
+      [currentUser, { id: '1102081', name: '王五', role: 'employee' }],
+      {
+        date: '2026-06-09',
+        title: '',
+      },
+    )
+
+    expect(parsed).toMatchObject({
+      title: '产品评审会',
+      assigneeId: '1102080,1102081',
+      assigneeName: '李四、王五',
+      type: 2,
+    })
+  })
+
+  it('sends assigneeIds and meeting type when creating todos', async () => {
+    vi.mocked(httpClient.request).mockImplementation((config) => {
+      if (config.url === '/smart-todo/create') {
+        expect(config.data).toMatchObject({
+          assigneeIds: '1102080,1102081',
+          type: 2,
+        })
+        return backendResponse(458) as never
+      }
+
+      return backendResponse(true) as never
+    })
+
+    await expect(
+      createTodo({
+        date: '2026-06-07',
+        time: '10:00',
+        title: '产品评审会',
+        assigneeId: '1102080,1102081',
+        type: 2,
+      }),
+    ).resolves.toBe(458)
   })
 
   it('maps analyze result with date and time fields for specific_time', async () => {
@@ -420,6 +515,8 @@ describe('todo.service real backend adapter', () => {
           timeType: 2,
           startDateShow: '2026-06-01 00:00:00',
           endDateShow: '2026-06-30 23:59:59',
+          assigneeIds: '1102080',
+          type: 1,
         })
         return backendResponse(456) as never
       }
@@ -444,6 +541,8 @@ describe('todo.service real backend adapter', () => {
           timeType: 2,
           startDateShow: '2026-06-01 09:00:00',
           endDateShow: '2026-06-30 18:30:00',
+          assigneeIds: '1102080',
+          type: 1,
         })
         return backendResponse(457) as never
       }

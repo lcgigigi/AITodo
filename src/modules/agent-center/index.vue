@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import IconActivity from '~icons/lucide/activity'
+import * as echarts from 'echarts'
 import IconBot from '~icons/lucide/bot'
 import IconBox from '~icons/lucide/box'
+import IconCalendarDays from '~icons/lucide/calendar-days'
 import IconChevronDown from '~icons/lucide/chevron-down'
 import IconCircleHelp from '~icons/lucide/circle-help'
 import IconCode2 from '~icons/lucide/code-2'
-import IconCoins from '~icons/lucide/coins'
 import IconCpu from '~icons/lucide/cpu'
 import IconHistory from '~icons/lucide/history'
 import IconImage from '~icons/lucide/image'
+import IconInfo from '~icons/lucide/info'
 import IconMessageCircle from '~icons/lucide/message-circle'
 import IconPanelLeftClose from '~icons/lucide/panel-left-close'
 import IconPanelLeftOpen from '~icons/lucide/panel-left-open'
@@ -20,20 +21,13 @@ import IconSearch from '~icons/lucide/search'
 import IconShieldCheck from '~icons/lucide/shield-check'
 import IconSparkles from '~icons/lucide/sparkles'
 import IconStar from '~icons/lucide/star'
-import IconTrendingDown from '~icons/lucide/trending-down'
 import IconTrendingUp from '~icons/lucide/trending-up'
 import IconUsers from '~icons/lucide/users'
 import IconX from '~icons/lucide/x'
 import makeUrl from '@/assets/agent-center/make.png'
 import moreAbilityUrl from '@/assets/agent-center/newagnet.png'
 import DashboardTopBar from '@/modules/home/dashboard/DashboardTopBar.vue'
-import {
-  agentCategories,
-  agents,
-  getAgentByKey,
-  permissionLabels,
-  skills,
-} from './mock'
+import { agentCategories, agents, getAgentByKey, permissionLabels, skills } from './mock'
 import type { AgentCatalogItem, AgentCategory } from './types'
 
 defineOptions({
@@ -52,7 +46,7 @@ const searchKeyword = ref('')
 const activeCategory = ref<AgentCategory | '全部'>('全部')
 const selectedAgent = ref<AgentCatalogItem | null>(null)
 const actionToast = ref('')
-const sidebarCollapsed = ref(false)
+const sidebarCollapsed = ref(true)
 
 const primaryNav = [
   { label: '智能体 Agent', icon: IconBot, active: true },
@@ -63,33 +57,378 @@ const primaryNav = [
 
 const secondaryNav = [{ label: '帮助中心', icon: IconCircleHelp }]
 
-function formatTokens(value: number) {
-  if (value >= 10000) {
-    const wan = value / 10000
-    return `${Number.isInteger(wan) ? wan : wan.toFixed(1)}万`
-  }
+const tokenRangeTabs = ['日', '周', '月']
+
+const tokenRanking = [
+  {
+    rank: 1,
+    name: '办公顾问',
+    tokens: '32,560',
+    share: '36.3%',
+    icon: IconMessageCircle,
+    color: '#2e7bff',
+    bar: 100,
+    rankTone: 'rank-warm',
+    iconTone: 'token-icon-blue',
+  },
+  {
+    rank: 2,
+    name: '图文分析',
+    tokens: '25,680',
+    share: '28.6%',
+    icon: IconImage,
+    color: '#2e7bff',
+    bar: 76,
+    rankTone: 'rank-orange',
+    iconTone: 'token-icon-blue',
+  },
+  {
+    rank: 3,
+    name: '会议纪要',
+    tokens: '14,320',
+    share: '16.0%',
+    icon: IconUsers,
+    color: '#27c7c8',
+    bar: 47,
+    rankTone: 'rank-cyan',
+    iconTone: 'token-icon-teal',
+  },
+  {
+    rank: 4,
+    name: 'PPT创作',
+    tokens: '9,860',
+    share: '11.0%',
+    icon: IconSparkles,
+    color: '#9a6df2',
+    bar: 33,
+    rankTone: 'rank-muted',
+    iconTone: 'token-icon-orange',
+  },
+  {
+    rank: 5,
+    name: '代码辅助',
+    tokens: '4,860',
+    share: '5.4%',
+    icon: IconCode2,
+    color: '#48c979',
+    bar: 20,
+    rankTone: 'rank-muted',
+    iconTone: 'token-icon-teal',
+  },
+  {
+    rank: 6,
+    name: '合规助手',
+    tokens: '2,780',
+    share: '3.1%',
+    icon: IconShieldCheck,
+    color: '#ff8b22',
+    bar: 13,
+    rankTone: 'rank-muted',
+    iconTone: 'token-icon-blue',
+  },
+]
+
+const tokenDistribution = [
+  { label: '办公', value: '54.9%', color: '#2e7bff' },
+  { label: '创作', value: '21.3%', color: '#25c8c9' },
+  { label: '研发', value: '13.8%', color: '#9b6ff1' },
+  { label: '合规', value: '6.3%', color: '#ff9428' },
+  { label: '其他', value: '3.7%', color: '#d6dee9' },
+]
+
+const tokenTrendTimeline = [
+  { label: '05-13', value: 28420 },
+  { label: '05-14', value: 19180 },
+  { label: '05-15', value: 46210 },
+  { label: '05-16', value: 86420 },
+  { label: '05-17', value: 44320 },
+  { label: '05-18', value: 56180 },
+  { label: '05-19', value: 34260 },
+]
+
+const tokenTotalConsumption = 89520
+
+const usageTrendChartRef = ref<HTMLElement | null>(null)
+const rankingChartRef = ref<HTMLElement | null>(null)
+const distributionPieChartRef = ref<HTMLElement | null>(null)
+
+const chartInstances = new Set<echarts.ECharts>()
+let chartResizeObserver: ResizeObserver | null = null
+
+const chartTextStyle = {
+  color: '#71819c',
+  fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif',
+  fontWeight: 500,
+}
+
+function parseTokenCount(value: string) {
+  return Number(value.replace(/,/g, ''))
+}
+
+function formatTokenNumber(value: number) {
   return value.toLocaleString('zh-CN')
 }
 
-const tokenUsage = computed(() => {
-  const quota = 2_000_000
-  const used = 1_240_000
-  const todayUsed = 86_000
-  const todayDelta = 12
+function formatTokenCompact(value: number) {
+  return new Intl.NumberFormat('zh-CN', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(value)
+}
 
-  const remaining = quota - used
-  const usedPercent = Math.min(100, Math.round((used / quota) * 100))
+function getChart(el: HTMLElement | null) {
+  if (!el) return null
 
-  return {
-    quotaLabel: formatTokens(quota),
-    remainingLabel: formatTokens(remaining),
-    usedPercent,
-    isRunningLow: usedPercent >= 80,
-    todayLabel: formatTokens(todayUsed),
-    todayDelta,
-    todayTrendUp: todayDelta >= 0,
-  }
-})
+  const chart = echarts.getInstanceByDom(el) ?? echarts.init(el, undefined, { renderer: 'canvas' })
+  chartInstances.add(chart)
+  return chart
+}
+
+function renderUsageTrendChart() {
+  const chart = getChart(usageTrendChartRef.value)
+  if (!chart) return
+
+  const labels = tokenTrendTimeline.map((point) => point.label)
+  const values = tokenTrendTimeline.map((point) => point.value)
+  const peakIndex = values.indexOf(Math.max(...values))
+
+  chart.setOption(
+    {
+      animationDuration: 620,
+      textStyle: chartTextStyle,
+      grid: { top: 18, right: 18, bottom: 28, left: 46 },
+      tooltip: {
+        trigger: 'axis',
+        confine: true,
+        borderColor: '#dfe8f4',
+        backgroundColor: 'rgba(255, 255, 255, 0.98)',
+        textStyle: { ...chartTextStyle, color: '#172033', fontWeight: 700 },
+        formatter: (params: unknown) => {
+          const item = (Array.isArray(params) ? params[0] : params) as {
+            name: string
+            value: number
+          }
+          return `${item.name}<br/>消耗 ${formatTokenNumber(Number(item.value))} Tokens`
+        },
+      },
+      xAxis: {
+        type: 'category',
+        boundaryGap: false,
+        data: labels,
+        axisTick: { show: false },
+        axisLine: { lineStyle: { color: '#d9e2ef', width: 1.4 } },
+        axisLabel: { ...chartTextStyle, fontSize: 13, fontWeight: 500 },
+      },
+      yAxis: {
+        type: 'value',
+        splitNumber: 5,
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: {
+          ...chartTextStyle,
+          formatter: (value: number) => formatTokenCompact(value),
+        },
+        splitLine: { lineStyle: { color: '#dce6f3', type: 'dashed' } },
+      },
+      series: [
+        {
+          name: 'Token 消耗',
+          type: 'line',
+          data: values,
+          smooth: true,
+          symbol: 'circle',
+          symbolSize: 8,
+          lineStyle: {
+            width: 3,
+            color: '#2e7bff',
+          },
+          itemStyle: {
+            color: '#2e7bff',
+            borderColor: '#ffffff',
+            borderWidth: 4,
+          },
+          areaStyle: {
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: 'rgba(46, 123, 255, 0.24)' },
+              { offset: 1, color: 'rgba(46, 123, 255, 0.03)' },
+            ]),
+          },
+          markLine: {
+            silent: true,
+            symbol: 'none',
+            lineStyle: {
+              color: 'rgba(69, 126, 224, 0.24)',
+              width: 3,
+            },
+            data: [{ xAxis: labels[peakIndex] }],
+          },
+          markPoint: {
+            symbol: 'circle',
+            symbolSize: 14,
+            itemStyle: {
+              color: '#2e7bff',
+              borderColor: '#ffffff',
+              borderWidth: 5,
+            },
+            label: { show: false },
+            data: [{ name: '峰值', coord: [labels[peakIndex], values[peakIndex]] }],
+          },
+        },
+      ],
+    } satisfies echarts.EChartsOption,
+    true,
+  )
+}
+
+function renderRankingChart() {
+  const chart = getChart(rankingChartRef.value)
+  if (!chart) return
+
+  const ordered = [...tokenRanking].reverse()
+
+  chart.setOption(
+    {
+      animationDuration: 620,
+      textStyle: chartTextStyle,
+      grid: { top: 4, right: 52, bottom: 4, left: 72 },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        confine: true,
+        borderColor: '#dfe8f4',
+        backgroundColor: 'rgba(255, 255, 255, 0.98)',
+        textStyle: { ...chartTextStyle, color: '#172033', fontWeight: 700 },
+        formatter: (params: unknown) => {
+          const item = (Array.isArray(params) ? params[0] : params) as {
+            name: string
+            value: number
+          }
+          const ranking = tokenRanking.find((entry) => entry.name === item.name)
+          const share = ranking?.share ?? ''
+          return `${item.name}<br/>${formatTokenNumber(Number(item.value))} Tokens<br/>占比 ${share}`
+        },
+      },
+      xAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { show: false },
+        splitLine: { show: false },
+      },
+      yAxis: {
+        type: 'category',
+        data: ordered.map((item) => item.name),
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: {
+          ...chartTextStyle,
+          color: '#182337',
+          fontSize: 12,
+          fontWeight: 600,
+        },
+      },
+      series: [
+        {
+          type: 'bar',
+          data: ordered.map((item) => ({
+            value: parseTokenCount(item.tokens),
+            itemStyle: { color: item.color, borderRadius: [0, 999, 999, 0] },
+          })),
+          barWidth: 8,
+          showBackground: true,
+          backgroundStyle: {
+            color: '#eef3fb',
+            borderRadius: 999,
+          },
+          label: {
+            show: true,
+            position: 'right',
+            ...chartTextStyle,
+            color: '#182337',
+            fontSize: 11,
+            fontWeight: 600,
+            formatter: (params: { value?: unknown }) =>
+              formatTokenNumber(Number(params.value ?? 0)),
+          },
+        },
+      ],
+    } satisfies echarts.EChartsOption,
+    true,
+  )
+}
+
+function renderDistributionPieChart() {
+  const chart = getChart(distributionPieChartRef.value)
+  if (!chart) return
+
+  chart.setOption(
+    {
+      animationDuration: 720,
+      textStyle: chartTextStyle,
+      color: tokenDistribution.map((item) => item.color),
+      title: {
+        text: formatTokenNumber(tokenTotalConsumption),
+        subtext: '总消耗 Tokens',
+        left: 'center',
+        top: '38%',
+        textStyle: {
+          ...chartTextStyle,
+          color: '#172033',
+          fontSize: 24,
+          fontWeight: 700,
+        },
+        subtextStyle: {
+          ...chartTextStyle,
+          color: '#7c8ca5',
+          fontSize: 11,
+          fontWeight: 500,
+        },
+      },
+      tooltip: {
+        trigger: 'item',
+        confine: true,
+        borderColor: '#dfe8f4',
+        backgroundColor: 'rgba(255, 255, 255, 0.98)',
+        textStyle: { ...chartTextStyle, color: '#172033', fontWeight: 700 },
+        formatter: (params: unknown) => {
+          const item = params as { name: string; percent: number }
+          return `${item.name}<br/>占比 ${item.percent}%`
+        },
+      },
+      series: [
+        {
+          name: 'Token 消耗分布',
+          type: 'pie',
+          radius: ['52%', '78%'],
+          center: ['50%', '50%'],
+          avoidLabelOverlap: true,
+          minAngle: 4,
+          itemStyle: {
+            borderColor: '#ffffff',
+            borderWidth: 3,
+          },
+          label: { show: false },
+          labelLine: { show: false },
+          data: tokenDistribution.map((item) => ({
+            name: item.label,
+            value: Number(item.value.replace('%', '')),
+          })),
+        },
+      ],
+    } satisfies echarts.EChartsOption,
+    true,
+  )
+}
+
+function renderAllCharts() {
+  renderUsageTrendChart()
+  renderRankingChart()
+  renderDistributionPieChart()
+}
+
+function resizeCharts() {
+  chartInstances.forEach((chart) => chart.resize())
+}
 
 const agentVisualMap: Record<string, AgentVisual> = {
   'policy-qa': { icon: IconMessageCircle, tone: 'icon-blue' },
@@ -217,10 +556,13 @@ watch(
   { immediate: true },
 )
 
-function handleOpenTodo(payload: { id: string; date: string }) {
+function handleOpenTodo(payload: { id: string; date?: string }) {
+  const query: Record<string, string> = { todo: payload.id }
+  if (payload.date) query.date = payload.date
+
   void router.push({
     name: 'Home',
-    query: { todo: payload.id, date: payload.date },
+    query,
   })
 }
 
@@ -231,13 +573,33 @@ function syncSidebarForViewport(event?: MediaQueryListEvent) {
   if (isMobile) sidebarCollapsed.value = false
 }
 
-onMounted(() => {
+onMounted(async () => {
   syncSidebarForViewport()
   mobileSidebarMedia.addEventListener('change', syncSidebarForViewport)
+
+  await nextTick()
+  renderAllCharts()
+
+  chartResizeObserver = new ResizeObserver(resizeCharts)
+  ;[usageTrendChartRef.value, rankingChartRef.value, distributionPieChartRef.value].forEach(
+    (el) => {
+      if (el) chartResizeObserver?.observe(el)
+    },
+  )
+  window.addEventListener('resize', resizeCharts, { passive: true })
 })
 
 onBeforeUnmount(() => {
   mobileSidebarMedia.removeEventListener('change', syncSidebarForViewport)
+  window.removeEventListener('resize', resizeCharts)
+  chartResizeObserver?.disconnect()
+  chartInstances.forEach((chart) => chart.dispose())
+  chartInstances.clear()
+})
+
+watch(sidebarCollapsed, async () => {
+  await nextTick()
+  resizeCharts()
 })
 </script>
 
@@ -245,28 +607,52 @@ onBeforeUnmount(() => {
   <div class="agent-center-page">
     <DashboardTopBar @open-todo="handleOpenTodo" />
 
-    <main
-      class="agent-center-shell"
-      :class="{ 'is-sidebar-collapsed': sidebarCollapsed }"
-    >
-    <Transition
-      enter-active-class="toast-enter-active"
-      enter-from-class="toast-enter-from"
-      enter-to-class="toast-enter-to"
-      leave-active-class="toast-leave-active"
-      leave-from-class="toast-leave-from"
-      leave-to-class="toast-leave-to"
-    >
-      <div v-if="actionToast" class="agent-toast" role="status">
-        {{ actionToast }}
-      </div>
-    </Transition>
+    <main class="agent-center-shell" :class="{ 'is-sidebar-collapsed': sidebarCollapsed }">
+      <Transition
+        enter-active-class="toast-enter-active"
+        enter-from-class="toast-enter-from"
+        enter-to-class="toast-enter-to"
+        leave-active-class="toast-leave-active"
+        leave-from-class="toast-leave-from"
+        leave-to-class="toast-leave-to"
+      >
+        <div v-if="actionToast" class="agent-toast" role="status">
+          {{ actionToast }}
+        </div>
+      </Transition>
 
-    <aside class="agent-sidebar" aria-label="Agent Center 导航">
-      <nav class="sidebar-nav" aria-label="主要导航">
-        <template v-for="item in primaryNav" :key="item.label">
-          <div v-if="item.label === '智能体 Agent'" class="sidebar-link-row">
+      <aside class="agent-sidebar" aria-label="Agent Center 导航">
+        <nav class="sidebar-nav" aria-label="主要导航">
+          <template v-for="item in primaryNav" :key="item.label">
+            <div v-if="item.label === '智能体 Agent'" class="sidebar-link-row">
+              <button
+                type="button"
+                class="sidebar-link"
+                :class="{ active: item.active }"
+                :aria-label="item.label"
+                :title="sidebarCollapsed ? item.label : undefined"
+                @click="handleNav(item.label)"
+              >
+                <component :is="item.icon" class="sidebar-link-icon" />
+                <span class="sidebar-link-label">{{ item.label }}</span>
+              </button>
+
+              <button
+                type="button"
+                class="sidebar-collapse-toggle"
+                :aria-label="sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'"
+                :aria-expanded="!sidebarCollapsed"
+                @click="toggleSidebar"
+              >
+                <span class="sidebar-collapse-toggle-icon" aria-hidden="true">
+                  <IconPanelLeftClose v-if="!sidebarCollapsed" />
+                  <IconPanelLeftOpen v-else />
+                </span>
+              </button>
+            </div>
+
             <button
+              v-else
               type="button"
               class="sidebar-link"
               :class="{ active: item.active }"
@@ -277,26 +663,17 @@ onBeforeUnmount(() => {
               <component :is="item.icon" class="sidebar-link-icon" />
               <span class="sidebar-link-label">{{ item.label }}</span>
             </button>
+          </template>
+        </nav>
 
-            <button
-              type="button"
-              class="sidebar-collapse-toggle"
-              :aria-label="sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'"
-              :aria-expanded="!sidebarCollapsed"
-              @click="toggleSidebar"
-            >
-              <span class="sidebar-collapse-toggle-icon" aria-hidden="true">
-                <IconPanelLeftClose v-if="!sidebarCollapsed" />
-                <IconPanelLeftOpen v-else />
-              </span>
-            </button>
-          </div>
+        <div class="sidebar-divider" />
 
+        <nav class="sidebar-nav sidebar-nav-secondary" aria-label="辅助导航">
           <button
-            v-else
+            v-for="item in secondaryNav"
+            :key="item.label"
             type="button"
             class="sidebar-link"
-            :class="{ active: item.active }"
             :aria-label="item.label"
             :title="sidebarCollapsed ? item.label : undefined"
             @click="handleNav(item.label)"
@@ -304,123 +681,139 @@ onBeforeUnmount(() => {
             <component :is="item.icon" class="sidebar-link-icon" />
             <span class="sidebar-link-label">{{ item.label }}</span>
           </button>
-        </template>
-      </nav>
+        </nav>
 
-      <div class="sidebar-divider" />
+        <div class="sidebar-spacer" />
 
-      <nav class="sidebar-nav sidebar-nav-secondary" aria-label="辅助导航">
         <button
-          v-for="item in secondaryNav"
-          :key="item.label"
           type="button"
-          class="sidebar-link"
-          :aria-label="item.label"
-          :title="sidebarCollapsed ? item.label : undefined"
-          @click="handleNav(item.label)"
+          class="make-agent-card"
+          :class="{ 'is-icon-only': sidebarCollapsed }"
+          :style="sidebarCollapsed ? undefined : { backgroundImage: `url(${makeUrl})` }"
+          :aria-label="sidebarCollapsed ? '创建专属智能体' : undefined"
+          @click="createAgent"
         >
-          <component :is="item.icon" class="sidebar-link-icon" />
-          <span class="sidebar-link-label">{{ item.label }}</span>
+          <span class="sr-only">创建专属智能体</span>
+          <span v-if="sidebarCollapsed" class="make-agent-icon-only" aria-hidden="true">
+            <IconPlus />
+          </span>
+          <span v-else class="make-agent-action">
+            <IconPlus />
+            创建智能体
+          </span>
         </button>
-      </nav>
+      </aside>
 
-      <div class="sidebar-spacer" />
-
-      <button
-        type="button"
-        class="make-agent-card"
-        :class="{ 'is-icon-only': sidebarCollapsed }"
-        :style="sidebarCollapsed ? undefined : { backgroundImage: `url(${makeUrl})` }"
-        :aria-label="sidebarCollapsed ? '创建专属智能体' : undefined"
-        @click="createAgent"
-      >
-        <span class="sr-only">创建专属智能体</span>
-        <span v-if="sidebarCollapsed" class="make-agent-icon-only" aria-hidden="true">
-          <IconPlus />
-        </span>
-        <span v-else class="make-agent-action">
-          <IconPlus />
-          创建智能体
-        </span>
-      </button>
-    </aside>
-
-    <section class="agent-main">
-      <header class="main-header">
-        <div class="header-intro">
-          <h1 class="page-title">智体中心</h1>
-
-          <div class="metric-row" aria-label="Token 用量概览">
-            <article class="metric-card token-card">
-              <div class="token-card-head">
-                <div class="token-card-meta">
-                  <p>本月 Token 额度</p>
-                  <strong>
-                    {{ tokenUsage.remainingLabel }}
-                    <span class="token-total">/ {{ tokenUsage.quotaLabel }}</span>
-                  </strong>
+      <section class="agent-main">
+        <section class="token-record-card" aria-label="Token使用记录">
+          <div class="token-record-main">
+            <header class="token-record-topline">
+              <div class="token-record-title-stack">
+                <div class="token-record-title">
+                  <h2>Token使用记录</h2>
+                  <IconInfo aria-hidden="true" />
                 </div>
-                <span class="metric-icon metric-blue">
-                  <IconCoins />
-                </span>
+
+                <div class="token-range-tabs" role="tablist" aria-label="Token 时间范围">
+                  <button
+                    v-for="range in tokenRangeTabs"
+                    :key="range"
+                    type="button"
+                    class="token-range-tab"
+                    :class="{ active: range === '周' }"
+                    role="tab"
+                    :aria-selected="range === '周'"
+                  >
+                    {{ range }}
+                  </button>
+                </div>
               </div>
-              <div class="token-progress">
-                <div
-                  class="token-progress-bar"
-                  role="progressbar"
-                  :aria-valuenow="tokenUsage.usedPercent"
-                  aria-valuemin="0"
-                  aria-valuemax="100"
+
+              <div class="token-record-filters">
+                <button
+                  type="button"
+                  class="token-filter-button"
+                  @click="showToast('日期筛选即将开放')"
                 >
-                  <span
-                    class="token-progress-fill"
-                    :class="{ 'is-low': tokenUsage.isRunningLow }"
-                    :style="{ width: `${tokenUsage.usedPercent}%` }"
-                  />
-                </div>
-                <span class="token-progress-meta">已用 {{ tokenUsage.usedPercent }}%</span>
+                  <span>2024-05-13&nbsp;&nbsp;~&nbsp;&nbsp;2024-05-19</span>
+                  <IconCalendarDays aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  class="token-filter-button token-filter-select"
+                  @click="showToast('类别筛选即将开放')"
+                >
+                  <span>全部类别</span>
+                  <IconChevronDown aria-hidden="true" />
+                </button>
               </div>
-            </article>
+            </header>
 
-            <article class="metric-card token-card">
-              <div class="token-card-head">
-                <div class="token-card-meta">
-                  <p>今日消耗</p>
-                  <strong>{{ tokenUsage.todayLabel }} <span class="token-unit">Tokens</span></strong>
-                </div>
-                <span class="metric-icon metric-teal">
-                  <IconActivity />
-                </span>
+            <div class="token-record-body">
+              <div class="usage-chart-panel">
+                <div
+                  ref="usageTrendChartRef"
+                  class="usage-trend-chart"
+                  aria-label="05-13 到 05-19 Token 消耗折线图，05-16 最高为 86,420 Tokens"
+                />
               </div>
-              <span
-                class="token-trend"
-                :class="tokenUsage.todayTrendUp ? 'is-up' : 'is-down'"
-              >
-                <IconTrendingUp v-if="tokenUsage.todayTrendUp" />
-                <IconTrendingDown v-else />
-                较昨日 {{ tokenUsage.todayTrendUp ? '+' : '' }}{{ tokenUsage.todayDelta }}%
+
+              <div class="token-ranking-panel">
+                <h3>智能体消耗排行</h3>
+                <div
+                  ref="rankingChartRef"
+                  class="ranking-chart"
+                  aria-label="智能体 Token 消耗排行柱状图"
+                />
+
+                <button
+                  type="button"
+                  class="ranking-more-button"
+                  @click="showToast('更多排行即将开放')"
+                >
+                  查看更多
+                  <IconChevronDown aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <aside class="token-distribution-panel" aria-label="Token 消耗分布">
+            <h2>Token 消耗分布</h2>
+
+            <div class="token-distribution-body">
+              <div
+                ref="distributionPieChartRef"
+                class="distribution-pie-chart"
+                aria-label="总消耗 89,520 Tokens"
+              />
+
+              <ul class="distribution-legend">
+                <li v-for="item in tokenDistribution" :key="item.label">
+                  <span class="legend-swatch" :style="{ backgroundColor: item.color }" />
+                  <span>{{ item.label }}</span>
+                  <strong>{{ item.value }}</strong>
+                </li>
+              </ul>
+            </div>
+
+            <div class="token-week-summary">
+              <span class="week-summary-icon">
+                <IconCalendarDays aria-hidden="true" />
               </span>
-            </article>
-          </div>
-        </div>
+              <div>
+                <p>
+                  较上周总消耗
+                  <strong>+12.4%</strong>
+                  <IconTrendingUp aria-hidden="true" />
+                </p>
+                <span>日均消耗 12,788 Tokens</span>
+              </div>
+            </div>
+          </aside>
+        </section>
 
-        <div class="header-cluster">
-          <div class="utility-row">
-            <label class="search-box">
-              <span class="sr-only">搜索智能体或能力</span>
-              <input
-                v-model="searchKeyword"
-                type="search"
-                placeholder="搜索智能体或能力..."
-                autocomplete="off"
-              >
-              <IconSearch class="search-icon" />
-            </label>
-          </div>
-        </div>
-      </header>
-
-      <!-- banner 暂时隐藏
+        <!-- banner 暂时隐藏
       <section
         class="hero-banner"
         :style="{ backgroundImage: `url(${bannerUrl})` }"
@@ -428,131 +821,142 @@ onBeforeUnmount(() => {
       />
       -->
 
-      <section class="catalog-toolbar" aria-label="智能体筛选">
-        <div class="category-tabs" role="tablist" aria-label="分类筛选">
-          <button
-            v-for="tab in categoryTabs"
-            :key="tab.key"
-            type="button"
-            class="category-tab"
-            :class="{ active: activeCategory === tab.key }"
-            role="tab"
-            :aria-selected="activeCategory === tab.key"
-            @click="selectCategory(tab.key)"
-          >
-            {{ tab.label }}
-            <span>{{ tab.count }}</span>
-          </button>
-        </div>
-
-        <button type="button" class="sort-button" @click="showToast('已按推荐排序')">
-          推荐排序
-          <IconChevronDown />
-        </button>
-      </section>
-
-      <section class="agent-grid" aria-label="智能体列表">
-        <button
-          v-for="agent in visibleAgents"
-          :key="agent.id"
-          type="button"
-          class="agent-card"
-          :class="{ selected: selectedAgent?.id === agent.id }"
-          @click="openAgent(agent)"
-        >
-          <div class="agent-card-body">
-            <span class="agent-icon" :class="getAgentVisual(agent).tone">
-              <component :is="getAgentVisual(agent).icon" />
-            </span>
-
-            <div class="agent-card-copy">
-              <div class="agent-card-title-row">
-                <h2>{{ agent.name }}</h2>
-                <span v-if="agent.recommended" class="favorite-mark" aria-label="推荐">
-                  <IconStar />
-                </span>
-              </div>
-              <p class="agent-description">{{ agent.description }}</p>
-            </div>
+        <section class="catalog-toolbar" aria-label="智能体筛选">
+          <div class="category-tabs" role="tablist" aria-label="分类筛选">
+            <button
+              v-for="tab in categoryTabs"
+              :key="tab.key"
+              type="button"
+              class="category-tab"
+              :class="{ active: activeCategory === tab.key }"
+              role="tab"
+              :aria-selected="activeCategory === tab.key"
+              @click="selectCategory(tab.key)"
+            >
+              {{ tab.label }}
+              <span>{{ tab.count }}</span>
+            </button>
           </div>
 
-          <div class="agent-card-footer">
-            <span class="status-pill" :class="statusClass(agent.permissionState)">
-              {{ permissionLabels[agent.permissionState] }}
-            </span>
-            <span class="agent-card-source">来自：{{ agent.category }}</span>
-          </div>
-        </button>
+          <div class="toolbar-actions">
+            <label class="search-box">
+              <span class="sr-only">搜索智能体或能力</span>
+              <input
+                v-model="searchKeyword"
+                type="search"
+                placeholder="搜索智能体或能力..."
+                autocomplete="off"
+              />
+              <IconSearch class="search-icon" />
+            </label>
 
-        <button
-          v-if="shouldShowMoreAbility"
-          type="button"
-          class="agent-card more-ability-card"
-          @click="handleNav('能力 Skills')"
-        >
-          <div class="agent-card-body">
-            <span class="agent-icon icon-blue">
-              <IconPlus />
-            </span>
-
-            <div class="agent-card-copy">
-              <h2>更多能力</h2>
-              <p class="agent-description">更多智能体与技能正在路上，敬请期待。</p>
-            </div>
-          </div>
-
-          <img :src="moreAbilityUrl" alt="" class="more-ability-art" aria-hidden="true">
-
-          <div class="agent-card-footer">
-            <span class="status-placeholder" aria-hidden="true" />
-            <span class="agent-card-source">来自：智体中心</span>
-          </div>
-        </button>
-
-        <p v-if="visibleAgents.length === 0" class="empty-message">
-          没有匹配的智能体
-        </p>
-      </section>
-    </section>
-
-    <Transition
-      enter-active-class="panel-enter-active"
-      enter-from-class="panel-enter-from"
-      enter-to-class="panel-enter-to"
-      leave-active-class="panel-leave-active"
-      leave-from-class="panel-leave-from"
-      leave-to-class="panel-leave-to"
-    >
-      <aside v-if="selectedAgent" class="agent-detail-panel" aria-label="智能体详情">
-        <header>
-          <div>
-            <p>{{ selectedAgent.category }}</p>
-            <h2>{{ selectedAgent.name }}</h2>
-          </div>
-          <button type="button" aria-label="关闭详情" @click="closeAgentPanel">
-            <IconX />
-          </button>
-        </header>
-
-        <p class="detail-description">{{ selectedAgent.description }}</p>
-
-        <section>
-          <h3>适用场景</h3>
-          <div class="detail-tags">
-            <span v-for="scenario in selectedAgent.scenarios" :key="scenario">
-              {{ scenario }}
-            </span>
+            <button type="button" class="sort-button" @click="showToast('已按推荐排序')">
+              推荐排序
+              <IconChevronDown />
+            </button>
           </div>
         </section>
 
-        <footer>
-          <button type="button" class="detail-secondary" @click="closeAgentPanel">关闭</button>
-          <button type="button" class="detail-primary" @click="launchAgent(selectedAgent)">
-            立即使用
+        <section class="agent-grid" aria-label="智能体列表">
+          <button
+            v-for="agent in visibleAgents"
+            :key="agent.id"
+            type="button"
+            class="agent-card"
+            :class="{ selected: selectedAgent?.id === agent.id }"
+            @click="openAgent(agent)"
+          >
+            <div class="agent-card-body">
+              <span class="agent-icon" :class="getAgentVisual(agent).tone">
+                <component :is="getAgentVisual(agent).icon" />
+              </span>
+
+              <div class="agent-card-copy">
+                <div class="agent-card-title-row">
+                  <h2>{{ agent.name }}</h2>
+                  <span v-if="agent.recommended" class="favorite-mark" aria-label="推荐">
+                    <IconStar />
+                  </span>
+                </div>
+                <p class="agent-description">{{ agent.description }}</p>
+              </div>
+            </div>
+
+            <div class="agent-card-footer">
+              <span class="status-pill" :class="statusClass(agent.permissionState)">
+                {{ permissionLabels[agent.permissionState] }}
+              </span>
+              <span class="agent-card-source">来自：{{ agent.category }}</span>
+            </div>
           </button>
-        </footer>
-      </aside>
-    </Transition>
+
+          <button
+            v-if="shouldShowMoreAbility"
+            type="button"
+            class="agent-card more-ability-card"
+            @click="handleNav('能力 Skills')"
+          >
+            <div class="agent-card-body">
+              <span class="agent-icon icon-blue">
+                <IconPlus />
+              </span>
+
+              <div class="agent-card-copy">
+                <h2>更多能力</h2>
+                <p class="agent-description">更多智能体与技能正在路上，敬请期待。</p>
+              </div>
+            </div>
+
+            <img :src="moreAbilityUrl" alt="" class="more-ability-art" aria-hidden="true" />
+
+            <div class="agent-card-footer">
+              <span class="status-placeholder" aria-hidden="true" />
+              <span class="agent-card-source">来自：智体中心</span>
+            </div>
+          </button>
+
+          <p v-if="visibleAgents.length === 0" class="empty-message">没有匹配的智能体</p>
+        </section>
+      </section>
+
+      <Transition
+        enter-active-class="panel-enter-active"
+        enter-from-class="panel-enter-from"
+        enter-to-class="panel-enter-to"
+        leave-active-class="panel-leave-active"
+        leave-from-class="panel-leave-from"
+        leave-to-class="panel-leave-to"
+      >
+        <aside v-if="selectedAgent" class="agent-detail-panel" aria-label="智能体详情">
+          <header>
+            <div>
+              <p>{{ selectedAgent.category }}</p>
+              <h2>{{ selectedAgent.name }}</h2>
+            </div>
+            <button type="button" aria-label="关闭详情" @click="closeAgentPanel">
+              <IconX />
+            </button>
+          </header>
+
+          <p class="detail-description">{{ selectedAgent.description }}</p>
+
+          <section>
+            <h3>适用场景</h3>
+            <div class="detail-tags">
+              <span v-for="scenario in selectedAgent.scenarios" :key="scenario">
+                {{ scenario }}
+              </span>
+            </div>
+          </section>
+
+          <footer>
+            <button type="button" class="detail-secondary" @click="closeAgentPanel">关闭</button>
+            <button type="button" class="detail-primary" @click="launchAgent(selectedAgent)">
+              立即使用
+            </button>
+          </footer>
+        </aside>
+      </Transition>
     </main>
   </div>
 </template>
@@ -564,16 +968,10 @@ onBeforeUnmount(() => {
   height: 100vh;
   flex-direction: column;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 78% 0%, rgba(207, 229, 255, 0.75) 0, transparent 360px),
+  background: radial-gradient(circle at 78% 0%, rgba(207, 229, 255, 0.75) 0, transparent 360px),
     linear-gradient(130deg, #f8fbff 0%, #edf6ff 52%, #f8fcff 100%);
   color: #111827;
-  font-family:
-    Inter,
-    "PingFang SC",
-    "Microsoft YaHei",
-    system-ui,
-    sans-serif;
+  font-family: Inter, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
 }
 
 .agent-center-shell {
@@ -581,9 +979,9 @@ onBeforeUnmount(() => {
   --sidebar-collapsed-width: 76px;
   --sidebar-card-margin: clamp(19px, 1.15vw, 22px);
   --main-pad-top: clamp(17px, 1.9vh, 21px);
-  --main-pad-right: clamp(36px, 2.2vw, 42px);
+  --main-pad-right: clamp(18px, 1.1vw, 21px);
   --main-pad-bottom: 32px;
-  --main-pad-left: clamp(49px, 2.9vw, 56px);
+  --main-pad-left: clamp(25px, 1.45vw, 28px);
   --banner-height: clamp(260px, 26.5vh, 286px);
   --toolbar-gap: clamp(14px, 1.55vh, 17px);
   --grid-gap-x: 16px;
@@ -646,8 +1044,7 @@ onBeforeUnmount(() => {
   justify-content: center;
   border: 1px solid rgba(207, 224, 248, 0.95);
   border-radius: 11px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(244, 249, 255, 0.98) 100%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(244, 249, 255, 0.98) 100%);
   color: #355a8f;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.92),
@@ -677,8 +1074,7 @@ onBeforeUnmount(() => {
 .sidebar-collapse-toggle:hover,
 .sidebar-collapse-toggle:focus-visible {
   border-color: rgba(122, 168, 255, 0.55);
-  background:
-    linear-gradient(180deg, #ffffff 0%, #edf4ff 100%);
+  background: linear-gradient(180deg, #ffffff 0%, #edf4ff 100%);
   color: #075df4;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.95),
@@ -875,40 +1271,6 @@ onBeforeUnmount(() => {
   padding: var(--main-pad-top) var(--main-pad-right) var(--main-pad-bottom) var(--main-pad-left);
 }
 
-.main-header {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 28px;
-}
-
-.header-intro {
-  display: grid;
-  gap: 14px;
-}
-
-.page-title {
-  margin: 0;
-  color: #101827;
-  font-size: 30px;
-  font-weight: 900;
-  line-height: 1.18;
-  letter-spacing: 0;
-}
-
-.header-cluster {
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-}
-
-.utility-row {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
-
 .search-box {
   position: relative;
   display: block;
@@ -948,146 +1310,338 @@ onBeforeUnmount(() => {
   stroke-width: 2.5;
 }
 
-.metric-row {
+.token-record-card {
   display: grid;
-  grid-template-columns: repeat(2, var(--metric-card-width));
-  gap: clamp(13px, 0.8vw, 15px);
-}
-
-.metric-card {
-  display: flex;
-  height: var(--metric-card-height);
-  flex-direction: column;
-  justify-content: center;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1.9fr) minmax(282px, 0.9fr);
+  flex: 0 0 auto;
+  height: clamp(336px, 19vw, 392px);
+  min-height: 0;
   overflow: hidden;
-  border: 1px solid rgba(227, 236, 250, 0.95);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 13px 30px rgba(83, 120, 171, 0.12);
-  padding: 16px 18px;
+  border: 1px solid rgba(219, 231, 248, 0.96);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 18px 42px rgba(72, 110, 165, 0.13);
+  margin-top: 18px;
+  padding: 16px clamp(18px, 1.45vw, 26px) 14px;
 }
 
-.token-card-head {
+.token-record-main {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  padding-right: clamp(16px, 1.3vw, 24px);
+}
+
+.token-record-topline {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 18px;
 }
 
-.token-card-meta {
+.token-record-title-stack {
   min-width: 0;
 }
 
-.metric-card p {
-  margin: 0 0 8px;
-  color: #607ba3;
-  font-size: 13px;
-  font-weight: 700;
+.token-record-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #172033;
 }
 
-.metric-card strong {
-  display: flex;
-  align-items: baseline;
-  gap: 5px;
-  color: #091325;
-  font-size: 27px;
+.token-record-title h2,
+.token-distribution-panel h2 {
+  margin: 0;
+  color: #172033;
+  font-size: clamp(18px, 1.2vw, 22px);
   font-weight: 900;
-  line-height: 1;
+  line-height: 1.16;
+  letter-spacing: 0;
 }
 
-.token-total {
-  color: #93a9c9;
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.token-unit {
-  color: #93a9c9;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.metric-icon {
-  display: grid;
-  width: 44px;
-  height: 44px;
-  flex-shrink: 0;
-  place-items: center;
-  border-radius: 13px;
-}
-
-.metric-icon svg {
-  width: 23px;
-  height: 23px;
-  stroke-width: 2.5;
-}
-
-.metric-blue {
-  background: #eef5ff;
-  color: #126cff;
-}
-
-.metric-teal {
-  background: #ecfbfa;
-  color: #19bcae;
-}
-
-.token-progress {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.token-progress-bar {
-  position: relative;
-  height: 7px;
-  flex: 1;
-  overflow: hidden;
-  border-radius: 999px;
-  background: #e9eef7;
-}
-
-.token-progress-fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #4c9dff 0%, #0966ff 100%);
-  transition: width 360ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.token-progress-fill.is-low {
-  background: linear-gradient(90deg, #ffb24c 0%, #f97316 100%);
-}
-
-.token-progress-meta {
-  flex-shrink: 0;
-  color: #607ba3;
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.token-trend {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.token-trend svg {
-  width: 14px;
-  height: 14px;
+.token-record-title svg {
+  width: 16px;
+  height: 16px;
+  color: #9aaac2;
   stroke-width: 2.6;
 }
 
-.token-trend.is-up {
-  color: #ef6b53;
+.token-range-tabs {
+  display: grid;
+  width: 134px;
+  height: 32px;
+  grid-template-columns: repeat(3, 1fr);
+  align-items: center;
+  border-radius: 999px;
+  background: #eef4fc;
+  margin-top: 14px;
+  padding: 3px;
 }
 
-.token-trend.is-down {
-  color: #10a87c;
+.token-range-tab {
+  display: inline-flex;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #617391;
+  font-size: 14px;
+  font-weight: 850;
+  line-height: 1;
+  transition:
+    background 180ms ease,
+    color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.token-range-tab.active {
+  background: linear-gradient(180deg, #3788ff 0%, #126cff 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 8px 16px rgba(35, 114, 245, 0.26);
+  color: #ffffff;
+}
+
+.token-range-tab:focus-visible,
+.token-filter-button:focus-visible,
+.ranking-more-button:focus-visible {
+  outline: 2px solid rgba(26, 111, 255, 0.28);
+  outline-offset: 2px;
+}
+
+.token-range-tab:active,
+.token-filter-button:active,
+.ranking-more-button:active {
+  transform: translateY(1px);
+}
+
+.token-record-filters {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.token-filter-button {
+  display: inline-flex;
+  height: 38px;
+  min-width: 164px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #dfe8f4;
+  border-radius: 13px;
+  background: #ffffff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 6px 15px rgba(69, 101, 148, 0.08);
+  color: #617391;
+  font-size: 13px;
+  font-weight: 850;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
+.token-filter-select {
+  min-width: 136px;
+}
+
+.token-filter-button svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: #627795;
+  stroke-width: 2.5;
+}
+
+.token-record-body {
+  display: grid;
+  grid-template-columns: minmax(292px, 1fr) minmax(246px, 0.86fr);
+  flex: 1;
+  gap: clamp(16px, 1.45vw, 24px);
+  align-items: stretch;
+  min-height: 0;
+  margin-top: 4px;
+}
+
+.usage-chart-panel {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  padding-top: 0;
+}
+
+.usage-trend-chart {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.token-ranking-panel {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  border-left: 1px solid #e2ebf6;
+  padding-left: clamp(16px, 1.4vw, 24px);
+}
+
+.token-ranking-panel h3 {
+  margin: 0 0 5px;
+  color: #172033;
+  font-size: clamp(15px, 0.98vw, 18px);
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.ranking-chart {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+}
+
+.ranking-more-button {
+  display: inline-flex;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  color: #2f7fff;
+  font-size: 13px;
+  font-weight: 900;
+  margin: 7px auto 0;
+  padding: 0 10px;
+}
+
+.ranking-more-button svg {
+  width: 14px;
+  height: 14px;
+  rotate: -90deg;
+  stroke-width: 3;
+}
+
+.token-distribution-panel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  border-left: 1px solid #e2ebf6;
+  padding-left: clamp(18px, 1.45vw, 26px);
+}
+
+.token-distribution-body {
+  display: flex;
+  min-height: 0;
+  align-items: center;
+  gap: clamp(15px, 1.35vw, 24px);
+  margin-top: 16px;
+}
+
+.distribution-pie-chart {
+  width: clamp(128px, 8.8vw, 158px);
+  height: clamp(128px, 8.8vw, 158px);
+  flex: 0 0 auto;
+}
+
+.distribution-legend {
+  display: grid;
+  flex: 1;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.distribution-legend li {
+  display: grid;
+  grid-template-columns: 12px minmax(38px, 1fr) 52px;
+  align-items: center;
+  gap: 10px;
+  color: #35425a;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+  box-shadow: 0 4px 10px rgba(58, 125, 231, 0.16);
+}
+
+.distribution-legend strong {
+  color: #73829a;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.token-week-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 54px;
+  border: 1px solid #dbe8fb;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #f8fbff 0%, #f2f7ff 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.88);
+  margin-top: auto;
+  padding: 9px 14px;
+}
+
+.week-summary-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  place-items: center;
+  border: 1px solid #d5e6ff;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #2e7bff;
+}
+
+.week-summary-icon svg {
+  width: 17px;
+  height: 17px;
+  stroke-width: 2.6;
+}
+
+.token-week-summary p {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 5px;
+  color: #344057;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.token-week-summary p strong,
+.token-week-summary p svg {
+  color: #43bc65;
+}
+
+.token-week-summary p svg {
+  width: 13px;
+  height: 13px;
+  stroke-width: 3;
+}
+
+.token-week-summary span {
+  color: #6f7f98;
+  font-size: 13px;
+  font-weight: 850;
 }
 
 .hero-banner {
@@ -1109,8 +1663,15 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  margin-top: calc(var(--toolbar-gap) + 16px);
+  margin-top: 18px;
   margin-bottom: 12px;
+}
+
+.toolbar-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 12px;
 }
 
 .category-tabs {
@@ -1222,7 +1783,9 @@ onBeforeUnmount(() => {
 
 .sort-button:hover {
   border-color: #cbd5e1;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.05),
+    0 2px 4px -1px rgba(0, 0, 0, 0.03);
 }
 
 .sort-button svg {
@@ -1623,12 +2186,16 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1280px) {
-  .metric-row {
-    grid-template-columns: repeat(2, minmax(220px, 1fr));
-  }
-
   .agent-center-shell {
     --agent-grid-columns: 3;
+  }
+
+  .token-record-card {
+    grid-template-columns: minmax(0, 1.8fr) minmax(260px, 0.92fr);
+  }
+
+  .token-record-body {
+    grid-template-columns: minmax(260px, 1fr) minmax(228px, 0.86fr);
   }
 }
 
@@ -1636,9 +2203,9 @@ onBeforeUnmount(() => {
   .agent-center-shell {
     --sidebar-width: 220px;
     --main-pad-top: 18px;
-    --main-pad-right: 24px;
+    --main-pad-right: 12px;
     --main-pad-bottom: 32px;
-    --main-pad-left: 24px;
+    --main-pad-left: 12px;
     --banner-height: 170px;
     --agent-grid-columns: 3;
     --agent-card-min-height: 148px;
@@ -1654,23 +2221,22 @@ onBeforeUnmount(() => {
     padding: var(--main-pad-top) var(--main-pad-right) var(--main-pad-bottom) var(--main-pad-left);
   }
 
-  .main-header {
-    flex-direction: column;
+  .token-record-card {
+    grid-template-columns: 1fr;
+    gap: 18px;
+    height: auto;
     min-height: auto;
-    margin-bottom: 20px;
   }
 
-  .header-cluster {
-    width: 100%;
-    justify-content: flex-end;
+  .token-record-main {
+    padding-right: 0;
   }
 
-  .utility-row {
-    justify-content: flex-end;
-  }
-
-  .metric-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .token-distribution-panel {
+    border-top: 1px solid #e2ebf6;
+    border-left: 0;
+    padding-top: 18px;
+    padding-left: 0;
   }
 }
 
@@ -1724,25 +2290,70 @@ onBeforeUnmount(() => {
     flex: 1 1 auto;
     min-height: 0;
     overflow: hidden;
-    padding: 18px 16px 28px;
+    padding: 18px 8px 28px;
   }
 
-  .page-title {
-    font-size: 25px;
-  }
-
-  .utility-row {
+  .toolbar-actions {
+    width: 100%;
     flex-wrap: wrap;
-    justify-content: flex-start;
-    gap: 12px;
   }
 
   .search-box {
-    width: min(100%, 360px);
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto;
+    max-width: 360px;
   }
 
-  .metric-row {
+  .token-record-card {
+    border-radius: 17px;
+    margin-top: 14px;
+    padding: 16px;
+  }
+
+  .token-record-topline,
+  .token-record-filters,
+  .token-record-body,
+  .token-distribution-body {
+    flex-direction: column;
+  }
+
+  .token-record-topline,
+  .token-record-filters {
+    align-items: stretch;
+  }
+
+  .token-record-filters {
+    width: 100%;
+  }
+
+  .token-filter-button,
+  .token-filter-select {
+    width: 100%;
+  }
+
+  .token-record-body {
+    display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .token-ranking-panel {
+    border-top: 1px solid #e2ebf6;
+    border-left: 0;
+    padding-top: 14px;
+    padding-left: 0;
+  }
+
+  .token-distribution-body {
+    align-items: center;
+  }
+
+  .distribution-legend {
+    width: 100%;
+  }
+
+  .token-week-summary {
+    margin-top: 16px;
   }
 
   .hero-banner {
@@ -1752,6 +2363,10 @@ onBeforeUnmount(() => {
   .catalog-toolbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .toolbar-actions {
+    justify-content: flex-end;
   }
 
   .category-tabs {
