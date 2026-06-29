@@ -1,23 +1,24 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import IconAlarmClock from '~icons/lucide/alarm-clock'
 import IconArrowUpRight from '~icons/lucide/arrow-up-right'
 import IconCheck from '~icons/lucide/check'
-import IconChevronDown from '~icons/lucide/chevron-down'
 import IconChevronLeft from '~icons/lucide/chevron-left'
 import IconChevronRight from '~icons/lucide/chevron-right'
-import IconCircle from '~icons/lucide/circle'
 import IconSendHorizontal from '~icons/lucide/send-horizontal'
 import { routeConfig } from '@/config/route.config'
+import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
 import { useFeedbackStore } from '@/stores/feedback.store'
 import { useRouter } from 'vue-router'
 import { dashboardTools, navigateDashboardTool, type DashboardToolTarget } from './dashboardTools'
-import type { CalendarEvent, CalendarTodoDraft } from './types'
+import CalendarWeekTimeline from './components/CalendarWeekTimeline.vue'
+import type { CalendarDay, CalendarEvent, CalendarTodoDraft } from './types'
 import { formatEventTime, ymd } from './todoDisplay'
 import {
   createTodo as serviceCreateTodo,
   getTodoMonthRange,
+  getTodoWeekRange,
   loadTodoDetail,
   parseTodoText,
   updateTodoStatus as serviceUpdateTodoStatus,
@@ -54,12 +55,20 @@ const now = ref(new Date())
 const todayDate = computed(() => ymd(now.value))
 const currentMonth = ref(new Date(now.value.getFullYear(), now.value.getMonth(), 1))
 const selectedDate = ref(todayDate.value)
+const calendarViewMode = ref<'month' | 'week'>('month')
 const taskDetails = ref<Record<string, CalendarEvent>>({})
 const activeFilter = ref<DetailFilter>('all')
 const activeTaskId = ref('')
 const detailLoadingId = ref('')
 const quickCreateText = ref('')
 const isCreating = ref(false)
+
+function getActiveTodoLoadRange() {
+  return calendarViewMode.value === 'week'
+    ? getTodoWeekRange(selectedDate.value)
+    : getTodoMonthRange(currentMonth.value)
+}
+
 const {
   assignableUsers,
   currentUser,
@@ -69,10 +78,12 @@ const {
   refreshTodos: refreshDashboardTodos,
   initializeDashboardTodos,
 } = useDashboardTodos({
-  getLoadRange: () => getTodoMonthRange(currentMonth.value),
+  getLoadRange: getActiveTodoLoadRange,
   loadErrorFallback: '加载待办数据失败',
   onUnauthorized: redirectToLogin,
 })
+
+let hasInitializedTodoRange = false
 
 const filters: FilterItem[] = [
   { value: 'all', label: '全部' },
@@ -112,8 +123,53 @@ const filterCounts = computed<Record<DetailFilter, number>>(() => ({
   overdue: overdueCount.value,
 }))
 
+const isFilterEmpty = computed(
+  () => activeFilter.value !== 'all' && !filteredTasks.value.length && !isLoading.value,
+)
+
+const emptyStateCopy = computed(() => {
+  if (activeFilter.value === 'pending') {
+    return {
+      title: '暂无待处理事项',
+      desc: '当前日期没有需要推进的待办，可以休息一下或安排新任务。',
+    }
+  }
+  if (activeFilter.value === 'done') {
+    return {
+      title: '暂无已完成事项',
+      desc: '完成待办后会在这里展示记录。',
+    }
+  }
+  if (activeFilter.value === 'overdue') {
+    return {
+      title: '暂无逾期待办',
+      desc: '很好，当前日期没有逾期的任务。',
+    }
+  }
+  return {
+    title: '当前日期暂无待办',
+    desc: '在下方输入框用一句话描述，即可快速创建待办。',
+  }
+})
+const taskEmptyActionLabel = computed(() => (isFilterEmpty.value ? '查看全部' : ''))
+
 const monthDays = computed(() => buildMonthDays())
+const weekCalendarDays = computed(() => buildWeekCalendarDays())
+const calendarHeaderLabel = computed(() =>
+  calendarViewMode.value === 'week'
+    ? weekRangeLabel(selectedDate.value)
+    : monthLabel(currentMonth.value),
+)
+const todoLoadRangeKey = computed(() => {
+  const range = getActiveTodoLoadRange()
+  return `${range.startDate}:${range.endDate}`
+})
 const scheduleEvents = computed(() => selectedDateEvents.value)
+
+watch(todoLoadRangeKey, () => {
+  if (!hasInitializedTodoRange) return
+  void refreshTodos()
+})
 
 onMounted(() => {
   void initializeDetailData()
@@ -123,8 +179,9 @@ async function initializeDetailData() {
   const initialized = await initializeDashboardTodos()
   if (!initialized) return
 
+  hasInitializedTodoRange = true
   taskDetails.value = {}
-  ensureSelectedDateInLoadedMonth()
+  ensureSelectedDateInLoadedRange()
 }
 
 function redirectToLogin() {
@@ -141,10 +198,11 @@ function openDetailTool(tool: DashboardToolTarget) {
 async function refreshTodos() {
   await refreshDashboardTodos()
   taskDetails.value = {}
-  ensureSelectedDateInLoadedMonth()
+  ensureSelectedDateInLoadedRange()
 }
 
-function ensureSelectedDateInLoadedMonth() {
+function ensureSelectedDateInLoadedRange() {
+  if (calendarViewMode.value === 'week') return
   const value = new Date(`${selectedDate.value}T12:00:00`)
   if (
     value.getFullYear() === currentMonth.value.getFullYear() &&
@@ -167,20 +225,38 @@ function ensureSelectedDateInLoadedMonth() {
   )
 }
 
-async function changeMonth(delta: number) {
+async function changeCalendarPeriod(delta: number) {
+  if (calendarViewMode.value === 'week') {
+    const next = new Date(`${selectedDate.value}T12:00:00`)
+    next.setDate(next.getDate() + delta * 7)
+    selectedDate.value = ymd(next)
+    activeTaskId.value = ''
+    activeFilter.value = 'all'
+    return
+  }
+
   currentMonth.value = new Date(
     currentMonth.value.getFullYear(),
     currentMonth.value.getMonth() + delta,
     1,
   )
-  await refreshTodos()
+}
+
+function setCalendarViewMode(mode: 'month' | 'week') {
+  if (calendarViewMode.value === mode) return
+
+  calendarViewMode.value = mode
+
+  if (mode === 'month') {
+    const nextDate = new Date(`${selectedDate.value}T12:00:00`)
+    currentMonth.value = new Date(nextDate.getFullYear(), nextDate.getMonth(), 1)
+  }
 }
 
 async function goToday() {
   now.value = new Date()
   selectedDate.value = todayDate.value
   currentMonth.value = new Date(now.value.getFullYear(), now.value.getMonth(), 1)
-  await refreshTodos()
 }
 
 function selectCalendarDate(date: string) {
@@ -271,6 +347,29 @@ async function submitQuickCreate() {
   } finally {
     isCreating.value = false
   }
+}
+
+function buildWeekCalendarDays(): CalendarDay[] {
+  const start = new Date(`${selectedDate.value}T12:00:00`)
+  const offset = (start.getDay() + 6) % 7
+  start.setDate(start.getDate() - offset)
+
+  return Array.from({ length: 7 }, () => {
+    const date = ymd(start)
+    const result: CalendarDay = {
+      date,
+      day: start.getDate(),
+      inMonth:
+        start.getFullYear() === currentMonth.value.getFullYear() &&
+        start.getMonth() === currentMonth.value.getMonth(),
+      inActiveWeek: true,
+      isToday: date === todayDate.value,
+      specialDays: [],
+      events: eventMap.value.get(date) ?? [],
+    }
+    start.setDate(start.getDate() + 1)
+    return result
+  })
 }
 
 function buildMonthDays(): MonthDay[] {
@@ -377,6 +476,16 @@ function formatDateShortTitle(date: string) {
 function monthLabel(date: Date) {
   return `${date.getFullYear()} 年 ${date.getMonth() + 1} 月`
 }
+
+function weekRangeLabel(anchorDate: string) {
+  const range = getTodoWeekRange(anchorDate)
+  const start = new Date(`${range.startDate}T12:00:00`)
+  const end = new Date(`${range.endDate}T12:00:00`)
+  const startLabel = `${start.getMonth() + 1}月${start.getDate()}日`
+  const endLabel = `${end.getMonth() + 1}月${end.getDate()}日`
+
+  return `${start.getFullYear()} 年 ${startLabel} - ${endLabel}`
+}
 </script>
 
 <template>
@@ -408,20 +517,11 @@ function monthLabel(date: Date) {
       <main class="detail-main-panel" aria-label="当日待办清单">
         <div class="detail-main-body side-content-card">
           <header class="detail-main-header">
-            <h1>{{ mainTitle }}</h1>
-            <p class="subtitle">
-              {{ selectedDateLabel }}
-              <span class="divider">|</span>
-              任务总数 <span class="num">{{ filterCounts.all }}</span>
-              <span class="divider">|</span>
-              已完成 <span class="num">{{ filterCounts.done }}</span>
-              <span class="divider">|</span>
-              待处理 <span class="num">{{ filterCounts.pending }}</span>
-            </p>
+            <h1>
+              {{ mainTitle }}
+              <span>{{ selectedDateLabel }}</span>
+            </h1>
           </header>
-
-          <p v-if="loadError" class="detail-state is-error">{{ loadError }}</p>
-          <p v-else-if="isLoading" class="detail-state">正在加载真实待办数据...</p>
 
           <div class="filter-row" role="group" aria-label="待办筛选">
             <button
@@ -439,10 +539,35 @@ function monthLabel(date: Date) {
             </button>
           </div>
 
+          <AppStateBlock
+            v-if="loadError"
+            class="detail-main-state"
+            type="error"
+            title="待办数据加载失败"
+            :description="loadError"
+            action-label="重新加载"
+            @action="refreshTodos"
+          />
+          <AppStateBlock
+            v-else-if="isLoading"
+            class="detail-main-state"
+            type="loading"
+            title="正在加载真实待办数据"
+            description="待办、日程和协作人信息同步后会自动展示。"
+          />
+
           <div class="task-list" aria-label="待办列表">
-            <article v-if="!isLoading && !filteredTasks.length" class="task-empty">
-              当前日期暂无待办
-            </article>
+            <AppStateBlock
+              v-if="!isLoading && !loadError && !filteredTasks.length"
+              class="task-empty-state"
+              type="empty"
+              :title="emptyStateCopy.title"
+              :description="emptyStateCopy.desc"
+              :action-label="taskEmptyActionLabel"
+              size="sm"
+              variant="inline"
+              @action="activeFilter = 'all'"
+            />
 
             <article
               v-for="task in filteredTasks"
@@ -525,56 +650,67 @@ function monthLabel(date: Date) {
       </main>
 
       <aside class="detail-side-panel" aria-label="日历和日程">
-        <div class="detail-side-toolbar">
-          <div class="mode-segment-wrapper">
-            <div class="mode-segment" role="group" aria-label="首页模式">
-              <button type="button" @click="emit('switch-mode', 'simple')">总览模式</button>
-              <button type="button" class="active">工作模式</button>
-            </div>
-          </div>
-
-          <div class="view-control-cluster" aria-label="日历视图">
-            <button type="button" class="calendar-menu-btn" aria-label="展开日历视图选项">
-              <IconChevronDown aria-hidden="true" />
-            </button>
-            <div class="calendar-range-segment" role="group" aria-label="日历范围">
-              <button type="button" class="active" aria-pressed="true">月</button>
-              <button type="button" aria-pressed="false" disabled>周</button>
-            </div>
-          </div>
-        </div>
-
-        <section class="calendar-card side-content-card" aria-label="月历">
+        <section
+          class="calendar-card side-content-card"
+          :class="{ 'is-week-mode': calendarViewMode === 'week' }"
+          :aria-label="calendarViewMode === 'week' ? '周历' : '月历'"
+        >
           <header class="calendar-header-mock">
             <div class="calendar-month-group">
-              <h2 @click="goToday" title="回到今天">{{ monthLabel(currentMonth) }}</h2>
+              <h2 @click="goToday" title="回到今天">{{ calendarHeaderLabel }}</h2>
               <button
                 type="button"
-                aria-label="上个月"
-                @click="changeMonth(-1)"
+                :aria-label="calendarViewMode === 'week' ? '上一周' : '上个月'"
+                @click="changeCalendarPeriod(-1)"
                 class="month-nav-btn"
               >
                 <IconChevronLeft aria-hidden="true" />
               </button>
               <button
                 type="button"
-                aria-label="下个月"
-                @click="changeMonth(1)"
+                :aria-label="calendarViewMode === 'week' ? '下一周' : '下个月'"
+                @click="changeCalendarPeriod(1)"
                 class="month-nav-btn"
               >
                 <IconChevronRight aria-hidden="true" />
               </button>
             </div>
-            <div class="calendar-action-group">
-              <button type="button" class="today-chip" @click="goToday">今天</button>
-              <button type="button" class="today-ring-btn" aria-label="回到今天" @click="goToday">
-                <IconCircle aria-hidden="true" />
+            <div class="calendar-header-actions">
+              <div class="calendar-range-segment" role="group" aria-label="日历范围">
+                <button
+                  type="button"
+                  :class="{ active: calendarViewMode === 'month' }"
+                  :aria-pressed="calendarViewMode === 'month'"
+                  @click="setCalendarViewMode('month')"
+                >
+                  月
+                </button>
+                <button
+                  type="button"
+                  :class="{ active: calendarViewMode === 'week' }"
+                  :aria-pressed="calendarViewMode === 'week'"
+                  @click="setCalendarViewMode('week')"
+                >
+                  周
+                </button>
+              </div>
+              <button type="button" class="compact-mode-btn" @click="emit('switch-mode', 'simple')">
+                缩略模式
               </button>
+              <div class="calendar-action-group">
+                <button type="button" class="today-chip" @click="goToday">今天</button>
+              </div>
             </div>
           </header>
 
           <div class="calendar-placeholder-wrapper">
-            <div class="calendar-grid" :aria-label="`${monthLabel(currentMonth)}日历`">
+            <CalendarWeekTimeline
+              v-if="calendarViewMode === 'week'"
+              :days="weekCalendarDays"
+              :selected-date="selectedDate"
+              @select="selectCalendarDate"
+            />
+            <div v-else class="calendar-grid" :aria-label="`${calendarHeaderLabel}日历`">
               <span
                 v-for="week in ['一', '二', '三', '四', '五', '六', '日']"
                 :key="week"
@@ -611,7 +747,15 @@ function monthLabel(date: Date) {
           </header>
 
           <div class="schedule-list">
-            <article v-if="!scheduleEvents.length" class="schedule-empty">当前日期暂无日程</article>
+            <AppStateBlock
+              v-if="!scheduleEvents.length"
+              class="schedule-empty-state"
+              type="empty"
+              title="当前日期暂无日程"
+              description="带有时间的待办会自动汇总到这里。"
+              size="sm"
+              variant="inline"
+            />
             <article
               v-for="task in scheduleEvents"
               :key="`schedule-${task.id}`"
@@ -699,7 +843,7 @@ function monthLabel(date: Date) {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 14px;
+  padding: 9px;
   min-height: 0;
   min-width: 0;
   box-sizing: border-box;
@@ -975,33 +1119,29 @@ function monthLabel(date: Date) {
 }
 
 .detail-main-header {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
+}
+
+.detail-main-state {
+  margin: -2px 0 20px;
 }
 
 .detail-main-header h1 {
-  margin: 0 0 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 18px;
+  margin: 0;
   color: #101936;
   font-size: 24px;
   font-weight: 900;
 }
 
-.subtitle {
-  margin: 0;
+.detail-main-header h1 span {
   color: #60708d;
   font-size: 13px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.subtitle .divider {
-  color: #c0cbe0;
-}
-
-.subtitle .num {
-  color: #101936;
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .filter-row {
@@ -1047,6 +1187,11 @@ function monthLabel(date: Date) {
 }
 .task-list::-webkit-scrollbar {
   display: none;
+}
+
+.task-empty-state {
+  flex: 1;
+  min-height: 168px;
 }
 
 .task-row {
@@ -1262,7 +1407,7 @@ function monthLabel(date: Date) {
   gap: 16px;
   min-height: 0;
   min-width: 0;
-  padding: 18px 18px 18px 8px;
+  padding: 8px 8px 8px 4px;
   box-sizing: border-box;
   background: transparent;
 }
@@ -1277,11 +1422,11 @@ function monthLabel(date: Date) {
 }
 
 .calendar-card {
-  flex: 0 0 clamp(390px, 40vh, 520px);
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding: 24px 26px 26px;
+  padding: 20px 24px 22px;
   border-radius: 24px;
   background: linear-gradient(142deg, rgba(255, 255, 255, 0.64), rgba(239, 247, 255, 0.42)),
     rgba(249, 252, 255, 0.56);
@@ -1291,10 +1436,15 @@ function monthLabel(date: Date) {
     0 18px 38px -30px rgba(20, 48, 92, 0.36);
 }
 
+.calendar-card.is-week-mode {
+  flex: 1 1 auto;
+  min-height: clamp(420px, 46vh, 580px);
+}
+
 .schedule-card {
   flex: 1;
   min-height: 0;
-  padding: 24px 26px 22px;
+  padding: 20px 24px 18px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1307,42 +1457,34 @@ function monthLabel(date: Date) {
     0 18px 38px -30px rgba(20, 48, 92, 0.32);
 }
 
-.detail-side-toolbar {
-  flex: 0 0 auto;
-  min-height: 50px;
+.calendar-range-segment {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-}
-
-.mode-segment-wrapper {
-  width: min(288px, 50%);
-  flex: 0 1 288px;
-}
-.mode-segment {
-  display: flex;
-  width: 100%;
+  box-sizing: border-box;
   min-width: 0;
-  background: rgba(238, 246, 255, 0.58);
-  border: 1px solid rgba(255, 255, 255, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.74);
   border-radius: 999px;
-  padding: 5px;
+  padding: 4px;
+  background: linear-gradient(180deg, rgba(246, 250, 255, 0.72), rgba(226, 237, 250, 0.56)),
+    rgba(238, 246, 255, 0.5);
   backdrop-filter: blur(18px) saturate(1.12);
   -webkit-backdrop-filter: blur(18px) saturate(1.12);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.76),
-    0 14px 28px -24px rgba(20, 48, 92, 0.38);
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    inset 0 -1px 0 rgba(142, 165, 197, 0.1),
+    0 14px 30px -24px rgba(20, 48, 92, 0.42);
 }
-.mode-segment button {
+
+.calendar-range-segment button {
   flex: 1;
   min-width: 0;
-  height: 38px;
+  height: 32px;
   border: none;
   border-radius: 999px;
   background: transparent;
   color: #5f7192;
-  font-size: 14px;
+  font: inherit;
+  font-size: 13px;
   font-weight: 900;
   cursor: pointer;
   transition:
@@ -1350,88 +1492,32 @@ function monthLabel(date: Date) {
     color 160ms ease,
     box-shadow 160ms ease;
 }
-.mode-segment button.active {
-  background: linear-gradient(180deg, #3e8aff, #2575f5);
+
+.calendar-range-segment button.active {
+  background: linear-gradient(180deg, #428dff, #2878f6);
   color: white;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.32),
-    0 9px 18px -10px rgba(37, 117, 245, 0.7);
+    inset 0 1px 0 rgba(255, 255, 255, 0.36),
+    0 10px 18px -11px rgba(37, 117, 245, 0.76);
 }
 
-.mode-segment button:focus-visible,
-.calendar-menu-btn:focus-visible,
+.calendar-range-segment button:not(.active):hover {
+  background: rgba(255, 255, 255, 0.34);
+  color: #30446c;
+}
+
 .calendar-range-segment button:focus-visible,
+.compact-mode-btn:focus-visible,
 .month-nav-btn:focus-visible,
 .today-chip:focus-visible,
-.today-ring-btn:focus-visible,
 .all-schedule-btn:focus-visible,
 .schedule-footer button:focus-visible {
   outline: 2px solid rgba(47, 124, 255, 0.65);
   outline-offset: 2px;
 }
 
-.view-control-cluster {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.calendar-menu-btn {
-  width: 46px;
-  height: 40px;
-  border: 1px solid rgba(255, 255, 255, 0.66);
-  border-radius: 16px;
-  background: rgba(238, 246, 255, 0.56);
-  color: #5f7192;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
-  backdrop-filter: blur(16px) saturate(1.1);
-  -webkit-backdrop-filter: blur(16px) saturate(1.1);
-}
-
-.calendar-menu-btn svg {
-  width: 17px;
-  height: 17px;
-}
-
 .calendar-range-segment {
-  width: 140px;
-  height: 40px;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  padding: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.66);
-  border-radius: 17px;
-  background: rgba(238, 246, 255, 0.56);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
-  backdrop-filter: blur(16px) saturate(1.1);
-  -webkit-backdrop-filter: blur(16px) saturate(1.1);
-}
-
-.calendar-range-segment button {
-  flex: 1;
-  height: 30px;
-  border: none;
-  border-radius: 11px;
-  background: transparent;
-  color: #6a7b98;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 900;
-  cursor: pointer;
-}
-
-.calendar-range-segment button.active {
-  background: linear-gradient(180deg, #3e8aff, #2575f5);
-  color: #fff;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.32),
-    0 8px 16px -10px rgba(37, 117, 245, 0.72);
+  flex: 0 0 112px;
 }
 
 .calendar-range-segment button:disabled {
@@ -1443,24 +1529,71 @@ function monthLabel(date: Date) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
-  margin-bottom: 20px;
+  gap: 10px;
+  margin-bottom: 14px;
+  flex-wrap: nowrap;
 }
 
 .calendar-month-group {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 8px;
+  flex: 0 1 auto;
   min-width: 0;
 }
 
 .calendar-header-mock h2 {
+  min-width: 0;
   margin: 0;
+  overflow: hidden;
   color: #142142;
-  font-size: 19px;
+  font-size: 18px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.calendar-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-width: 0;
+  margin-left: auto;
+}
+
+.compact-mode-btn {
+  flex: 0 0 auto;
+  height: 34px;
+  border: 1px solid rgba(199, 216, 241, 0.78);
+  border-radius: 999px;
+  padding: 0 12px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(232, 241, 253, 0.54)),
+    rgba(248, 251, 255, 0.6);
+  color: #31517f;
+  font: inherit;
+  font-size: 13px;
   font-weight: 900;
   white-space: nowrap;
   cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.78),
+    0 12px 22px -20px rgba(20, 48, 92, 0.36);
+  transition:
+    background 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.compact-mode-btn:hover {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(224, 238, 255, 0.62)),
+    rgba(255, 255, 255, 0.66);
+  color: var(--detail-blue);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.88),
+    0 12px 24px -18px rgba(47, 124, 255, 0.32);
 }
 .month-nav-btn {
   border: none;
@@ -1469,8 +1602,8 @@ function monthLabel(date: Date) {
   cursor: pointer;
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   border-radius: 10px;
   transition:
@@ -1482,21 +1615,20 @@ function monthLabel(date: Date) {
   color: var(--detail-blue);
 }
 .month-nav-btn svg {
-  width: 19px;
-  height: 19px;
+  width: 18px;
+  height: 18px;
   stroke-width: 2.4;
 }
 
 .calendar-action-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
   flex: 0 0 auto;
 }
 
-.today-chip,
-.today-ring-btn {
-  height: 36px;
+.today-chip {
+  height: 32px;
   border: 1px solid rgba(199, 216, 241, 0.78);
   background: rgba(248, 251, 255, 0.62);
   color: #2f7cff;
@@ -1507,24 +1639,10 @@ function monthLabel(date: Date) {
 }
 
 .today-chip {
-  min-width: 58px;
+  min-width: 46px;
   border-radius: 12px;
-  padding: 0 12px;
-  font-size: 14px;
-}
-
-.today-ring-btn {
-  width: 42px;
-  border-radius: 14px;
-  display: grid;
-  place-items: center;
-  color: #6980a1;
-}
-
-.today-ring-btn svg {
-  width: 17px;
-  height: 17px;
-  stroke-width: 2.6;
+  padding: 0 8px;
+  font-size: 13px;
 }
 
 .calendar-placeholder-wrapper {
@@ -1533,25 +1651,28 @@ function monthLabel(date: Date) {
   border-radius: 14px;
   padding: 0;
   background: transparent;
+  display: flex;
+  flex-direction: column;
 }
 
 .calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  grid-template-rows: 44px repeat(6, minmax(0, 1fr));
-  height: 100%;
+  grid-template-rows: 34px repeat(6, 44px);
+  height: auto;
   column-gap: 0;
   row-gap: 0;
   text-align: center;
 }
+
 .week-label {
   min-width: 0;
-  height: 44px;
+  height: 34px;
   border-bottom: 1px solid rgba(166, 186, 214, 0.24);
   color: #687999;
   display: grid;
   place-items: center;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 900;
 }
 .month-day {
@@ -1567,7 +1688,7 @@ function monthLabel(date: Date) {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 2px;
   font: inherit;
   transition:
     color 160ms ease,
@@ -1582,12 +1703,12 @@ function monthLabel(date: Date) {
 .month-day strong {
   position: relative;
   z-index: 1;
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
   border-radius: 999px;
   display: grid;
   place-items: center;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 900;
   line-height: 1;
   transition:
@@ -1608,8 +1729,8 @@ function monthLabel(date: Date) {
 }
 
 .month-day.selected strong {
-  width: 50px;
-  height: 50px;
+  width: 44px;
+  height: 44px;
   color: #fff;
   background: linear-gradient(180deg, #4c8dff, #2879ff);
   box-shadow:
@@ -1635,7 +1756,7 @@ function monthLabel(date: Date) {
 .month-day.selected .day-dots {
   position: absolute;
   left: 50%;
-  bottom: 6px;
+  bottom: 5px;
   transform: translateX(-50%);
 }
 
@@ -1671,16 +1792,16 @@ function monthLabel(date: Date) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 18px;
+  gap: 12px;
   margin-bottom: 0;
-  padding-bottom: 16px;
+  padding-bottom: 12px;
   border-bottom: 1px solid rgba(166, 186, 214, 0.2);
 }
 
 .schedule-title-area {
   display: flex;
   align-items: baseline;
-  gap: 18px;
+  gap: 12px;
   min-width: 0;
 }
 .schedule-title-area h2 {
@@ -1703,14 +1824,14 @@ function monthLabel(date: Date) {
   border: none;
   background: transparent;
   border-radius: 12px;
-  padding: 6px 0 6px 10px;
+  padding: 4px 0 4px 8px;
   font: inherit;
   font-size: 14px;
   font-weight: 800;
   color: var(--detail-blue);
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   cursor: pointer;
 }
 .all-schedule-btn svg {
@@ -1726,7 +1847,7 @@ function monthLabel(date: Date) {
   scrollbar-width: none;
   display: flex;
   flex-direction: column;
-  padding-top: 6px;
+  padding-top: 4px;
 }
 .schedule-list::-webkit-scrollbar {
   display: none;
@@ -1735,10 +1856,10 @@ function monthLabel(date: Date) {
 .schedule-item {
   position: relative;
   display: grid;
-  grid-template-columns: 24px 72px minmax(0, 1fr) auto;
-  gap: 14px;
-  min-height: 78px;
-  padding: 18px 0;
+  grid-template-columns: 20px 64px minmax(0, 1fr) auto;
+  gap: 10px;
+  min-height: 66px;
+  padding: 12px 0;
   cursor: pointer;
   align-items: center;
   border-bottom: 1px solid rgba(166, 186, 214, 0.18);
@@ -1753,9 +1874,9 @@ function monthLabel(date: Date) {
 .schedule-item::after {
   content: '';
   position: absolute;
-  left: 11px;
-  top: 44px;
-  bottom: -18px;
+  left: 9px;
+  top: 38px;
+  bottom: -12px;
   width: 2px;
   background: linear-gradient(180deg, rgba(47, 124, 255, 0.34), rgba(47, 124, 255, 0.08));
 }
@@ -1766,18 +1887,18 @@ function monthLabel(date: Date) {
 .schedule-dot {
   position: relative;
   z-index: 1;
-  width: 10px;
-  height: 10px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   background: var(--detail-blue);
-  border: 3px solid rgba(235, 244, 255, 0.98);
+  border: 2px solid rgba(235, 244, 255, 0.98);
   box-shadow: 0 0 0 1px rgba(47, 124, 255, 0.22);
   justify-self: center;
 }
 
 .schedule-item time {
   color: #172440;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 900;
   white-space: nowrap;
 }
@@ -1790,14 +1911,14 @@ function monthLabel(date: Date) {
   display: block;
   overflow: hidden;
   color: #172440;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 900;
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .schedule-info p {
-  margin: 7px 0 0;
+  margin: 5px 0 0;
   overflow: hidden;
   color: #76869f;
   font-size: 13px;
@@ -1810,24 +1931,21 @@ function monthLabel(date: Date) {
 .schedule-item > span {
   align-self: center;
   border-radius: 8px;
-  padding: 5px 9px;
-  font-size: 13px;
+  padding: 4px 8px;
+  font-size: 12px;
   font-weight: 900;
   white-space: nowrap;
 }
 
-.schedule-empty {
-  margin-top: 18px;
-  color: #233454;
-  font-size: 15px;
-  font-weight: 800;
+.schedule-empty-state {
+  margin-top: 8px;
 }
 
 .schedule-footer {
   flex: 0 0 auto;
   display: flex;
   justify-content: center;
-  padding-top: 16px;
+  padding-top: 12px;
   border-top: 1px solid rgba(166, 186, 214, 0.18);
 }
 
@@ -1838,10 +1956,10 @@ function monthLabel(date: Date) {
   color: var(--detail-blue);
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
+  gap: 6px;
+  padding: 6px 12px;
   font: inherit;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 900;
   cursor: pointer;
 }

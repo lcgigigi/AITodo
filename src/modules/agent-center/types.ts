@@ -16,6 +16,7 @@ export interface AgentCatalogItem {
   theme: 'blue' | 'green' | 'purple' | 'orange' | 'indigo' | 'pink' | 'cyan' | 'violet'
   permissionState: PermissionState
   scenarios: string[]
+  launchUrl?: string
   recommended?: boolean
 }
 

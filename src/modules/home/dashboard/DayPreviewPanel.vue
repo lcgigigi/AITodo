@@ -946,6 +946,7 @@ defineExpose({
         class="inline-section ai-inline-section"
         :class="{ 'is-parsing': isParsing }"
         :aria-busy="isParsing"
+        data-tour-target="todo-ai-parser"
       >
         <label class="field field-full">
           <span>一句话创建待办</span>
@@ -981,6 +982,7 @@ defineExpose({
         class="inline-section todo-details-section"
         :class="{ 'is-readonly': isViewMode }"
         :aria-disabled="isFormReadonly"
+        data-tour-target="todo-detail-fields"
       >
         <div class="basic-info-layout" :inert="isFormReadonly">
           <div class="basic-info-columns">
@@ -1137,7 +1139,7 @@ defineExpose({
         </div>
       </section>
 
-      <div class="form-actions">
+      <div class="form-actions" data-tour-target="todo-save-actions">
         <template v-if="isViewMode">
           <Button type="button" @click="requestCancelForm">返回</Button>
         </template>

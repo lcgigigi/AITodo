@@ -4,7 +4,6 @@ import type { Component } from 'vue'
 import IconBuilding2 from '~icons/lucide/building-2'
 import IconCheck from '~icons/lucide/check'
 import IconMail from '~icons/lucide/mail'
-import IconLayoutDashboard from '~icons/lucide/layout-dashboard'
 import { Button } from '@/components/ui/button'
 import bgMorning from '@/assets/morning.png'
 import bgNoon from '@/assets/noon.png'
@@ -15,6 +14,8 @@ import { useUserStore } from '@/stores/user.store'
 import CalendarWorkspace from './dashboard/CalendarWorkspace.vue'
 import DashboardTopBar from './dashboard/DashboardTopBar.vue'
 import DetailedDashboardWorkspace from './dashboard/DetailedDashboardWorkspace.vue'
+import OnboardingTour from './dashboard/components/OnboardingTour.vue'
+import { dispatchDashboardOnboardingTourStart } from './dashboard/onboardingTour'
 import {
   selectEmailProvider as submitEmailProvider,
   type SmartTodoEmailProvider,
@@ -98,6 +99,15 @@ async function handleOpenTodo(payload: { id: string; date?: string }) {
   await calendarWorkspaceRef.value?.openTodoFromNotification(payload)
 }
 
+async function startOnboardingTour() {
+  if (homeViewMode.value !== 'simple') {
+    homeViewMode.value = 'simple'
+    await nextTick()
+  }
+
+  dispatchDashboardOnboardingTourStart()
+}
+
 function setHomeViewMode(mode: HomeViewMode) {
   homeViewMode.value = mode
 }
@@ -135,22 +145,19 @@ async function confirmEmailProvider() {
         :show-tool-dock="homeViewMode === 'simple'"
         @calendar-refresh="handleCalendarRefresh"
         @open-todo="handleOpenTodo"
+        @start-onboarding="startOnboardingTour"
       />
       <div class="dashboard-content">
-        <button
+        <CalendarWorkspace
           v-if="homeViewMode === 'simple'"
-          type="button"
-          class="home-detail-switch"
-          aria-label="切换到详细模式"
-          @click="setHomeViewMode('detail')"
-        >
-          <IconLayoutDashboard aria-hidden="true" />
-          <span>详细模式</span>
-        </button>
-        <CalendarWorkspace v-if="homeViewMode === 'simple'" ref="calendarWorkspaceRef" />
+          ref="calendarWorkspaceRef"
+          @switch-mode="setHomeViewMode"
+        />
         <DetailedDashboardWorkspace v-else @switch-mode="setHomeViewMode" />
       </div>
     </main>
+
+    <OnboardingTour :enabled="userStore.isLoggedIn && !shouldShowEmailProviderGate" />
 
     <Transition name="email-provider-gate">
       <div
@@ -277,58 +284,6 @@ async function confirmEmailProvider() {
   position: relative;
   min-height: 0;
   flex: 1;
-}
-
-.home-detail-switch {
-  position: absolute;
-  top: 12px;
-  right: clamp(28px, 2.4vw, 44px);
-  z-index: 42;
-  min-width: 116px;
-  height: 42px;
-  border: 1px solid rgba(255, 255, 255, 0.74);
-  border-radius: 999px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(226, 239, 252, 0.72)),
-    rgba(238, 247, 255, 0.76);
-  color: #17335f;
-  padding: 0 16px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 900;
-  cursor: pointer;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.88),
-    0 14px 30px -22px rgba(15, 32, 61, 0.46);
-  backdrop-filter: blur(16px) saturate(1.12);
-  -webkit-backdrop-filter: blur(16px) saturate(1.12);
-  transition:
-    transform 180ms ease,
-    background 180ms ease,
-    box-shadow 180ms ease;
-}
-
-.home-detail-switch:hover,
-.home-detail-switch:focus-visible {
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(226, 239, 252, 0.82)),
-    rgba(238, 247, 255, 0.86);
-  transform: translateY(-1px);
-  outline: none;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    0 18px 34px -22px rgba(15, 32, 61, 0.52);
-}
-
-.home-detail-switch:active {
-  transform: translateY(0);
-}
-
-.home-detail-switch svg {
-  width: 18px;
-  height: 18px;
 }
 
 .email-provider-overlay {

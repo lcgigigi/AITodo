@@ -8,11 +8,13 @@ import IconExternalLink from '~icons/lucide/external-link'
 import IconLogOut from '~icons/lucide/log-out'
 import IconSettings from '~icons/lucide/settings'
 import IconSlidersHorizontal from '~icons/lucide/sliders-horizontal'
+import IconSparkles from '~icons/lucide/sparkles'
 import IconTrash2 from '~icons/lucide/trash-2'
 import IconX from '~icons/lucide/x'
 import girlImage from '@/assets/libao.png'
 import logoDarkImage from '@/assets/logoDark1.png'
 import { routeConfig } from '@/config/route.config'
+import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
 import {
   acceptTodos,
   loadAssignableUsers,
@@ -51,6 +53,7 @@ import { useUserStore } from '@/stores/user.store'
 const emit = defineEmits<{
   'calendar-refresh': []
   'open-todo': [payload: { id: string; date?: string }]
+  'start-onboarding': []
 }>()
 
 const props = withDefaults(
@@ -611,6 +614,13 @@ function openTopbarTool(tool: DashboardToolTarget) {
   void navigateDashboardTool(router, tool)
 }
 
+function openOnboardingTour() {
+  closeNotificationPanel()
+  closeUserMenu()
+  closeGlassPanel()
+  emit('start-onboarding')
+}
+
 async function handleLogout() {
   if (isLoggingOut.value) {
     return
@@ -695,6 +705,7 @@ onBeforeUnmount(() => {
     :class="{ 'without-tools': !props.showToolDock }"
     :style="glassStyle"
     aria-label="顶部导航"
+    data-tour-target="dashboard-topbar"
   >
     <div class="brand-block" aria-label="华力企业级AI平台">
       <span class="logo-mark" aria-hidden="true">
@@ -706,7 +717,11 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <TopbarToolDock v-if="props.showToolDock" @select="openTopbarTool" />
+    <TopbarToolDock
+      v-if="props.showToolDock"
+      data-tour-target="tool-dock"
+      @select="openTopbarTool"
+    />
 
     <div class="topbar-actions">
       <div ref="notificationPanelRef" class="notification-wrap">
@@ -716,6 +731,7 @@ onBeforeUnmount(() => {
           aria-label="消息通知"
           aria-controls="dashboard-notification-panel"
           :aria-expanded="isNotificationPanelOpen"
+          data-tour-target="notifications"
           @click="toggleNotificationPanel"
         >
           <IconBell />
@@ -728,7 +744,9 @@ onBeforeUnmount(() => {
             id="dashboard-notification-panel"
             class="notification-panel"
             aria-label="消息通知"
+            data-tour-target="notification-panel"
           >
+            <span class="notification-panel__arrow" aria-hidden="true" />
             <header class="notification-panel__header">
               <div>
                 <strong>消息中心</strong>
@@ -754,7 +772,12 @@ onBeforeUnmount(() => {
               </button>
             </header>
 
-            <div class="notification-tabs" role="tablist" aria-label="消息分类">
+            <div
+              class="notification-tabs"
+              role="tablist"
+              aria-label="消息分类"
+              data-tour-target="notification-tabs"
+            >
               <button
                 type="button"
                 role="tab"
@@ -795,13 +818,36 @@ onBeforeUnmount(() => {
                 </button>
               </div>
 
-              <p v-if="sysMessageError" class="notification-error">{{ sysMessageError }}</p>
-
-              <div class="notification-list">
-                <p v-if="isSysMessageLoading" class="notification-empty">正在加载站内消息…</p>
-                <p v-else-if="!sysMessages.length" class="notification-empty">
-                  {{ sysMessageFilter === 'unread' ? '暂无未读消息' : '暂无站内消息' }}
-                </p>
+              <div class="notification-list" data-tour-target="notification-list">
+                <AppStateBlock
+                  v-if="sysMessageError"
+                  class="notification-state"
+                  type="error"
+                  title="站内消息加载失败"
+                  :description="sysMessageError"
+                  action-label="重新加载"
+                  size="sm"
+                  variant="inline"
+                  @action="refreshSysMessages()"
+                />
+                <AppStateBlock
+                  v-else-if="isSysMessageLoading"
+                  class="notification-state"
+                  type="loading"
+                  title="正在加载站内消息"
+                  description="消息同步后会自动展示。"
+                  size="sm"
+                  variant="inline"
+                />
+                <AppStateBlock
+                  v-else-if="!sysMessages.length"
+                  class="notification-state"
+                  type="empty"
+                  :title="sysMessageFilter === 'unread' ? '暂无未读消息' : '暂无站内消息'"
+                  description="新的待办、会议和系统通知会出现在这里。"
+                  size="sm"
+                  variant="inline"
+                />
 
                 <article
                   v-for="message in sysMessages"
@@ -874,11 +920,36 @@ onBeforeUnmount(() => {
             </template>
 
             <template v-else>
-              <p v-if="pendingError" class="notification-error">{{ pendingError }}</p>
-
-              <div class="notification-list">
-                <p v-if="isPendingLoading" class="notification-empty">正在加载待接受待办…</p>
-                <p v-else-if="!pendingTodos.length" class="notification-empty">暂无待接受待办</p>
+              <div class="notification-list" data-tour-target="notification-list">
+                <AppStateBlock
+                  v-if="pendingError"
+                  class="notification-state"
+                  type="error"
+                  title="待接受待办加载失败"
+                  :description="pendingError"
+                  action-label="重新加载"
+                  size="sm"
+                  variant="inline"
+                  @action="refreshPendingTodos"
+                />
+                <AppStateBlock
+                  v-else-if="isPendingLoading"
+                  class="notification-state"
+                  type="loading"
+                  title="正在加载待接受待办"
+                  description="别人派发给你的待办同步后会自动展示。"
+                  size="sm"
+                  variant="inline"
+                />
+                <AppStateBlock
+                  v-else-if="!pendingTodos.length"
+                  class="notification-state"
+                  type="empty"
+                  title="暂无待接受待办"
+                  description="需要你确认的协作待办会出现在这里。"
+                  size="sm"
+                  variant="inline"
+                />
 
                 <article
                   v-for="todo in pendingTodos"
@@ -977,6 +1048,15 @@ onBeforeUnmount(() => {
           </section>
         </Transition>
       </div>
+      <button
+        class="icon-button"
+        type="button"
+        aria-label="打开新手引导"
+        title="打开新手引导"
+        @click="openOnboardingTour"
+      >
+        <IconSparkles />
+      </button>
       <button class="icon-button" type="button" aria-label="设置">
         <IconSettings />
       </button>
@@ -1020,12 +1100,16 @@ onBeforeUnmount(() => {
             </header>
 
             <label class="glass-controller-field">
-              <span>模糊强度 <em>{{ glassSettings.blur }}px</em></span>
+              <span
+                >模糊强度 <em>{{ glassSettings.blur }}px</em></span
+              >
               <input v-model.number="glassSettings.blur" type="range" min="0" max="40" step="1" />
             </label>
 
             <label class="glass-controller-field">
-              <span>饱和度 <em>{{ glassSettings.saturate.toFixed(2) }}</em></span>
+              <span
+                >饱和度 <em>{{ glassSettings.saturate.toFixed(2) }}</em></span
+              >
               <input
                 v-model.number="glassSettings.saturate"
                 type="range"
@@ -1036,7 +1120,9 @@ onBeforeUnmount(() => {
             </label>
 
             <label class="glass-controller-field">
-              <span>底色透明度 <em>{{ glassSettings.baseOpacity.toFixed(2) }}</em></span>
+              <span
+                >底色透明度 <em>{{ glassSettings.baseOpacity.toFixed(2) }}</em></span
+              >
               <input
                 v-model.number="glassSettings.baseOpacity"
                 type="range"
@@ -1047,7 +1133,9 @@ onBeforeUnmount(() => {
             </label>
 
             <label class="glass-controller-field">
-              <span>高光强度 <em>{{ glassSettings.highlightOpacity.toFixed(2) }}</em></span>
+              <span
+                >高光强度 <em>{{ glassSettings.highlightOpacity.toFixed(2) }}</em></span
+              >
               <input
                 v-model.number="glassSettings.highlightOpacity"
                 type="range"
@@ -1058,7 +1146,9 @@ onBeforeUnmount(() => {
             </label>
 
             <label class="glass-controller-field">
-              <span>渐变起点 <em>{{ glassSettings.gradientStart.toFixed(2) }}</em></span>
+              <span
+                >渐变起点 <em>{{ glassSettings.gradientStart.toFixed(2) }}</em></span
+              >
               <input
                 v-model.number="glassSettings.gradientStart"
                 type="range"
@@ -1069,7 +1159,9 @@ onBeforeUnmount(() => {
             </label>
 
             <label class="glass-controller-field">
-              <span>渐变终点 <em>{{ glassSettings.gradientEnd.toFixed(2) }}</em></span>
+              <span
+                >渐变终点 <em>{{ glassSettings.gradientEnd.toFixed(2) }}</em></span
+              >
               <input
                 v-model.number="glassSettings.gradientEnd"
                 type="range"
@@ -1080,7 +1172,9 @@ onBeforeUnmount(() => {
             </label>
 
             <label class="glass-controller-field">
-              <span>边框透明度 <em>{{ glassSettings.borderOpacity.toFixed(2) }}</em></span>
+              <span
+                >边框透明度 <em>{{ glassSettings.borderOpacity.toFixed(2) }}</em></span
+              >
               <input
                 v-model.number="glassSettings.borderOpacity"
                 type="range"
@@ -1121,6 +1215,7 @@ onBeforeUnmount(() => {
             class="user-menu-panel"
             aria-label="个人中心"
           >
+            <span class="user-menu-panel__arrow" aria-hidden="true" />
             <header class="user-menu-panel__header">
               <img :src="avatarUrl" alt="" />
               <div>
@@ -1367,6 +1462,7 @@ onBeforeUnmount(() => {
 }
 
 .notification-panel {
+  --notification-arrow-center: 123px;
   position: absolute;
   top: calc(100% + 14px);
   right: -104px;
@@ -1383,16 +1479,27 @@ onBeforeUnmount(() => {
   z-index: 30;
 }
 
-.notification-panel::before {
+.notification-panel__arrow {
   position: absolute;
-  top: -7px;
-  right: 116px;
-  width: 14px;
-  height: 14px;
-  border-top: 1px solid rgba(226, 232, 240, 0.92);
-  border-left: 1px solid rgba(226, 232, 240, 0.92);
+  top: -11px;
+  right: calc(var(--notification-arrow-center) - 11px);
+  width: 22px;
+  height: 11px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.notification-panel__arrow::before {
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  width: 16px;
+  height: 16px;
+  border: 1px solid rgba(226, 232, 240, 0.92);
   background: rgba(255, 255, 255, 0.92);
-  transform: rotate(45deg);
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.82);
+  transform: translateX(-50%) rotate(45deg);
   content: '';
 }
 
@@ -1676,28 +1783,8 @@ onBeforeUnmount(() => {
   padding: 6px 8px;
 }
 
-.notification-error {
-  margin: 0 2px 8px;
-  border-radius: 12px;
-  background: rgba(254, 226, 226, 0.72);
-  color: #b91c1c;
-  font-size: 12px;
-  line-height: 1.45;
-  font-weight: 750;
-  padding: 8px 10px;
-}
-
-.notification-empty {
-  margin: 0;
-  border: 1px dashed rgba(226, 232, 240, 0.92);
-  border-radius: 14px;
-  background: rgba(248, 250, 252, 0.72);
-  color: #64748b;
-  font-size: 12px;
-  line-height: 1.5;
-  font-weight: 750;
-  padding: 18px 14px;
-  text-align: center;
+.notification-state {
+  flex: 0 0 auto;
 }
 
 .notification-item__actions,
@@ -1833,6 +1920,7 @@ onBeforeUnmount(() => {
 }
 
 .user-menu-panel {
+  --user-menu-arrow-center: 31px;
   position: absolute;
   top: calc(100% + 14px);
   right: 0;
@@ -1849,16 +1937,27 @@ onBeforeUnmount(() => {
   z-index: 30;
 }
 
-.user-menu-panel::before {
+.user-menu-panel__arrow {
   position: absolute;
-  top: -7px;
-  right: 24px;
-  width: 14px;
-  height: 14px;
-  border-top: 1px solid rgba(226, 232, 240, 0.92);
-  border-left: 1px solid rgba(226, 232, 240, 0.92);
+  top: -11px;
+  right: calc(var(--user-menu-arrow-center) - 11px);
+  width: 22px;
+  height: 11px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.user-menu-panel__arrow::before {
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  width: 16px;
+  height: 16px;
+  border: 1px solid rgba(226, 232, 240, 0.92);
   background: rgba(255, 255, 255, 0.92);
-  transform: rotate(45deg);
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.82);
+  transform: translateX(-50%) rotate(45deg);
   content: '';
 }
 
@@ -1996,12 +2095,9 @@ onBeforeUnmount(() => {
   }
 
   .notification-panel {
+    --notification-arrow-center: 151px;
     right: -132px;
     border-radius: 18px;
-  }
-
-  .notification-panel::before {
-    right: 144px;
   }
 
   .user-chip {

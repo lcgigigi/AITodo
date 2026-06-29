@@ -9,10 +9,10 @@ import IconPresentation from '~icons/lucide/presentation'
 import IconSendHorizontal from '~icons/lucide/send-horizontal'
 import IconSquareCheck from '~icons/lucide/square-check'
 import { routeConfig } from '@/config/route.config'
+import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
 import { useFeedbackStore } from '@/stores/feedback.store'
 import DayPreviewPanel from './DayPreviewPanel.vue'
 import type {
-  CalendarDay,
   CalendarEvent,
   CalendarEventStatus,
   CalendarSpecialDay,
@@ -43,6 +43,10 @@ type DayPreviewPanelExpose = {
   applyTypeFilter: (filter: TodoTypeFilter) => void
 }
 
+const emit = defineEmits<{
+  (event: 'switch-mode', mode: 'detail'): void
+}>()
+
 const now = ref(new Date())
 const selectedDate = ref(ymd(now.value))
 const currentMonth = ref(new Date(now.value.getFullYear(), now.value.getMonth(), 1))
@@ -62,16 +66,11 @@ const { glassStyle } = useDashboardGlassSettings()
 let clockTimer: ReturnType<typeof setInterval> | undefined
 let isConsumingDesktopTodoText = false
 
-const {
-  assignableUsers,
-  currentUser,
-  eventMap,
-  initializeDashboardTodos,
-  refreshTodos,
-} = useDashboardTodos({
-  getLoadRange: getActiveTodoLoadRange,
-  onUnauthorized: redirectToLogin,
-})
+const { assignableUsers, currentUser, eventMap, initializeDashboardTodos, refreshTodos } =
+  useDashboardTodos({
+    getLoadRange: getActiveTodoLoadRange,
+    onUnauthorized: redirectToLogin,
+  })
 
 onMounted(() => {
   clockTimer = setInterval(() => {
@@ -156,18 +155,6 @@ function ymd(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
-function getDaysInMonth(year: number, month: number) {
-  return new Date(year, month + 1, 0).getDate()
-}
-
-function getMonthGridCellCount(year: number, month: number) {
-  const start = new Date(year, month, 1)
-  const offset = (start.getDay() + 6) % 7
-  const dayCount = getDaysInMonth(year, month)
-  const rowCount = Math.ceil((offset + dayCount) / 7)
-  return rowCount * 7
-}
-
 const specialDayMap = computed(() => {
   const map = new Map<string, CalendarSpecialDay[]>()
   for (const item of specialDays) {
@@ -183,31 +170,6 @@ const specialDayMap = computed(() => {
 const todayDate = computed(() => ymd(now.value))
 const canSubmitHomeQuickTodo = computed(() => Boolean(homeQuickTodoText.value.trim()))
 const todayPreviewTasks = computed(() => [...todayEvents.value].sort(compareEvents))
-
-const days = computed<CalendarDay[]>(() => {
-  const result: CalendarDay[] = []
-  const year = currentMonth.value.getFullYear()
-  const month = currentMonth.value.getMonth()
-  const start = new Date(year, month, 1)
-  const offset = (start.getDay() + 6) % 7
-  const cursor = new Date(year, month, 1 - offset)
-  const cellCount = getMonthGridCellCount(year, month)
-
-  for (let i = 0; i < cellCount; i += 1) {
-    const date = ymd(cursor)
-    result.push({
-      date,
-      day: cursor.getDate(),
-      inMonth: cursor.getFullYear() === year && cursor.getMonth() === month,
-      isToday: date === todayDate.value,
-      specialDays: specialDayMap.value.get(date) ?? [],
-      events: eventMap.value.get(date) ?? [],
-    })
-    cursor.setDate(cursor.getDate() + 1)
-  }
-
-  return result
-})
 
 const selectedEvents = computed(() => eventMap.value.get(selectedDate.value) ?? [])
 const selectedSpecialDays = computed(() => specialDayMap.value.get(selectedDate.value) ?? [])
@@ -592,6 +554,7 @@ defineExpose({
           class="day-preview-popover"
           :style="glassStyle"
           aria-label="当天待办详情"
+          data-tour-target="todo-create-panel"
           @click.stop
           @pointerdown.stop
         >
@@ -619,7 +582,12 @@ defineExpose({
         </aside>
       </Transition>
 
-      <section class="home-main-panel" :style="glassStyle" aria-label="今日待办">
+      <section
+        class="home-main-panel"
+        :style="glassStyle"
+        aria-label="今日待办"
+        data-tour-target="today-panel"
+      >
         <header class="home-todo-calendar-header">
           <div class="home-todo-calendar-card">
             <div class="home-todo-calendar-left">
@@ -638,14 +606,20 @@ defineExpose({
               </div>
             </div>
             <div class="home-todo-calendar-actions">
-              <button type="button" class="home-todo-add-btn" @click.stop="openTodayAddTodo">
+              <button
+                type="button"
+                class="home-todo-add-btn"
+                data-tour-target="add-todo"
+                @click.stop="openTodayAddTodo"
+              >
                 <IconPlus aria-hidden="true" />
                 <span>新增待办</span>
               </button>
               <button
                 type="button"
                 class="home-todo-view-all"
-                @click.stop="openDayPreviewWithStatusFilter(todayDate, 'all')"
+                data-tour-target="detail-mode"
+                @click.stop="emit('switch-mode', 'detail')"
               >
                 <span>查看全部</span>
                 <IconChevronRight aria-hidden="true" />
@@ -702,7 +676,15 @@ defineExpose({
 
           <div class="home-todo-list-shell">
             <div class="home-todo-list" aria-label="今日待办列表">
-              <p v-if="!todayPreviewTasks.length" class="home-todo-empty">今日暂无待办</p>
+              <AppStateBlock
+                v-if="!todayPreviewTasks.length"
+                class="home-todo-empty-state"
+                type="empty"
+                title="今日暂无待办"
+                description="新增待办后会展示在这里。"
+                size="sm"
+                variant="inline"
+              />
               <article
                 v-for="task in todayPreviewTasks"
                 :key="task.id"
@@ -726,7 +708,11 @@ defineExpose({
               </article>
             </div>
 
-            <form class="home-todo-quick-create" @submit.prevent.stop="submitHomeQuickTodo">
+            <form
+              class="home-todo-quick-create"
+              data-tour-target="quick-create"
+              @submit.prevent.stop="submitHomeQuickTodo"
+            >
               <input
                 id="home-quick-todo"
                 v-model="homeQuickTodoText"
@@ -735,11 +721,7 @@ defineExpose({
                 aria-label="一句话新增"
                 placeholder="一句话新增待办..."
               />
-              <button
-                type="submit"
-                :disabled="!canSubmitHomeQuickTodo"
-                aria-label="解析并新增待办"
-              >
+              <button type="submit" :disabled="!canSubmitHomeQuickTodo" aria-label="解析并新增待办">
                 <IconSendHorizontal aria-hidden="true" />
               </button>
             </form>
@@ -1058,18 +1040,9 @@ defineExpose({
   height: 16px;
 }
 
-.home-todo-empty {
-  margin: 0;
+.home-todo-empty-state {
   flex: 1 1 auto;
   min-height: 0;
-  padding: 0 4px;
-  color: #8b99ae;
-  font-size: 13px;
-  font-weight: 800;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
 }
 
 .home-todo-item {

@@ -17,6 +17,7 @@ function selectTool(tool: DashboardTool) {
   emit('select', {
     routeName: tool.routeName,
     agentKey: tool.agentKey,
+    externalUrl: tool.externalUrl,
     isMore: tool.isMore,
   })
 }

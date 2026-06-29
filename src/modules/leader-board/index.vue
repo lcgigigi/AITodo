@@ -20,6 +20,13 @@ import IconSparkles from '~icons/lucide/sparkles'
 import IconTrendingUp from '~icons/lucide/trending-up'
 import IconTrophy from '~icons/lucide/trophy'
 import IconUserRound from '~icons/lucide/user-round'
+import {
+  loadAdminTokenDashboard,
+  type AdminTokenUsageDashboard,
+  type AdminTokenUsageModule,
+  type TokenUsagePeriodCode,
+} from '@/modules/token-usage/token-usage.service'
+import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
 
 defineOptions({
   name: 'LeaderBoardPage',
@@ -32,7 +39,7 @@ interface DepartmentUsage {
   tokens: string
   value: number
   share: number
-  change: number
+  change?: number
   color: string
   icon: Component
   trend: number[]
@@ -44,7 +51,7 @@ interface AppUsage {
   tokens: string
   value: number
   share: number
-  change: number
+  change?: number
   color: string
 }
 
@@ -74,6 +81,37 @@ const selectedDepartmentMode = ref('按部门')
 const selectedAppMode = ref('按应用')
 const selectedDepartmentPeriod = ref('周')
 const selectedAppPeriod = ref('周')
+const tokenDashboard = ref<AdminTokenUsageDashboard | null>(null)
+const isDashboardLoading = ref(true)
+const dashboardError = ref('')
+
+const periodCodeByMode: Record<string, TokenUsagePeriodCode> = {
+  日: 'today',
+  周: 'last7Days',
+  月: 'last30Days',
+}
+
+const periodNameByCode: Record<string, string> = {
+  today: '今天',
+  last7Days: '近7天',
+  last30Days: '近30天',
+}
+
+const departmentColors = ['#1273f8', '#7a5cff', '#1fb7e8', '#18bf9e', '#ff9418', '#6a6cff']
+const departmentIcons = [
+  IconCode2,
+  IconBox,
+  IconMegaphone,
+  IconHeadphones,
+  IconBriefcaseBusiness,
+  IconUserRound,
+]
+const moduleColors: Record<string, string> = {
+  codeAssist: '#1273f8',
+  libaiQa: '#8656f5',
+  fileAnalysis: '#20aaf3',
+  smartTodo: '#1fc6bd',
+}
 
 const BOARD_DESIGN_WIDTH = 2000
 const BOARD_DESIGN_HEIGHT = 1125
@@ -88,7 +126,7 @@ const departmentSparklineRefs = ref<Record<string, HTMLElement | null>>({})
 const chartInstances = new Set<echarts.ECharts>()
 let resizeObserver: ResizeObserver | null = null
 
-let currentSimulatedTotal = 0
+let currentDisplayedTotal = 0
 let trendLiveTimer: number | null = null
 const FLIP_HALF_MS = 220
 const FLIP_OVERLAP_MS = 90
@@ -171,39 +209,8 @@ const boardCanvasStyle = computed(() => ({
   transform: `translate3d(${boardOffsetX.value}px, ${boardOffsetY.value}px, 0) scale(${boardScale.value})`,
 }))
 
-const hourlyTimeLabels = Array.from(
-  { length: 25 },
-  (_, index) => `${String(index).padStart(2, '0')}:00`,
-)
-const totalTrend = [
-  0, 1.55, 2.95, 3.28, 4.45, 4.62, 6.22, 6.08, 5.82, 7.34, 7.95, 7.82, 7.45, 8.38, 8.05, 8.21, 8.78,
-  8.44, 8.02, 8.02, 8.18, 8.22, 8.52, 9.22, 10.05,
-]
-const dayTimeBuckets = [
-  { label: '0-8', hour: 8 },
-  { label: '10', hour: 10 },
-  { label: '12', hour: 12 },
-  { label: '14', hour: 14 },
-  { label: '16', hour: 15 },
-  { label: '18', hour: 18 },
-  { label: '20', hour: 20 },
-  { label: '22', hour: 22 },
-  { label: '22-24', hour: 24 },
-]
-
-function pickDayBucketTrend(hourlyTrend: number[]) {
-  return dayTimeBuckets.map(({ hour }) => hourlyTrend[hour] ?? 0)
-}
-
 function clampTrendIndex(index: number, length: number) {
   return Math.min(Math.max(index, 0), length - 1)
-}
-
-function getCurrentDayBucketIndex(hour = new Date().getHours()) {
-  if (hour < 8) return 0
-  if (hour >= 22) return dayTimeBuckets.length - 1
-
-  return Math.floor((hour - 8) / 2) + 1
 }
 
 function createTrendDataset(
@@ -222,213 +229,257 @@ function createTrendDataset(
   }
 }
 
-const hourlyTrendDataset = computed(() =>
-  createTrendDataset(hourlyTimeLabels, totalTrend, new Date().getHours()),
+function getPeriodCode(mode: string): TokenUsagePeriodCode {
+  return periodCodeByMode[mode] ?? 'last30Days'
+}
+
+function getPeriodName(periodCode: TokenUsagePeriodCode) {
+  return periodNameByCode[periodCode] ?? String(periodCode)
+}
+
+function getPeriodTokenUsage(module: AdminTokenUsageModule, periodCode: TokenUsagePeriodCode) {
+  return module.periodList.find((period) => period.periodCode === periodCode)?.tokenUsage ?? 0
+}
+
+function getPeriodDayCount(periodCode: TokenUsagePeriodCode) {
+  if (periodCode === 'today') return 1
+  if (periodCode === 'last7Days') return 7
+  return 30
+}
+
+function formatDateLabel(date: string) {
+  const [, month, day] = date.split('-')
+  return month && day ? `${month}-${day}` : date
+}
+
+function formatTokenNumber(value: number) {
+  return Math.round(value).toLocaleString('zh-CN')
+}
+
+function formatTokenCompact(value: number) {
+  return new Intl.NumberFormat('zh-CN', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(value)
+}
+
+function getSelectedTrendDates(periodCode: TokenUsagePeriodCode) {
+  const dates = new Set<string>()
+
+  for (const dept of tokenDashboard.value?.deptList ?? []) {
+    for (const module of dept.moduleList) {
+      for (const point of module.dailyList) {
+        dates.add(point.usageDate)
+      }
+    }
+  }
+
+  return [...dates].sort().slice(-getPeriodDayCount(periodCode))
+}
+
+function aggregateModuleDailyList(moduleList: AdminTokenUsageModule[], selectedDates: Set<string>) {
+  return [...selectedDates].map((date) =>
+    moduleList.reduce((sum, module) => {
+      const point = module.dailyList.find((item) => item.usageDate === date)
+      return sum + (point?.tokenUsage ?? 0)
+    }, 0),
+  )
+}
+
+const trendDataset = computed(() => {
+  const periodCode = getPeriodCode(selectedTimeMode.value)
+  const selectedDates = getSelectedTrendDates(periodCode)
+  const selectedDateSet = new Set(selectedDates)
+  const totals = selectedDates.map((date) =>
+    (tokenDashboard.value?.deptList ?? []).reduce((deptSum, dept) => {
+      const moduleTotal = dept.moduleList.reduce((moduleSum, module) => {
+        const point = module.dailyList.find((item) => item.usageDate === date)
+        return moduleSum + (point?.tokenUsage ?? 0)
+      }, 0)
+
+      return deptSum + moduleTotal
+    }, 0),
+  )
+
+  if (totals.length) {
+    return createTrendDataset(selectedDates.map(formatDateLabel), totals, selectedDates.length - 1)
+  }
+
+  const fallbackTotal = (tokenDashboard.value?.deptList ?? []).reduce(
+    (sum, dept) =>
+      sum +
+      dept.moduleList.reduce(
+        (moduleSum, module) => moduleSum + getPeriodTokenUsage(module, periodCode),
+        0,
+      ),
+    0,
+  )
+
+  return createTrendDataset(
+    [getPeriodName(periodCode)],
+    [fallbackTotal],
+    selectedDateSet.size ? selectedDateSet.size - 1 : 0,
+  )
+})
+
+const selectedDepartmentPeriodCode = computed(() => getPeriodCode(selectedDepartmentPeriod.value))
+const selectedAppPeriodCode = computed(() => getPeriodCode(selectedAppPeriod.value))
+
+const departments = computed<DepartmentUsage[]>(() => {
+  const periodCode = selectedDepartmentPeriodCode.value
+  const total = (tokenDashboard.value?.deptList ?? []).reduce(
+    (sum, dept) =>
+      sum +
+      dept.moduleList.reduce(
+        (moduleSum, module) => moduleSum + getPeriodTokenUsage(module, periodCode),
+        0,
+      ),
+    0,
+  )
+  const selectedDates = new Set(getSelectedTrendDates(periodCode))
+
+  return (tokenDashboard.value?.deptList ?? [])
+    .map((dept, index) => {
+      const value = dept.moduleList.reduce(
+        (sum, module) => sum + getPeriodTokenUsage(module, periodCode),
+        0,
+      )
+      const color = departmentColors[index % departmentColors.length]
+
+      return {
+        id: dept.deptId || dept.deptName,
+        rank: index + 1,
+        name: dept.deptName,
+        tokens: formatTokenCompact(value),
+        value,
+        share: total > 0 ? (value / total) * 100 : 0,
+        color,
+        icon: departmentIcons[index % departmentIcons.length],
+        trend: aggregateModuleDailyList(dept.moduleList, selectedDates),
+      }
+    })
+    .sort((a, b) => b.value - a.value)
+    .map((department, index) => ({
+      ...department,
+      rank: index + 1,
+    }))
+})
+
+const appUsages = computed<AppUsage[]>(() => {
+  const periodCode = selectedAppPeriodCode.value
+  const moduleMap = new Map<string, { name: string; value: number }>()
+
+  for (const dept of tokenDashboard.value?.deptList ?? []) {
+    for (const module of dept.moduleList) {
+      const key = module.moduleCode || module.moduleName
+      const current = moduleMap.get(key) ?? { name: module.moduleName, value: 0 }
+      current.value += getPeriodTokenUsage(module, periodCode)
+      moduleMap.set(key, current)
+    }
+  }
+
+  const total = [...moduleMap.values()].reduce((sum, module) => sum + module.value, 0)
+
+  return [...moduleMap.entries()]
+    .map(([moduleCode, module]) => ({
+      id: moduleCode,
+      name: module.name,
+      tokens: formatTokenCompact(module.value),
+      value: module.value,
+      share: total > 0 ? (module.value / total) * 100 : 0,
+      color: moduleColors[moduleCode] ?? '#8196bf',
+    }))
+    .sort((a, b) => b.value - a.value)
+})
+
+const departmentStats = computed<StatCard[]>(() => {
+  const topDepartment = departments.value[0]
+
+  return [
+    {
+      id: 'total',
+      label: '总部门数',
+      value: formatTokenNumber(tokenDashboard.value?.deptList.length ?? 0),
+      meta: '二级部门',
+      icon: IconBuilding2,
+      tone: 'blue',
+    },
+    {
+      id: 'top',
+      label: '最高部门',
+      value: topDepartment?.name ?? '--',
+      meta: topDepartment?.tokens ?? '--',
+      icon: IconTrophy,
+      tone: 'blue',
+    },
+    {
+      id: 'usage',
+      label: '部门总消耗',
+      value: formatTokenCompact(departments.value.reduce((sum, dept) => sum + dept.value, 0)),
+      meta: getPeriodName(selectedDepartmentPeriodCode.value),
+      icon: IconTrendingUp,
+      tone: 'blue',
+    },
+  ]
+})
+
+const appStats = computed<StatCard[]>(() => {
+  const topApp = appUsages.value[0]
+
+  return [
+    {
+      id: 'active',
+      label: '活跃模块数',
+      value: formatTokenNumber(appUsages.value.length),
+      meta: getPeriodName(selectedAppPeriodCode.value),
+      icon: IconGrid2x2,
+      tone: 'blue',
+    },
+    {
+      id: 'top',
+      label: '最高消耗模块',
+      value: topApp?.name ?? '--',
+      meta: topApp?.tokens ?? '--',
+      icon: IconFlame,
+      tone: 'orange',
+    },
+    {
+      id: 'total',
+      label: '总消耗',
+      value: formatTokenCompact(appUsages.value.reduce((sum, app) => sum + app.value, 0)),
+      meta: getPeriodName(selectedAppPeriodCode.value),
+      icon: IconBlocks,
+      tone: 'purple',
+    },
+  ]
+})
+
+const maxDepartmentValue = computed(() =>
+  Math.max(...departments.value.map((dept) => dept.value), 1),
 )
-
-const dayTrendDataset = computed(() =>
-  createTrendDataset(
-    dayTimeBuckets.map(({ label }) => label),
-    pickDayBucketTrend(totalTrend),
-    getCurrentDayBucketIndex(),
-  ),
-)
-
-const trendDataset = computed(() =>
-  selectedTimeMode.value === '日' ? dayTrendDataset.value : hourlyTrendDataset.value,
-)
-
-const departments: DepartmentUsage[] = [
-  {
-    id: 'rd',
-    rank: 1,
-    name: '研发中心',
-    tokens: '8.42B',
-    value: 8.42,
-    share: 32.4,
-    change: 18.3,
-    color: '#1273f8',
-    icon: IconCode2,
-    trend: [42, 46, 43, 51, 48, 56, 50, 61, 54, 63, 58, 55, 60, 53, 57, 66, 61, 68],
-  },
-  {
-    id: 'product',
-    rank: 2,
-    name: '产品中心',
-    tokens: '5.61B',
-    value: 5.61,
-    share: 21.6,
-    change: 12.7,
-    color: '#7a5cff',
-    icon: IconBox,
-    trend: [30, 34, 32, 38, 35, 42, 36, 45, 40, 48, 43, 51, 44, 39, 47, 42, 50, 46],
-  },
-  {
-    id: 'marketing',
-    rank: 3,
-    name: '市场运营',
-    tokens: '4.23B',
-    value: 4.23,
-    share: 16.3,
-    change: 9.8,
-    color: '#1fb7e8',
-    icon: IconMegaphone,
-    trend: [26, 29, 27, 34, 31, 38, 35, 42, 36, 40, 34, 37, 33, 39, 44, 41, 47, 43],
-  },
-  {
-    id: 'support',
-    rank: 4,
-    name: '客服中心',
-    tokens: '2.98B',
-    value: 2.98,
-    share: 11.5,
-    change: 6.2,
-    color: '#18bf9e',
-    icon: IconHeadphones,
-    trend: [22, 24, 23, 28, 25, 30, 27, 32, 29, 35, 31, 37, 33, 30, 34, 39, 35, 40],
-  },
-  {
-    id: 'finance',
-    rank: 5,
-    name: '行政财务',
-    tokens: '1.72B',
-    value: 1.72,
-    share: 6.6,
-    change: -2.1,
-    color: '#ff9418',
-    icon: IconBriefcaseBusiness,
-    trend: [18, 21, 19, 22, 20, 24, 23, 26, 22, 25, 27, 24, 26, 23, 25, 28, 24, 27],
-  },
-  {
-    id: 'hr',
-    rank: 6,
-    name: '人力资源',
-    tokens: '1.04B',
-    value: 1.04,
-    share: 4.0,
-    change: 3.4,
-    color: '#6a6cff',
-    icon: IconUserRound,
-    trend: [15, 17, 16, 21, 19, 23, 18, 22, 20, 24, 19, 21, 18, 20, 23, 21, 25, 22],
-  },
-]
-
-const appUsages: AppUsage[] = [
-  {
-    id: 'qa',
-    name: '智能问答',
-    tokens: '5.63B',
-    value: 5.63,
-    share: 32.3,
-    change: 18.9,
-    color: '#1273f8',
-  },
-  {
-    id: 'doc',
-    name: '文档分析',
-    tokens: '3.85B',
-    value: 3.85,
-    share: 22.1,
-    change: 13.4,
-    color: '#8656f5',
-  },
-  {
-    id: 'content',
-    name: '内容生成',
-    tokens: '3.09B',
-    value: 3.09,
-    share: 17.8,
-    change: 9.6,
-    color: '#20aaf3',
-  },
-  {
-    id: 'data',
-    name: '数据分析',
-    tokens: '2.19B',
-    value: 2.19,
-    share: 12.6,
-    change: 6.8,
-    color: '#1fc6bd',
-  },
-  {
-    id: 'translate',
-    name: '翻译服务',
-    tokens: '1.28B',
-    value: 1.28,
-    share: 7.3,
-    change: -1.6,
-    color: '#ff8a00',
-  },
-  {
-    id: 'workflow',
-    name: '工作流助手',
-    tokens: '1.36B',
-    value: 1.36,
-    share: 7.8,
-    change: 4.7,
-    color: '#8196bf',
-  },
-]
-
-const departmentStats: StatCard[] = [
-  {
-    id: 'total',
-    label: '总部门数',
-    value: '6',
-    delta: '20%',
-    meta: '较前一周',
-    icon: IconBuilding2,
-    tone: 'blue',
-  },
-  {
-    id: 'top',
-    label: '本周最高部门',
-    value: '研发中心',
-    meta: '8.42B',
-    icon: IconTrophy,
-    tone: 'blue',
-  },
-  {
-    id: 'growth',
-    label: '环比增长',
-    value: '18.6%',
-    meta: '较前一周',
-    icon: IconTrendingUp,
-    tone: 'blue',
-  },
-]
-
-const appStats: StatCard[] = [
-  {
-    id: 'active',
-    label: '活跃应用数',
-    value: '12',
-    delta: '2',
-    meta: '较前一周',
-    icon: IconGrid2x2,
-    tone: 'blue',
-  },
-  {
-    id: 'top',
-    label: '最高消耗应用',
-    value: '智能问答',
-    meta: '5.63B',
-    icon: IconFlame,
-    tone: 'orange',
-  },
-  {
-    id: 'cost',
-    label: '平均调用成本',
-    value: '¥0.012',
-    delta: '8.7%',
-    meta: '较前一周',
-    icon: IconBlocks,
-    tone: 'purple',
-  },
-]
-
-const maxDepartmentValue = Math.max(...departments.map((department) => department.value))
-const maxAppValue = Math.max(...appUsages.map((app) => app.value))
+const maxAppValue = computed(() => Math.max(...appUsages.value.map((app) => app.value), 1))
+const hasDashboardContent = computed(() => Boolean(tokenDashboard.value?.deptList.length))
+const dashboardStateType = computed<'loading' | 'empty' | 'error' | null>(() => {
+  if (isDashboardLoading.value && !hasDashboardContent.value) return 'loading'
+  if (dashboardError.value) return 'error'
+  if (!hasDashboardContent.value) return 'empty'
+  return null
+})
+const dashboardStateTitle = computed(() => {
+  if (dashboardStateType.value === 'loading') return '正在加载 Token 看板数据'
+  if (dashboardStateType.value === 'error') return 'Token 看板数据未能加载'
+  return '暂无 Token 看板数据'
+})
+const dashboardStateDescription = computed(() => {
+  if (dashboardStateType.value === 'loading') return '正在同步部门与模块维度的消耗数据。'
+  if (dashboardStateType.value === 'error') return dashboardError.value
+  return '当前筛选范围内还没有可展示的消耗数据。'
+})
+const dashboardStateActionLabel = computed(() => {
+  if (dashboardStateType.value === 'error') return '重新加载'
+  if (dashboardStateType.value === 'empty') return '刷新数据'
+  return ''
+})
 const chartTextStyle = {
   color: '#526b9f',
   fontFamily:
@@ -452,7 +503,7 @@ function getChart(el: HTMLElement | null) {
 }
 
 function formatTrendAxis(value: number) {
-  return value === 0 ? '0' : `${value}B`
+  return value === 0 ? '0' : formatTokenCompact(value)
 }
 
 function makeAreaGradient(color: string) {
@@ -463,7 +514,7 @@ function makeAreaGradient(color: string) {
 }
 
 function getProgressWidth(value: number, maxValue: number) {
-  return `${Math.max(8, (value / maxValue) * 100)}%`
+  return `${Math.max(8, (value / Math.max(maxValue, 1)) * 100)}%`
 }
 
 function showDefaultTrendTip(chart: echarts.ECharts) {
@@ -490,8 +541,8 @@ function renderTrendChart() {
   if (!chart) return
 
   const dataset = trendDataset.value
-  const xAxisLabelInterval =
-    selectedTimeMode.value === '日' ? 0 : (index: number) => index % 4 === 0
+  const xAxisLabelInterval = dataset.labels.length <= 8 ? 0 : (index: number) => index % 4 === 0
+  const maxTrendValue = Math.max(...dataset.total, 1)
 
   chart.setOption(
     {
@@ -532,8 +583,8 @@ function renderTrendChart() {
           }
 
           let totalVal = Number(point?.value ?? 0)
-          if (isCurrent && currentSimulatedTotal > 0) {
-            totalVal = currentSimulatedTotal
+          if (isCurrent && currentDisplayedTotal > 0) {
+            totalVal = currentDisplayedTotal
           }
 
           const timeId = isCurrent ? 'id="live-time-digits"' : ''
@@ -550,7 +601,7 @@ function renderTrendChart() {
               <div class="score-section">
                 <div class="score-label">Token 消耗总量</div>
                 <div class="score-digits" ${tokenId}>
-                  ${renderScoreboardText(totalVal.toFixed(3))}<span class="score-unit">B</span>
+                  ${renderScoreboardText(formatTokenNumber(totalVal))}<span class="score-unit">Tokens</span>
                 </div>
               </div>
             </div>
@@ -574,8 +625,7 @@ function renderTrendChart() {
       yAxis: {
         type: 'value',
         min: 0,
-        max: 10,
-        interval: 2,
+        max: Math.ceil(maxTrendValue * 1.15),
         axisLine: { show: true, lineStyle: { color: '#d7e4f8' } },
         axisTick: { show: false },
         axisLabel: {
@@ -632,14 +682,16 @@ function renderTrendChart() {
 function renderAppDonutChart() {
   const chart = getChart(appDonutChartRef.value)
   if (!chart) return
+  const apps = appUsages.value
+  const total = apps.reduce((sum, app) => sum + app.value, 0)
 
   chart.setOption(
     {
       animationDuration: 760,
-      color: appUsages.map((app) => app.color),
+      color: apps.map((app) => app.color),
       title: {
-        text: '总 Token\n17.40B',
-        subtext: '较前一周   ↑ 16.2%',
+        text: `总 Token\n${formatTokenCompact(total)}`,
+        subtext: getPeriodName(selectedAppPeriodCode.value),
         left: 'center',
         top: '39%',
         textStyle: {
@@ -664,7 +716,7 @@ function renderAppDonutChart() {
         textStyle: { ...chartTextStyle, color: '#0d1d4a', fontWeight: 700 },
         formatter: (params: unknown) => {
           const item = params as { name: string; value: number; percent: number }
-          return `${item.name}<br/>${Number(item.value).toFixed(2)}B<br/>占比 ${item.percent}%`
+          return `${item.name}<br/>${formatTokenNumber(Number(item.value))} Tokens<br/>占比 ${item.percent}%`
         },
       },
       series: [
@@ -686,7 +738,7 @@ function renderAppDonutChart() {
             scale: true,
             scaleSize: 5,
           },
-          data: appUsages.map((app) => ({
+          data: apps.map((app) => ({
             name: app.name,
             value: app.value,
           })),
@@ -700,22 +752,23 @@ function renderAppDonutChart() {
 function renderDepartmentSparkline(department: DepartmentUsage) {
   const chart = getChart(departmentSparklineRefs.value[department.id] ?? null)
   if (!chart) return
+  const trend = department.trend.length ? department.trend : [0]
 
   chart.setOption(
     {
       animationDuration: 520,
       grid: { top: 4, right: 2, bottom: 4, left: 2 },
-      xAxis: { type: 'category', show: false, data: department.trend.map((_, index) => index) },
+      xAxis: { type: 'category', show: false, data: trend.map((_, index) => index) },
       yAxis: {
         type: 'value',
         show: false,
-        min: Math.min(...department.trend) - 4,
-        max: Math.max(...department.trend) + 4,
+        min: Math.max(0, Math.min(...trend) * 0.9),
+        max: Math.max(...trend, 1) * 1.1,
       },
       series: [
         {
           type: 'line',
-          data: department.trend,
+          data: trend,
           smooth: true,
           symbol: 'none',
           lineStyle: { width: 2, color: department.color },
@@ -729,7 +782,7 @@ function renderDepartmentSparkline(department: DepartmentUsage) {
 function renderAllCharts() {
   renderTrendChart()
   renderAppDonutChart()
-  departments.forEach(renderDepartmentSparkline)
+  departments.value.forEach(renderDepartmentSparkline)
 }
 
 function resizeCharts() {
@@ -767,21 +820,47 @@ function observeChartContainers() {
   elements.forEach((el) => resizeObserver?.observe(el))
 }
 
+async function refreshTokenDashboard() {
+  isDashboardLoading.value = true
+  dashboardError.value = ''
+
+  try {
+    tokenDashboard.value = await loadAdminTokenDashboard()
+    await nextTick()
+    currentDisplayedTotal = trendDataset.value.selectedTotal || 0
+    renderAllCharts()
+    observeChartContainers()
+  } catch (error) {
+    tokenDashboard.value = null
+    dashboardError.value = error instanceof Error ? error.message : '加载 Token 看板失败'
+    await nextTick()
+    currentDisplayedTotal = 0
+    renderAllCharts()
+  } finally {
+    isDashboardLoading.value = false
+  }
+}
+
 watch(selectedTimeMode, () => {
-  currentSimulatedTotal = trendDataset.value.selectedTotal || 0
+  currentDisplayedTotal = trendDataset.value.selectedTotal || 0
   renderTrendChart()
+})
+
+watch([selectedDepartmentPeriod, selectedAppPeriod], async () => {
+  await nextTick()
+  renderAllCharts()
 })
 
 onMounted(async () => {
   updateBoardScale()
   await nextTick()
-  currentSimulatedTotal = trendDataset.value.selectedTotal || 8.21
+  currentDisplayedTotal = trendDataset.value.selectedTotal || 0
   renderAllCharts()
   observeChartContainers()
   window.addEventListener('resize', handleWindowResize, { passive: true })
+  void refreshTokenDashboard()
 
   trendLiveTimer = window.setInterval(() => {
-    currentSimulatedTotal += Math.random() * 0.005
     const timeEl = document.getElementById('live-time-digits')
     if (timeEl) {
       const now = new Date()
@@ -790,7 +869,7 @@ onMounted(async () => {
     }
     const tokenEl = document.getElementById('live-token-digits')
     if (tokenEl) {
-      updateScoreboardDigits(tokenEl, currentSimulatedTotal.toFixed(3))
+      updateScoreboardDigits(tokenEl, formatTokenNumber(currentDisplayedTotal))
     }
   }, 1000)
 })
@@ -832,22 +911,34 @@ onBeforeUnmount(() => {
           </div>
 
           <button class="toolbar-button compare-button" type="button">
-            <span>对比：前一天</span>
+            <span>数据口径：近30天</span>
             <IconChevronDown aria-hidden="true" />
           </button>
 
-          <button class="toolbar-button" type="button">
+          <button class="toolbar-button" type="button" disabled>
             <IconFilter aria-hidden="true" />
             <span>筛选</span>
           </button>
 
-          <button class="toolbar-button" type="button">
+          <button class="toolbar-button" type="button" disabled>
             <IconDownload aria-hidden="true" />
             <span>导出</span>
             <IconChevronDown aria-hidden="true" />
           </button>
         </div>
       </header>
+
+      <AppStateBlock
+        v-if="dashboardStateType"
+        class="leader-board-state"
+        :type="dashboardStateType"
+        :title="dashboardStateTitle"
+        :description="dashboardStateDescription"
+        :action-label="dashboardStateActionLabel"
+        size="sm"
+        variant="inline"
+        @action="refreshTokenDashboard"
+      />
 
       <section class="panel trend-panel" aria-label="Token 使用趋势">
         <div class="panel-header trend-header">
@@ -958,9 +1049,12 @@ onBeforeUnmount(() => {
                   </td>
                   <td class="numeric">{{ department.share.toFixed(1) }}%</td>
                   <td class="numeric">
-                    <span class="change-chip" :class="{ negative: department.change < 0 }">
-                      {{ department.change >= 0 ? '▲' : '▼' }}
-                      {{ Math.abs(department.change).toFixed(1) }}%
+                    <span class="change-chip" :class="{ negative: (department.change ?? 0) < 0 }">
+                      <template v-if="department.change !== undefined">
+                        {{ department.change >= 0 ? '▲' : '▼' }}
+                        {{ Math.abs(department.change).toFixed(1) }}%
+                      </template>
+                      <template v-else>--</template>
                     </span>
                   </td>
                   <td>
@@ -1076,8 +1170,12 @@ onBeforeUnmount(() => {
                     </td>
                     <td class="numeric">{{ app.share.toFixed(1) }}%</td>
                     <td class="numeric">
-                      <span class="change-chip" :class="{ negative: app.change < 0 }">
-                        {{ app.change >= 0 ? '▲' : '▼' }} {{ Math.abs(app.change).toFixed(1) }}%
+                      <span class="change-chip" :class="{ negative: (app.change ?? 0) < 0 }">
+                        <template v-if="app.change !== undefined">
+                          {{ app.change >= 0 ? '▲' : '▼' }}
+                          {{ Math.abs(app.change).toFixed(1) }}%
+                        </template>
+                        <template v-else>--</template>
                       </span>
                     </td>
                   </tr>
@@ -1086,8 +1184,8 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <button class="detail-link" type="button">
-            查看应用详情
+          <button class="detail-link" type="button" disabled>
+            模块明细来自接口汇总
             <IconArrowRight aria-hidden="true" />
           </button>
         </article>
@@ -1137,6 +1235,19 @@ onBeforeUnmount(() => {
   padding: 24px 34px 22px;
   transform-origin: top left;
   will-change: transform;
+}
+
+.leader-board-page .leader-board-state {
+  position: absolute;
+  z-index: 20;
+  top: 94px;
+  left: 50%;
+  width: min(460px, calc(100% - 68px));
+  min-height: 0;
+  transform: translateX(-50%);
+  border-style: solid;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 14px 34px rgba(29, 78, 141, 0.12);
 }
 
 .leader-board-page *,
