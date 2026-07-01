@@ -11,7 +11,10 @@ import IconSquareCheck from '~icons/lucide/square-check'
 import { routeConfig } from '@/config/route.config'
 import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
 import { useFeedbackStore } from '@/stores/feedback.store'
+import HomePanelToolDock from './components/HomePanelToolDock.vue'
+import DashboardTopBar from './DashboardTopBar.vue'
 import DayPreviewPanel from './DayPreviewPanel.vue'
+import { navigateDashboardTool, type DashboardToolTarget } from './dashboardTools'
 import type {
   CalendarEvent,
   CalendarEventStatus,
@@ -45,6 +48,7 @@ type DayPreviewPanelExpose = {
 
 const emit = defineEmits<{
   (event: 'switch-mode', mode: 'detail'): void
+  (event: 'start-onboarding'): void
 }>()
 
 const now = ref(new Date())
@@ -58,6 +62,7 @@ const presetCreateTime = ref('')
 const presetCreateKey = ref(0)
 const isDayPreviewFormDirty = ref(false)
 const dayPreviewPanelRef = ref<DayPreviewPanelExpose | null>(null)
+const homeMainPanelRef = ref<HTMLElement | null>(null)
 const calendarViewMode = ref<'month' | 'week'>('month')
 const route = useRoute()
 const router = useRouter()
@@ -219,6 +224,15 @@ const homeFooterDateLabel = computed(() => {
   const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()]
   return `${date.getMonth() + 1}月${date.getDate()}日 ${weekday}`
 })
+const homeCornerClockTime = computed(() => {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${pad(now.value.getHours())}:${pad(now.value.getMinutes())}`
+})
+const homeCornerClockDate = computed(() => {
+  const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][now.value.getDay()]
+  return `${now.value.getFullYear()}年${now.value.getMonth() + 1}月${now.value.getDate()}日 ${weekday}`
+})
+const homeCornerClockIso = computed(() => now.value.toISOString())
 const selectedDateLabel = computed(() => {
   const date = new Date(`${selectedDate.value}T12:00:00`)
   const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()]
@@ -473,6 +487,10 @@ function submitHomeQuickTodo() {
   }
 }
 
+function openHomePanelTool(tool: DashboardToolTarget) {
+  void navigateDashboardTool(router, tool)
+}
+
 async function createTodo(payload: CalendarTodoDraft) {
   try {
     await serviceCreateTodo(payload)
@@ -547,6 +565,11 @@ defineExpose({
 
 <template>
   <div class="calendar-workspace" @click="closeDayPreview">
+    <div class="home-corner-clock" aria-label="当前时间" aria-live="polite">
+      <time :datetime="homeCornerClockIso">{{ homeCornerClockTime }}</time>
+      <span class="home-corner-clock-date">{{ homeCornerClockDate }}</span>
+    </div>
+
     <section class="layout-column left-column" aria-label="日历与待办" @click.stop>
       <Transition name="day-preview-float">
         <aside
@@ -583,11 +606,21 @@ defineExpose({
       </Transition>
 
       <section
+        ref="homeMainPanelRef"
         class="home-main-panel"
         :style="glassStyle"
         aria-label="今日待办"
         data-tour-target="today-panel"
       >
+        <DashboardTopBar
+          embedded
+          :portal-target="homeMainPanelRef"
+          @calendar-refresh="refreshTodos"
+          @open-todo="openTodoFromNotification"
+          @start-onboarding="emit('start-onboarding')"
+          @switch-mode="emit('switch-mode', 'detail')"
+        />
+
         <header class="home-todo-calendar-header">
           <div class="home-todo-calendar-card">
             <div class="home-todo-calendar-left">
@@ -618,7 +651,6 @@ defineExpose({
               <button
                 type="button"
                 class="home-todo-view-all"
-                data-tour-target="detail-mode"
                 @click.stop="emit('switch-mode', 'detail')"
               >
                 <span>查看全部</span>
@@ -727,6 +759,8 @@ defineExpose({
             </form>
           </div>
         </div>
+
+        <HomePanelToolDock data-tour-target="tool-dock" @select="openHomePanelTool" />
       </section>
     </section>
   </div>
@@ -734,7 +768,7 @@ defineExpose({
 
 <style scoped>
 .calendar-workspace {
-  --home-module-height: clamp(440px, 50vh, 520px);
+  --home-module-height: clamp(560px, 62vh, 680px);
   --home-ink: #13203a;
   --home-muted: #6d7c93;
   position: relative;
@@ -745,6 +779,55 @@ defineExpose({
   padding: 0;
   display: block;
   overflow: hidden;
+}
+
+.home-corner-clock {
+  position: absolute;
+  top: clamp(28px, 3.6vh, 48px);
+  left: clamp(32px, 2.4vw, 48px);
+  z-index: 1;
+  pointer-events: none;
+  user-select: none;
+}
+
+.home-corner-clock time {
+  display: block;
+  font-family:
+    'SF Pro Display',
+    'SF Pro Text',
+    -apple-system,
+    BlinkMacSystemFont,
+    'Helvetica Neue',
+    'Segoe UI',
+    sans-serif;
+  font-size: clamp(72px, 7.2vw, 108px);
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: -0.05em;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.96);
+  text-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.36),
+    0 0 32px rgba(255, 255, 255, 0.16),
+    0 10px 28px rgba(15, 23, 42, 0.14);
+}
+
+.home-corner-clock-date {
+  display: block;
+  margin-top: 10px;
+  font-family:
+    'SF Pro Text',
+    -apple-system,
+    BlinkMacSystemFont,
+    'Helvetica Neue',
+    'Segoe UI',
+    sans-serif;
+  font-size: clamp(13px, 1vw, 15px);
+  line-height: 1.25;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.78);
+  text-shadow: 0 1px 10px rgba(15, 23, 42, 0.16);
 }
 
 .left-column {
@@ -780,11 +863,12 @@ defineExpose({
       rgba(238, 246, 255, var(--glass-gradient-end, 0.2))
     ),
     rgba(248, 252, 255, var(--glass-base-opacity, 0.18));
-  padding: 10px 10px 6px;
+  padding: 12px 12px 8px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   overflow: hidden;
+  isolation: isolate;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.72),
     0 20px 36px -30px rgba(18, 38, 72, 0.4);
@@ -1277,6 +1361,17 @@ defineExpose({
   .calendar-workspace {
     overflow: auto;
     padding: 16px;
+  }
+
+  .home-corner-clock {
+    position: relative;
+    top: auto;
+    left: auto;
+    margin: 4px 0 8px;
+  }
+
+  .home-corner-clock time {
+    font-size: clamp(56px, 16vw, 80px);
   }
 
   .left-column {

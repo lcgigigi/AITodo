@@ -25,6 +25,34 @@ export type DashboardToolTarget = Pick<
   'routeName' | 'agentKey' | 'externalUrl' | 'isMore'
 >
 
+export const homePanelTools: DashboardTool[] = [
+  {
+    name: '图文分析',
+    icon: IconImage,
+    tone: 'orange',
+    externalUrl: agentLaunchUrls['image-analysis'],
+  },
+  {
+    name: '力宝百问',
+    icon: IconMessageCircle,
+    tone: 'blue',
+    externalUrl: agentLaunchUrls['policy-qa'],
+  },
+  {
+    name: '会议纪要',
+    icon: IconFileText,
+    tone: 'green',
+    externalUrl: agentLaunchUrls['meeting-notes'],
+  },
+  {
+    name: 'PPT创作',
+    icon: IconPresentation,
+    tone: 'violet',
+    externalUrl: agentLaunchUrls['ppt-creator'],
+  },
+  { name: '更多工具', icon: IconCompass, tone: 'slate', isMore: true },
+]
+
 export const dashboardTools: DashboardTool[] = [
   {
     name: '图文分析',

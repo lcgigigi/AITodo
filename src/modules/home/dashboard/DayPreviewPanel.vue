@@ -53,6 +53,7 @@ const props = defineProps<{
   currentUser: CalendarUser
   assignableUsers: CalendarUser[]
   showClose?: boolean
+  formOnly?: boolean
   quickCreatePrompt?: string
   quickCreateKey?: number
   externalDraft?: CalendarTodoDraft | null
@@ -156,7 +157,10 @@ watch(
 watch(
   () => props.quickCreateKey,
   async () => {
-    if (!props.quickCreatePrompt?.trim()) return
+    if (!props.quickCreatePrompt?.trim()) {
+      if (props.formOnly) beginCreateForm()
+      return
+    }
 
     beginCreateForm()
     aiPrompt.value = props.quickCreatePrompt
@@ -435,6 +439,11 @@ async function beginEditForm(event: CalendarEvent) {
 }
 
 function requestCancelForm() {
+  if (props.formOnly) {
+    requestClosePanel()
+    return
+  }
+
   if (!confirmDiscardChanges(resetFormState)) return
   resetFormState()
 }
@@ -693,9 +702,9 @@ defineExpose({
         <button
           v-if="showClose"
           class="close-btn"
-          :class="{ 'is-back': isFormMode }"
+          :class="{ 'is-back': isFormMode && !formOnly }"
           type="button"
-          :aria-label="isFormMode ? '返回待办列表' : '关闭当天待办'"
+          :aria-label="isFormMode && !formOnly ? '返回待办列表' : '关闭'"
           @click="isFormMode ? requestCancelForm() : requestClosePanel()"
         >
           <IconArrowLeft v-if="isFormMode" aria-hidden="true" />

@@ -26,6 +26,11 @@ type CalendarWorkspaceExpose = {
   openTodoFromNotification: (payload: { id: string; date?: string }) => Promise<void>
 }
 
+type DetailedDashboardWorkspaceExpose = {
+  refreshTodos: () => Promise<void>
+  openTodoFromNotification: (payload: { id: string; date?: string }) => Promise<void>
+}
+
 type HomeViewMode = 'simple' | 'detail'
 
 type EmailProviderOption = {
@@ -66,6 +71,7 @@ const emailProviderOptions: EmailProviderOption[] = [
 ]
 
 const calendarWorkspaceRef = ref<CalendarWorkspaceExpose | null>(null)
+const detailedDashboardWorkspaceRef = ref<DetailedDashboardWorkspaceExpose | null>(null)
 const homeViewMode = ref<HomeViewMode>('simple')
 const selectedEmailProvider = ref<SmartTodoEmailProvider | ''>('')
 const isEmailProviderSaving = ref(false)
@@ -87,13 +93,18 @@ const shouldShowEmailProviderGate = computed(() => {
 })
 
 function handleCalendarRefresh() {
+  if (homeViewMode.value === 'detail') {
+    void detailedDashboardWorkspaceRef.value?.refreshTodos()
+    return
+  }
+
   void calendarWorkspaceRef.value?.refreshTodos()
 }
 
 async function handleOpenTodo(payload: { id: string; date?: string }) {
-  if (homeViewMode.value !== 'simple') {
-    homeViewMode.value = 'simple'
-    await nextTick()
+  if (homeViewMode.value === 'detail') {
+    await detailedDashboardWorkspaceRef.value?.openTodoFromNotification(payload)
+    return
   }
 
   await calendarWorkspaceRef.value?.openTodoFromNotification(payload)
@@ -142,7 +153,9 @@ async function confirmEmailProvider() {
 
     <main class="dashboard-shell">
       <DashboardTopBar
-        :show-tool-dock="homeViewMode === 'simple'"
+        v-if="homeViewMode === 'detail'"
+        hide-notifications
+        :show-tool-dock="false"
         @calendar-refresh="handleCalendarRefresh"
         @open-todo="handleOpenTodo"
         @start-onboarding="startOnboardingTour"
@@ -152,8 +165,13 @@ async function confirmEmailProvider() {
           v-if="homeViewMode === 'simple'"
           ref="calendarWorkspaceRef"
           @switch-mode="setHomeViewMode"
+          @start-onboarding="startOnboardingTour"
         />
-        <DetailedDashboardWorkspace v-else @switch-mode="setHomeViewMode" />
+        <DetailedDashboardWorkspace
+          v-else
+          ref="detailedDashboardWorkspaceRef"
+          @switch-mode="setHomeViewMode"
+        />
       </div>
     </main>
 
