@@ -77,6 +77,7 @@ const statusFilter = ref<TodoStatusFilter>('all')
 const typeFilter = ref<TodoTypeFilter>('all')
 const editingId = ref('')
 const aiPrompt = ref('')
+const aiParsedOriginalText = ref('')
 const isParsing = ref(false)
 const highlightedFields = ref<Set<ParsedHighlightField>>(new Set())
 const todoForm = ref<CalendarTodoForm>(createEmptyForm(props.date))
@@ -343,6 +344,7 @@ function resetFormState() {
   const nextForm = createEmptyForm(props.date)
   editingId.value = ''
   aiPrompt.value = ''
+  aiParsedOriginalText.value = ''
   isParsing.value = false
   todoForm.value = nextForm
   syncFormSnapshot(nextForm)
@@ -359,6 +361,7 @@ function beginCreateForm(overrides: Partial<CalendarTodoForm> = {}) {
   }
   editingId.value = ''
   aiPrompt.value = ''
+  aiParsedOriginalText.value = ''
   isParsing.value = false
   todoForm.value = nextForm
   syncFormSnapshot(nextForm)
@@ -411,6 +414,7 @@ async function beginViewForm(event: CalendarEvent) {
   const nextForm = createFormFromEvent(detailEvent)
   editingId.value = detailEvent.id
   aiPrompt.value = ''
+  aiParsedOriginalText.value = ''
   isParsing.value = false
   todoForm.value = nextForm
   syncFormSnapshot(nextForm)
@@ -431,6 +435,7 @@ async function beginEditForm(event: CalendarEvent) {
   const nextForm = createFormFromEvent(detailEvent)
   editingId.value = detailEvent.id
   aiPrompt.value = ''
+  aiParsedOriginalText.value = ''
   isParsing.value = false
   todoForm.value = nextForm
   syncFormSnapshot(nextForm)
@@ -482,6 +487,7 @@ async function parseTodoText() {
       endTime: parsed.endTime ?? todoForm.value.endTime,
     }
     todoForm.value = nextForm
+    aiParsedOriginalText.value = aiPrompt.value.trim()
     triggerParsedHighlights(previousForm, nextForm)
   } catch (error) {
     emit('notify', error instanceof Error ? error.message : 'AI 解析待办失败，请稍后重试', 'error')
@@ -640,6 +646,7 @@ function submitTodo() {
       time: payload.time || undefined,
       endTime: payload.mode === 'deadline' ? payload.endTime || undefined : undefined,
       title: payload.title,
+      aiPrompt: aiParsedOriginalText.value || undefined,
       owner: payload.owner,
       source: payload.source,
       assigneeId: payload.assigneeId,

@@ -27,7 +27,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   'calendar-refresh': []
-  'open-todo': [payload: { id: string; date?: string }]
+  'open-todo': [payload: { id: string; date?: string; source?: 'pending-inbox' }]
   close: []
   'update:open': [value: boolean]
 }>()
@@ -48,6 +48,7 @@ const notificationPanelPosition = ref<NotificationPanelPosition>({
   width: 400,
   arrowCenter: 123,
 })
+const notificationBackdropTop = ref(0)
 const { glassStyle } = useDashboardGlassSettings()
 
 const isScopedPortal = computed(() => props.usePortal && Boolean(props.portalTarget))
@@ -99,6 +100,7 @@ const {
   handleRejectTodo,
   handleOpenTodo,
   initializeNotifications,
+  refreshNotificationsOnOpen,
 } = useDashboardNotifications({
   onCalendarRefresh: () => emit('calendar-refresh'),
   onOpenTodo: (payload) => emit('open-todo', payload),
@@ -107,6 +109,13 @@ const {
 
 const isEmbedded = computed(() => props.layout === 'embedded')
 const isPopoverOpen = computed(() => (isEmbedded.value ? true : props.open))
+
+const scopedBackdropStyle = computed(() => {
+  if (!isScopedPortal.value) return undefined
+  return {
+    top: `${notificationBackdropTop.value}px`,
+  }
+})
 
 const notificationPanelStyle = computed(() => {
   if (isEmbedded.value) return undefined
@@ -146,11 +155,18 @@ function updateNotificationPanelPosition() {
 
   if (isScopedPortal.value && props.portalTarget) {
     const containerRect = props.portalTarget.getBoundingClientRect()
+    const topbar = props.portalTarget.querySelector('.dashboard-topbar.is-embedded')
+    const topbarBottom =
+      topbar instanceof HTMLElement
+        ? Math.max(0, topbar.getBoundingClientRect().bottom - containerRect.top)
+        : 56
+    notificationBackdropTop.value = topbarBottom
+
     const bellRightOffset = Math.max(padding, containerRect.right - anchorRect.right)
     const right = bellRightOffset
     const maxWidthAtAnchor = containerRect.width - right - padding
     const panelWidth = Math.min(400, containerRect.width - padding * 2, maxWidthAtAnchor)
-    const top = Math.max(padding, anchorRect.bottom - containerRect.top + 10)
+    const top = Math.max(topbarBottom + 4, anchorRect.bottom - containerRect.top + 6)
     const panelRightAbs = containerRect.right - right
     const bellCenterX = anchorRect.left + anchorRect.width / 2
     const arrowCenter = Math.max(28, Math.min(panelWidth - 28, panelRightAbs - bellCenterX))
@@ -181,15 +197,18 @@ async function togglePanel() {
 
   if (!props.open) {
     if (props.usePortal) updateNotificationPanelPosition()
-    await initializeNotifications()
+    emit('update:open', true)
+
+    if (props.usePortal) {
+      await nextTick()
+      updateNotificationPanelPosition()
+    }
+
+    void refreshNotificationsOnOpen()
+    return
   }
 
-  emit('update:open', !props.open)
-
-  if (props.usePortal && !props.open) {
-    await nextTick()
-    updateNotificationPanelPosition()
-  }
+  emit('update:open', false)
 }
 
 function handleDocumentPointerDown(event: PointerEvent) {
@@ -197,7 +216,8 @@ function handleDocumentPointerDown(event: PointerEvent) {
 
   const target = event.target as Node
   const insideNotification =
-    notificationPanelRef.value?.contains(target) || notificationPanelPortalRef.value?.contains(target)
+    notificationPanelRef.value?.contains(target) ||
+    notificationPanelPortalRef.value?.contains(target)
 
   if (!insideNotification) {
     closePanel()
@@ -243,6 +263,7 @@ watch(
 defineExpose({
   unreadNotificationCount,
   updateNotificationPanelPosition,
+  refreshPendingTodos,
 })
 </script>
 
@@ -253,6 +274,7 @@ defineExpose({
     :class="{
       'is-embedded': isEmbedded,
       'is-popover': !isEmbedded,
+      'is-open': !isEmbedded && open,
     }"
   >
     <button
@@ -266,9 +288,7 @@ defineExpose({
       @click="togglePanel"
     >
       <IconBell />
-      <span v-if="unreadNotificationCount">{{
-        unreadNotificationCount
-      }}</span>
+      <span v-if="unreadNotificationCount">{{ unreadNotificationCount }}</span>
     </button>
 
     <Teleport :to="teleportTarget" :disabled="!usePortal">
@@ -278,6 +298,7 @@ defineExpose({
           type="button"
           class="notification-backdrop"
           :class="{ 'is-scoped': isScopedPortal }"
+          :style="scopedBackdropStyle"
           aria-label="关闭消息通知"
           @click="closePanel"
         />
@@ -305,20 +326,14 @@ defineExpose({
           <header class="notification-panel__header">
             <div>
               <strong>消息中心</strong>
-              <span
-                >{{ sysMessageSummary }} · 待处理
-                {{ pendingTodos.length }}</span
-              >
+              <span>{{ sysMessageSummary }} · 待处理 {{ pendingTodos.length }}</span>
             </div>
             <button
               v-if="activeNotificationTab === 'sys-message'"
               type="button"
               aria-label="全部标记已读"
               title="全部标记已读"
-              :disabled="
-                unreadSysMessageCount === 0 ||
-                processingSysMessageId === 'all'
-              "
+              :disabled="unreadSysMessageCount === 0 || processingSysMessageId === 'all'"
               @click="handleMarkAllSysMessagesRead()"
             >
               <IconCheckCheck />
@@ -343,22 +358,22 @@ defineExpose({
             <button
               type="button"
               role="tab"
-              :aria-selected="activeNotificationTab === 'sys-message'"
-              :class="{ active: activeNotificationTab === 'sys-message' }"
-              @click="setNotificationTab('sys-message')"
-            >
-              站内消息
-              <span>{{ unreadSysMessageCount }}</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
               :aria-selected="activeNotificationTab === 'pending-todo'"
               :class="{ active: activeNotificationTab === 'pending-todo' }"
               @click="setNotificationTab('pending-todo')"
             >
               待接受待办
               <span>{{ pendingTodos.length }}</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="activeNotificationTab === 'sys-message'"
+              :class="{ active: activeNotificationTab === 'sys-message' }"
+              @click="setNotificationTab('sys-message')"
+            >
+              站内消息
+              <span>{{ unreadSysMessageCount }}</span>
             </button>
           </div>
 
@@ -405,9 +420,7 @@ defineExpose({
                 v-else-if="!sysMessages.length"
                 class="notification-state"
                 type="empty"
-                :title="
-                  sysMessageFilter === 'unread' ? '暂无未读消息' : '暂无站内消息'
-                "
+                :title="sysMessageFilter === 'unread' ? '暂无未读消息' : '暂无站内消息'"
                 description="新的待办、会议和系统通知会出现在这里。"
                 size="sm"
                 variant="inline"
@@ -444,9 +457,7 @@ defineExpose({
                       @click="handleOpenSysMessage(message)"
                     >
                       <IconExternalLink aria-hidden="true" />
-                      <span>{{
-                        processingSysMessageId === message.id ? '打开中…' : '查看'
-                      }}</span>
+                      <span>{{ processingSysMessageId === message.id ? '打开中…' : '查看' }}</span>
                     </button>
                     <button
                       v-if="message.msgStatus === 0"
@@ -518,7 +529,12 @@ defineExpose({
               <article
                 v-for="todo in pendingTodos"
                 :key="todo.id"
-                class="notification-item is-unread"
+                class="notification-item is-unread is-clickable"
+                role="button"
+                tabindex="0"
+                @click="handleOpenTodo(todo)"
+                @keydown.enter="handleOpenTodo(todo)"
+                @keydown.space.prevent="handleOpenTodo(todo)"
               >
                 <span class="notification-item__marker is-amber" aria-hidden="true" />
                 <div class="notification-item__content">
@@ -531,7 +547,7 @@ defineExpose({
                     <span>待接受</span>
                   </div>
 
-                  <div class="notification-item__actions">
+                  <div class="notification-item__actions" @click.stop>
                     <template v-if="isPendingConfirmOnly(todo)">
                       <button
                         type="button"
@@ -550,8 +566,7 @@ defineExpose({
                         @click="handleAcceptTodo(todo.id)"
                       >
                         {{
-                          processingId === todo.id &&
-                          activeActionMode !== 'reject'
+                          processingId === todo.id && activeActionMode !== 'reject'
                             ? '处理中…'
                             : '接受'
                         }}
@@ -564,7 +579,11 @@ defineExpose({
                       >
                         拒绝
                       </button>
-                      <button type="button" class="action-btn is-view" @click="handleOpenTodo(todo)">
+                      <button
+                        type="button"
+                        class="action-btn is-view"
+                        @click="handleOpenTodo(todo)"
+                      >
                         查看
                       </button>
                     </template>
@@ -577,6 +596,7 @@ defineExpose({
                       activeActionMode === 'reject'
                     "
                     class="notification-item__form"
+                    @click.stop
                   >
                     <input
                       v-model="rejectReason"
@@ -593,7 +613,11 @@ defineExpose({
                       >
                         确认拒绝
                       </button>
-                      <button type="button" class="action-btn is-muted" @click="resetPendingAction()">
+                      <button
+                        type="button"
+                        class="action-btn is-muted"
+                        @click="resetPendingAction()"
+                      >
                         取消
                       </button>
                     </div>
@@ -615,6 +639,18 @@ defineExpose({
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
+}
+
+.notification-center.is-open {
+  z-index: 1;
+}
+
+.notification-center.is-open .notification-bell {
+  background: rgba(255, 255, 255, 0.96);
+  color: #438bff;
+  box-shadow:
+    0 0 0 2px rgba(67, 139, 255, 0.16),
+    0 10px 20px -12px rgba(67, 139, 255, 0.42);
 }
 
 .notification-center.is-embedded {
@@ -701,7 +737,7 @@ defineExpose({
   left: auto;
   z-index: 12;
   max-height: min(560px, calc(100% - 72px));
-  overflow: hidden;
+  overflow: visible;
   display: flex;
   flex-direction: column;
   border: 1px solid rgba(255, 255, 255, var(--glass-border-opacity, 0.58));
@@ -726,20 +762,48 @@ defineExpose({
     0 20px 36px -24px rgba(15, 23, 42, 0.24);
 }
 
+.notification-panel.is-scoped-portal .notification-panel__arrow {
+  top: -10px;
+  filter: drop-shadow(0 -1px 1px rgba(15, 23, 42, 0.08));
+}
+
 .notification-panel.is-scoped-portal .notification-panel__arrow::before {
+  width: 14px;
+  height: 14px;
+  bottom: -7px;
   border-color: rgba(255, 255, 255, var(--glass-border-opacity, 0.64));
   background: rgba(248, 252, 255, calc(var(--glass-base-opacity, 0.18) + 0.34));
   backdrop-filter: blur(var(--glass-blur, 24px));
   -webkit-backdrop-filter: blur(var(--glass-blur, 24px));
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.72),
+    0 -2px 6px -4px rgba(15, 23, 42, 0.12);
+}
+
+.notification-panel.is-scoped-portal .notification-tabs,
+.notification-panel.is-scoped-portal .notification-filter,
+.notification-panel.is-scoped-portal .notification-list {
+  position: relative;
+  z-index: 1;
+  background: inherit;
+}
+
+.notification-panel.is-scoped-portal .notification-panel__header {
+  border-radius: 22px 22px 0 0;
 }
 
 .notification-panel.is-scoped-portal .notification-list {
   max-height: min(420px, calc(100% - 240px));
+  border-radius: 0 0 22px 22px;
+  overflow: auto;
 }
 
 .notification-backdrop.is-scoped {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: 11;
   border-radius: inherit;
   background: rgba(15, 23, 42, 0.12);
@@ -1046,6 +1110,10 @@ defineExpose({
   background: linear-gradient(135deg, rgba(239, 246, 255, 0.95), rgba(255, 255, 255, 0.92));
 }
 
+.notification-item.is-clickable {
+  cursor: pointer;
+}
+
 .notification-item__marker {
   position: absolute;
   top: 17px;
@@ -1213,7 +1281,11 @@ defineExpose({
   color: #b91c1c;
 }
 
-.action-btn.is-view,
+.action-btn.is-view {
+  background: rgba(219, 234, 254, 0.92);
+  color: #1d4ed8;
+}
+
 .action-btn.is-muted {
   background: rgba(241, 245, 249, 0.92);
   color: #64748b;

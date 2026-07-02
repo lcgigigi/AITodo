@@ -2,7 +2,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import IconBell from '~icons/lucide/bell'
-import IconCheck from '~icons/lucide/check'
 import IconChevronRight from '~icons/lucide/chevron-right'
 import IconPlus from '~icons/lucide/plus'
 import IconPresentation from '~icons/lucide/presentation'
@@ -15,6 +14,7 @@ import HomePanelToolDock from './components/HomePanelToolDock.vue'
 import DashboardTopBar from './DashboardTopBar.vue'
 import DayPreviewPanel from './DayPreviewPanel.vue'
 import { navigateDashboardTool, type DashboardToolTarget } from './dashboardTools'
+import { DASHBOARD_ONBOARDING_TOUR_CLOSE_DAY_PREVIEW_EVENT } from './onboardingTour'
 import type {
   CalendarEvent,
   CalendarEventStatus,
@@ -81,11 +81,19 @@ onMounted(() => {
   clockTimer = setInterval(() => {
     now.value = new Date()
   }, 60_000)
+  window.addEventListener(
+    DASHBOARD_ONBOARDING_TOUR_CLOSE_DAY_PREVIEW_EVENT,
+    handleTourCloseDayPreview,
+  )
   void initializeDashboardData()
 })
 
 onBeforeUnmount(() => {
   if (clockTimer) clearInterval(clockTimer)
+  window.removeEventListener(
+    DASHBOARD_ONBOARDING_TOUR_CLOSE_DAY_PREVIEW_EVENT,
+    handleTourCloseDayPreview,
+  )
 })
 
 let hasInitializedTodoRange = false
@@ -376,6 +384,11 @@ function closeDayPreview() {
   if (!confirmDiscardPreviewChanges(closePreview)) return
 
   closePreview()
+}
+
+function handleTourCloseDayPreview() {
+  if (!isDayPreviewOpen.value) return
+  closeDayPreview()
 }
 
 function openTodoPanel() {
@@ -723,20 +736,28 @@ defineExpose({
                 class="home-todo-item"
                 :class="{ 'is-done': task.status === 'done' }"
               >
-                <button
-                  type="button"
-                  class="home-todo-check"
-                  :class="{ checked: task.status === 'done' }"
-                  :aria-label="task.status === 'done' ? '撤销完成' : '标记完成'"
-                  :disabled="task.completable === false"
-                  @click.stop="toggleTodayTaskStatus(task)"
-                >
-                  <IconCheck v-if="task.status === 'done'" aria-hidden="true" />
-                </button>
-                <button type="button" class="home-todo-item-main" @click.stop="openTodayTask(task)">
+                <div class="home-todo-item-main">
                   <span class="home-todo-item-title">{{ task.title }}</span>
                   <time>{{ formatHomeTodoMeta(task) }}</time>
-                </button>
+                </div>
+                <div class="home-todo-item-actions">
+                  <button
+                    v-if="task.completable !== false"
+                    type="button"
+                    class="home-todo-action complete-action"
+                    :class="{ 'is-done': task.status === 'done' }"
+                    @click.stop="toggleTodayTaskStatus(task)"
+                  >
+                    {{ task.status === 'done' ? '撤销' : '完成' }}
+                  </button>
+                  <button
+                    type="button"
+                    class="home-todo-action detail-action"
+                    @click.stop="openTodayTask(task)"
+                  >
+                    查看详情
+                  </button>
+                </div>
               </article>
             </div>
 
@@ -849,6 +870,7 @@ defineExpose({
   bottom: clamp(24px, 3.2vh, 40px);
   width: clamp(520px, 32vw, 660px);
   height: var(--home-module-height);
+  max-height: var(--home-module-height);
   box-sizing: border-box;
   border: 1px solid rgba(255, 255, 255, var(--glass-border-opacity, 0.64));
   border-radius: 24px;
@@ -876,6 +898,10 @@ defineExpose({
   -webkit-backdrop-filter: blur(var(--glass-blur, 24px)) saturate(var(--glass-saturate, 1.16));
 }
 
+.home-main-panel :deep(.dashboard-topbar.is-embedded) {
+  flex: 0 0 auto;
+}
+
 .home-todo-calendar-header {
   flex: 0 0 auto;
 }
@@ -885,7 +911,7 @@ defineExpose({
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.58);
   min-height: 108px;
-  padding: 16px 16px 14px;
+  padding: 10px 16px 10px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: stretch;
@@ -956,12 +982,13 @@ defineExpose({
 }
 
 .home-todo-body {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
+  overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.72);
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.58);
-  padding: 14px 16px;
+  padding: 7px 9px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -969,6 +996,7 @@ defineExpose({
 }
 
 .home-todo-stats {
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
@@ -1048,18 +1076,21 @@ defineExpose({
 }
 
 .home-todo-list-shell {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
 .home-todo-list {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  gap: 8px;
+  padding: 2px 0;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
@@ -1068,15 +1099,27 @@ defineExpose({
 .home-todo-quick-create {
   flex: 0 0 auto;
   box-sizing: border-box;
-  border: 1px solid rgba(255, 255, 255, 0.72);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.58);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.28);
   padding: 4px 5px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  transition:
+    background 0.22s ease,
+    border-color 0.22s ease,
+    box-shadow 0.22s ease;
+}
+
+.home-todo-quick-create:focus-within {
+  background: rgba(255, 255, 255, 0.52);
+  border-color: rgba(255, 255, 255, 0.78);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 8px 18px -16px rgba(67, 139, 255, 0.22);
 }
 
 .home-todo-quick-create input {
@@ -1130,84 +1173,169 @@ defineExpose({
 }
 
 .home-todo-item {
+  position: relative;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
-  gap: 12px;
-  flex: 0 0 33.3333%;
-  min-height: 56px;
+  flex: 0 0 auto;
+  min-height: 50px;
   box-sizing: border-box;
-  padding: 0 2px;
-  border-top: 1px solid rgba(196, 212, 228, 0.58);
-}
-
-.home-todo-item:first-child {
-  border-top: 0;
-}
-
-.home-todo-check {
-  width: 22px;
-  height: 22px;
-  border: 2px solid rgba(148, 163, 184, 0.72);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.72);
-  color: #ffffff;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
+  padding: 0 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.692);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42);
+  overflow: hidden;
   transition:
-    background 0.18s ease,
-    border-color 0.18s ease;
+    background 0.22s ease,
+    border-color 0.22s ease,
+    box-shadow 0.22s ease,
+    transform 0.22s ease;
 }
 
-.home-todo-check.checked {
-  border-color: #438bff;
-  background: #438bff;
-}
-
-.home-todo-check:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.home-todo-check svg {
-  width: 12px;
-  height: 12px;
+.home-todo-item:hover,
+.home-todo-item:focus-within {
+  background: rgba(255, 255, 255, 0.56);
+  border-color: rgba(255, 255, 255, 0.78);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 8px 18px -16px rgba(67, 139, 255, 0.28);
 }
 
 .home-todo-item-main {
   min-width: 0;
-  border: 0;
-  background: transparent;
-  padding: 0;
+  padding: 11px 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 14px;
+}
+
+.home-todo-item-actions {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-50%) translateX(10px);
+  transition:
+    opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    visibility 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.home-todo-item:hover .home-todo-item-actions,
+.home-todo-item:focus-within .home-todo-item-actions {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(-50%) translateX(0);
+}
+
+.home-todo-action {
+  min-height: 28px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #64748b;
+  padding: 0 10px;
   font: inherit;
-  text-align: left;
+  font-size: 12px;
+  font-weight: 850;
+  white-space: nowrap;
   cursor: pointer;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease;
+}
+
+.home-todo-action:hover {
+  background: rgba(255, 255, 255, 0.72);
+  color: #1f2f4d;
+}
+
+.home-todo-action.complete-action {
+  color: #16a34a;
+  background: rgba(34, 197, 94, 0.12);
+}
+
+.home-todo-action.complete-action:hover {
+  background: rgba(34, 197, 94, 0.2);
+  color: #15803d;
+}
+
+.home-todo-action.complete-action.is-done {
+  color: #64748b;
+  background: rgba(148, 163, 184, 0.14);
+}
+
+.home-todo-action.complete-action.is-done:hover {
+  background: rgba(148, 163, 184, 0.22);
+  color: #475569;
+}
+
+.home-todo-action.detail-action {
+  color: #438bff;
+  background: rgba(67, 139, 255, 0.1);
+}
+
+.home-todo-action.detail-action:hover {
+  background: rgba(67, 139, 255, 0.18);
+  color: #2563eb;
 }
 
 .home-todo-item-title {
   min-width: 0;
   overflow: hidden;
   color: #1f2f4d;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 850;
-  line-height: 1.4;
+  line-height: 1.45;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition:
+    color 0.22s ease,
+    opacity 0.22s ease;
 }
 
 .home-todo-item time {
   flex: 0 0 auto;
+  min-width: 42px;
   color: #8b99ae;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
   white-space: nowrap;
+  text-align: right;
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+
+.home-todo-item:hover time,
+.home-todo-item:focus-within time {
+  opacity: 0;
+  transform: translateX(8px);
+}
+
+.home-todo-item:hover .home-todo-item-title,
+.home-todo-item:focus-within .home-todo-item-title {
+  padding-right: 132px;
+}
+
+.home-todo-item.is-done {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.home-todo-item.is-done:hover,
+.home-todo-item.is-done:focus-within {
+  background: rgba(255, 255, 255, 0.38);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.62),
+    0 6px 16px -16px rgba(15, 23, 42, 0.12);
 }
 
 .home-todo-item.is-done .home-todo-item-title {
@@ -1216,7 +1344,12 @@ defineExpose({
 }
 
 .home-todo-item.is-done time {
-  color: #28c879;
+  color: #7ec8a8;
+}
+
+.home-todo-item.is-done:hover time,
+.home-todo-item.is-done:focus-within time {
+  opacity: 0;
 }
 
 .home-week-strip {
@@ -1389,9 +1522,9 @@ defineExpose({
     bottom: auto;
     left: auto;
     width: 100%;
-    min-height: 0;
-    height: auto;
     min-height: 440px;
+    height: auto;
+    max-height: var(--home-module-height);
   }
 
   .day-preview-popover {
@@ -1408,6 +1541,7 @@ defineExpose({
 @media (max-width: 760px) {
   .home-main-panel {
     height: auto;
+    max-height: none;
     min-height: 0;
     padding: 16px;
   }

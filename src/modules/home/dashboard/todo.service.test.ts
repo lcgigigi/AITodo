@@ -186,19 +186,27 @@ describe('todo.service real backend adapter', () => {
 
       if (config.url === '/smart-todo/123' && config.method === 'GET') {
         return backendResponse({
-          id: 123,
-          title: '项目复盘',
-          timeType: 1,
-          startDateShow: '2026-06-07 17:00:00',
-          status: 0,
-          assigneeId: '1102080',
-          creatorId: '1102080',
+          mainTodo: {
+            id: 123,
+            title: '项目复盘',
+            timeType: 1,
+            startDateShow: '2026-06-07 17:00:00',
+            content: '完成项目复盘',
+            status: 0,
+            assigneeIds: '1102080',
+            creatorId: '1101001',
+            handlerId: '1102080',
+            receiveStatus: 2,
+            type: 1,
+          },
+          childTodoList: [],
         }) as never
       }
 
       if (config.url === '/smart-todo/create') {
         expect(config.data).toMatchObject({
-          title: '项目复盘',
+          title: '',
+          content: '项目复盘',
           timeType: 1,
           startDateShow: '2026-06-07 17:00:00',
           assigneeIds: '1102080',
@@ -256,6 +264,11 @@ describe('todo.service real backend adapter', () => {
     await expect(loadTodoDetail('123', currentUser, assignableUsers)).resolves.toMatchObject({
       id: '123',
       assigneeName: '李四',
+      content: '完成项目复盘',
+      timeType: 1,
+      startDateShow: '2026-06-07 17:00:00',
+      handlerName: '李四',
+      receiveStatus: 2,
     })
     await expect(
       createTodo({
@@ -344,6 +357,8 @@ describe('todo.service real backend adapter', () => {
     vi.mocked(httpClient.request).mockImplementation((config) => {
       if (config.url === '/smart-todo/create') {
         expect(config.data).toMatchObject({
+          title: '',
+          content: '产品评审会',
           assigneeIds: '1102080,1102081',
           type: 2,
         })
@@ -362,6 +377,33 @@ describe('todo.service real backend adapter', () => {
         type: 2,
       }),
     ).resolves.toBe(458)
+  })
+
+  it('uses original ai prompt as title when creating todos parsed from natural language', async () => {
+    vi.mocked(httpClient.request).mockImplementation((config) => {
+      if (config.url === '/smart-todo/create') {
+        expect(config.data).toMatchObject({
+          title: '明天下午5点项目复盘',
+          content: '项目复盘',
+          timeType: 1,
+          startDateShow: '2026-06-07 17:00:00',
+        })
+        return backendResponse(459) as never
+      }
+
+      return backendResponse(true) as never
+    })
+
+    await expect(
+      createTodo({
+        date: '2026-06-07',
+        time: '17:00',
+        title: '项目复盘',
+        aiPrompt: '明天下午5点项目复盘',
+        assigneeId: '1102080',
+        type: 1,
+      }),
+    ).resolves.toBe(459)
   })
 
   it('maps analyze result with date and time fields for specific_time', async () => {
@@ -512,6 +554,8 @@ describe('todo.service real backend adapter', () => {
     vi.mocked(httpClient.request).mockImplementation((config) => {
       if (config.url === '/smart-todo/create') {
         expect(config.data).toMatchObject({
+          title: '',
+          content: '季度总结',
           timeType: 2,
           startDateShow: '2026-06-01 00:00:00',
           endDateShow: '2026-06-30 23:59:59',
@@ -538,6 +582,8 @@ describe('todo.service real backend adapter', () => {
     vi.mocked(httpClient.request).mockImplementation((config) => {
       if (config.url === '/smart-todo/create') {
         expect(config.data).toMatchObject({
+          title: '',
+          content: '季度总结',
           timeType: 2,
           startDateShow: '2026-06-01 09:00:00',
           endDateShow: '2026-06-30 18:30:00',

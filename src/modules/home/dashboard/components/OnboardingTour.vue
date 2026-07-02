@@ -6,7 +6,10 @@ import IconCheck from '~icons/lucide/check'
 import IconRocket from '~icons/lucide/rocket'
 import IconSparkles from '~icons/lucide/sparkles'
 import IconX from '~icons/lucide/x'
-import { DASHBOARD_ONBOARDING_TOUR_EVENT } from '@/modules/home/dashboard/onboardingTour'
+import {
+  DASHBOARD_ONBOARDING_TOUR_EVENT,
+  dispatchDashboardOnboardingTourCloseDayPreview,
+} from '@/modules/home/dashboard/onboardingTour'
 
 type TourAnchor = 'left' | 'right' | 'top' | 'bottom' | 'center'
 
@@ -19,6 +22,7 @@ type TourStep = {
   description: string
   action: string
   accent: string
+  closeDayPreview?: boolean
   spotlightPadding?: number
   spotlightRadius?: number
 }
@@ -50,7 +54,8 @@ const steps: TourStep[] = [
     target: 'today-panel',
     eyebrow: '第一站',
     title: '今天先看这块工作面板',
-    description: '问候、模式切换、本周日期、今日统计和待办列表都集中在这张卡片里，点日期或统计卡就能打开当天详情。',
+    description:
+      '问候、模式切换、本周日期、今日统计和待办列表都集中在这张卡片里，点日期或统计卡就能打开当天详情。',
     action: '从这里判断今天先处理什么，避免在多个入口之间来回找。',
     accent: '#2f7cff',
     spotlightPadding: 0,
@@ -135,6 +140,7 @@ const steps: TourStep[] = [
     description: '这里适合不想打开完整表单时先快速记一条待办，系统会按一句话内容做创建。',
     action: '一个用于快速记录，一个用于完整编辑，两个入口服务不同节奏。',
     accent: '#10b981',
+    closeDayPreview: true,
     spotlightPadding: 4,
     spotlightRadius: 12,
   },
@@ -143,9 +149,11 @@ const steps: TourStep[] = [
     fallbackTarget: 'today-panel',
     eyebrow: '工具坞',
     title: '常用 AI 能力在卡片底部',
-    description: '图文分析、会议纪要、PPT 创作和更多智能体都放在今日待办卡片底部，点击后直接进入对应工具。',
+    description:
+      '图文分析、会议纪要、PPT 创作和更多智能体都放在今日待办卡片底部，点击后直接进入对应工具。',
     action: '把它当成工作台的快捷启动器，少走菜单层级。',
     accent: '#f59e0b',
+    closeDayPreview: true,
     spotlightPadding: 6,
     spotlightRadius: 18,
   },
@@ -154,9 +162,11 @@ const steps: TourStep[] = [
     fallbackTarget: 'today-panel',
     eyebrow: '详细模式',
     title: '需要全量复盘时看详细模式',
-    description: '顶部切换或「查看全部」都会进入更完整的清单和日历视图，适合按日期筛选、复盘和批量处理。',
+    description:
+      '顶部切换或「查看全部」都会进入更完整的清单和日历视图，适合按日期筛选、复盘和批量处理。',
     action: '总览负责快速判断，详细模式负责深挖和整理。',
     accent: '#ef4444',
+    closeDayPreview: true,
     spotlightPadding: 4,
     spotlightRadius: 12,
   },
@@ -168,6 +178,7 @@ const steps: TourStep[] = [
     description: '别人派发给你的待办、站内消息和会议通知会在这里聚合，未读数会主动提示。',
     action: '每天开始工作时扫一眼，先处理需要确认的事项。',
     accent: '#06b6d4',
+    closeDayPreview: true,
     spotlightPadding: 6,
     spotlightRadius: 18,
   },
@@ -180,6 +191,7 @@ const steps: TourStep[] = [
     description: '这里聚合站内消息和别人派发给你的待办，弹层出现时不会离开当前工作台。',
     action: '下一步会继续看弹层内部的分类和列表区域。',
     accent: '#06b6d4',
+    closeDayPreview: true,
     spotlightPadding: 0,
     spotlightRadius: 22,
   },
@@ -192,6 +204,7 @@ const steps: TourStep[] = [
     description: '站内消息偏通知阅读，待接受待办偏协作处理；数量徽标可以快速判断有没有积压。',
     action: '分类切换只影响当前弹层，不会打断你正在看的待办。',
     accent: '#06b6d4',
+    closeDayPreview: true,
     spotlightPadding: 2,
     spotlightRadius: 14,
   },
@@ -204,6 +217,7 @@ const steps: TourStep[] = [
     description: '未读、查看、已读、删除，以及待办的接受/拒绝动作都集中在列表项里。',
     action: '这里是协作入口，日常建议先扫未读和待接受数量。',
     accent: '#06b6d4',
+    closeDayPreview: true,
     spotlightPadding: 0,
     spotlightRadius: 16,
   },
@@ -287,6 +301,10 @@ function findStepTarget(step: TourStep) {
 }
 
 function prepareStep(step: TourStep) {
+  if (step.closeDayPreview) {
+    dispatchDashboardOnboardingTourCloseDayPreview()
+  }
+
   if (!step.openTarget || findTourTarget(step.target)) return
 
   findTourTarget(step.openTarget)?.click()

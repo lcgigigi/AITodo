@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import IconCheck from '~icons/lucide/check'
 import IconChevronLeft from '~icons/lucide/chevron-left'
 import IconChevronRight from '~icons/lucide/chevron-right'
+import IconClock3 from '~icons/lucide/clock-3'
 import IconPlus from '~icons/lucide/plus'
 import IconSendHorizontal from '~icons/lucide/send-horizontal'
+import IconTag from '~icons/lucide/tag'
+import IconUser from '~icons/lucide/user'
+import IconUserCheck from '~icons/lucide/user-check'
 import IconX from '~icons/lucide/x'
 import { routeConfig } from '@/config/route.config'
 import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
@@ -18,16 +22,25 @@ import type { CalendarDay, CalendarEvent, CalendarTodoDraft } from './types'
 import {
   compareEvents,
   formatEventTime,
+  formatTodoDetailTimeField,
+  getBackendTodoStatusLabel,
   getEventScheduleDisplay,
+  getSmartTodoKindLabel,
+  getTodoAssigneeDisplayName,
+  getTodoContentDisplay,
+  getTodoCreatorDisplayName,
+  shouldShowTodoAssignerField,
   isAllDayEvent,
   isRangeEvent,
   ymd,
 } from './todoDisplay'
 import {
+  acceptTodos,
   createTodo as serviceCreateTodo,
   getTodoMonthRange,
   getTodoWeekRange,
   loadTodoDetail,
+  rejectTodo,
   updateTodoStatus as serviceUpdateTodoStatus,
 } from './todo.service'
 import { useDashboardTodos } from './useDashboardTodos'
@@ -36,6 +49,8 @@ type DayPreviewPanelExpose = {
   openCreateForm: () => void
   showDiscardWarning: (onConfirm?: () => void) => void
 }
+
+type LeftPanelMode = 'tools' | 'create' | 'detail'
 
 type DetailMode = 'simple' | 'detail'
 type DetailStatusFilter = 'all' | 'done' | 'other'
@@ -80,12 +95,15 @@ const typeFilter = ref<DetailTypeFilter>('all')
 const activeTaskId = ref('')
 const detailLoadingId = ref('')
 const quickCreateText = ref('')
-const isCreateModalOpen = ref(false)
+const leftPanelMode = ref<LeftPanelMode>('tools')
 const isCreateFormDirty = ref(false)
 const quickCreatePrompt = ref('')
 const quickCreateKey = ref(0)
 const dayPreviewPanelRef = ref<DayPreviewPanelExpose | null>(null)
+const notificationCenterRef = ref<{ refreshPendingTodos: () => Promise<void> } | null>(null)
 const activeToolName = ref('')
+const pendingActionProcessing = ref(false)
+const pendingInboxDetailActive = ref(false)
 
 function getActiveTodoLoadRange() {
   return calendarViewMode.value === 'week'
@@ -249,10 +267,67 @@ const leftSuggestionText = computed(() => {
   return `当前最需要关注的是“${nextTask.title}”，完成后即可清空待处理事项。`
 })
 
-const activeTask = computed(
-  () => selectedDateEvents.value.find((event) => event.id === activeTaskId.value) ?? null,
-)
-const isTaskDetailOpen = computed(() => Boolean(activeTaskId.value))
+const activeTask = computed(() => {
+  if (!activeTaskId.value) return null
+
+  const fromList = selectedDateEvents.value.find((event) => event.id === activeTaskId.value)
+  if (fromList) return fromList
+
+  return taskDetails.value[activeTaskId.value] ?? null
+})
+
+const showPendingInboxActions = computed(() => {
+  if (!activeTask.value) return false
+  if (pendingInboxDetailActive.value) return true
+  return isPendingAcceptanceTask(getTaskDetail(activeTask.value))
+})
+
+type DetailStatusTone = 'accepted' | 'done' | 'rejected' | 'pending' | 'waiting'
+
+const taskDetailPanel = computed(() => {
+  const task = activeTask.value
+  if (!task) return null
+
+  const detail = getTaskDetail(task)
+  const meta: Array<{ key: string; label: string; value: string }> = [
+    {
+      key: 'type',
+      label: '类型',
+      value: getSmartTodoKindLabel(detail),
+    },
+  ]
+
+  if (shouldShowTodoAssignerField(detail)) {
+    meta.push({
+      key: 'assigner',
+      label: '指派人',
+      value: getTodoCreatorDisplayName(detail),
+    })
+  }
+
+  meta.push({
+    key: 'receiver',
+    label: '接受人',
+    value: getTodoAssigneeDisplayName(detail),
+  })
+
+  return {
+    title: detail.title || '未命名待办',
+    typeLabel: getTaskTypeLabel(detail),
+    typeTone: detail.type === 'meeting' ? 'meeting' : 'todo',
+    statusLabel: getBackendTodoStatusLabel(detail),
+    statusTone: getDetailStatusTone(detail),
+    time: formatTodoDetailTimeField(detail),
+    content: getTodoContentDisplay(detail),
+    meta,
+  }
+})
+
+const leftPanelAriaLabel = computed(() => {
+  if (leftPanelMode.value === 'create') return '新增待办'
+  if (leftPanelMode.value === 'detail') return '任务详情'
+  return '快捷入口'
+})
 
 watch(todoLoadRangeKey, () => {
   if (!hasInitializedTodoRange) return
@@ -270,11 +345,11 @@ onUnmounted(() => {
 
 function onDetailWorkspaceKeydown(event: KeyboardEvent) {
   if (event.key !== 'Escape') return
-  if (isCreateModalOpen.value) {
+  if (leftPanelMode.value === 'create') {
     requestCloseCreateModal()
     return
   }
-  if (isTaskDetailOpen.value) {
+  if (leftPanelMode.value === 'detail') {
     closeTaskDetail()
   }
 }
@@ -318,36 +393,38 @@ async function refreshTodos() {
   ensureSelectedDateInLoadedRange()
 }
 
-async function openTodoFromNotification(payload: { id: string; date?: string }) {
-  let targetDate = payload.date
-
-  if (!targetDate) {
-    try {
-      const detailEvent = await loadTodoDetail(payload.id, currentUser.value, assignableUsers.value)
-      targetDate = detailEvent.date
-    } catch {
-      feedbackStore.error('查询消息关联待办失败')
+async function openTodoFromNotification(payload: {
+  id: string
+  date?: string
+  source?: 'pending-inbox'
+}) {
+  if (leftPanelMode.value === 'create') {
+    if (isCreateFormDirty.value) {
+      requestCloseCreateModal(() => {
+        void openTodoFromNotification(payload)
+      })
       return
     }
+    closeCreateModal()
   }
 
-  closeTaskDetail()
-  closeCreateModal()
-  selectedDate.value = targetDate
+  detailLoadingId.value = payload.id
 
-  const nextDate = new Date(`${targetDate}T12:00:00`)
-  currentMonth.value = new Date(nextDate.getFullYear(), nextDate.getMonth(), 1)
-  resetTaskFilters()
-  await refreshTodos()
-  await nextTick()
-
-  const targetTask = selectedDateEvents.value.find((event) => event.id === payload.id)
-  if (targetTask) {
-    await openTaskDetail(targetTask)
-    return
+  try {
+    const detailEvent = await loadTodoDetail(payload.id, currentUser.value, assignableUsers.value)
+    taskDetails.value = {
+      ...taskDetails.value,
+      [detailEvent.id]: detailEvent,
+    }
+    pendingInboxDetailActive.value = payload.source === 'pending-inbox'
+    leftPanelMode.value = 'detail'
+    activeTaskId.value = detailEvent.id
+  } catch {
+    pendingInboxDetailActive.value = false
+    feedbackStore.error('查询待办详情失败')
+  } finally {
+    detailLoadingId.value = ''
   }
-
-  feedbackStore.info('关联待办不在当前日期列表中')
 }
 
 defineExpose({
@@ -384,7 +461,7 @@ async function changeCalendarPeriod(delta: number) {
     const next = new Date(`${selectedDate.value}T12:00:00`)
     next.setDate(next.getDate() + delta * 7)
     selectedDate.value = ymd(next)
-    activeTaskId.value = ''
+    closeTaskDetail()
     resetTaskFilters()
     return
   }
@@ -415,7 +492,7 @@ async function goToday() {
 
 function selectCalendarDate(date: string) {
   selectedDate.value = date
-  activeTaskId.value = ''
+  closeTaskDetail()
   resetTaskFilters()
 }
 
@@ -449,12 +526,28 @@ function getTypeCountForStatus(status: DetailStatusFilter, type: Exclude<DetailT
 }
 
 async function openTaskDetail(task: CalendarEvent) {
+  if (leftPanelMode.value === 'create') {
+    if (isCreateFormDirty.value) {
+      requestCloseCreateModal(() => {
+        void openTaskDetail(task)
+      })
+      return
+    }
+    closeCreateModal()
+  }
+
+  pendingInboxDetailActive.value = false
+  leftPanelMode.value = 'detail'
   activeTaskId.value = task.id
   await loadTaskDetail(task)
 }
 
 function closeTaskDetail() {
   activeTaskId.value = ''
+  pendingInboxDetailActive.value = false
+  if (leftPanelMode.value === 'detail') {
+    leftPanelMode.value = 'tools'
+  }
 }
 
 async function loadTaskDetail(task: CalendarEvent, force = false) {
@@ -503,11 +596,11 @@ function openCreateModal(prefill = quickCreateText.value.trim()) {
   quickCreatePrompt.value = prefill
   quickCreateKey.value += 1
   isCreateFormDirty.value = false
-  isCreateModalOpen.value = true
+  leftPanelMode.value = 'create'
 }
 
 function closeCreateModal() {
-  isCreateModalOpen.value = false
+  leftPanelMode.value = 'tools'
   isCreateFormDirty.value = false
   quickCreatePrompt.value = ''
 }
@@ -582,7 +675,75 @@ function getTaskStatusLabel(task: CalendarEvent) {
   if (task.backendStatus === 6 || task.status === 'done') return '已完成'
   if (task.backendStatus === 9) return '已拒绝'
   if (task.backendStatus === 3) return '已接受'
+  if (isPendingAcceptanceTask(task)) return '待接受'
   return '待处理'
+}
+
+function getDetailStatusTone(event: CalendarEvent): DetailStatusTone {
+  const label = getBackendTodoStatusLabel(event)
+  if (label === '已完成') return 'done'
+  if (label === '已拒绝') return 'rejected'
+  if (label === '待接受') return 'pending'
+  if (label === '已接受') return 'accepted'
+  return 'waiting'
+}
+
+function isPendingAcceptanceTask(task: CalendarEvent) {
+  if (task.backendStatus === 3 || task.backendStatus === 6 || task.backendStatus === 9) {
+    return false
+  }
+
+  if (task.scope === 'assigned_to_me') return true
+
+  const assigneeIds =
+    task.assigneeId
+      ?.split(',')
+      .map((item) => item.trim())
+      .filter(Boolean) ?? []
+
+  return Boolean(
+    currentUser.value.id &&
+      assigneeIds.includes(currentUser.value.id) &&
+      task.creatorId &&
+      task.creatorId !== currentUser.value.id,
+  )
+}
+
+async function handleAcceptPendingTodo() {
+  const task = activeTask.value
+  if (!task || pendingActionProcessing.value) return
+
+  pendingActionProcessing.value = true
+  try {
+    await acceptTodos(task.id)
+    pendingInboxDetailActive.value = false
+    closeTaskDetail()
+    await refreshTodos()
+    await notificationCenterRef.value?.refreshPendingTodos()
+    feedbackStore.success('已接受待办')
+  } catch {
+    // 全局拦截器已统一提示错误。
+  } finally {
+    pendingActionProcessing.value = false
+  }
+}
+
+async function handleRejectPendingTodo() {
+  const task = activeTask.value
+  if (!task || pendingActionProcessing.value) return
+
+  pendingActionProcessing.value = true
+  try {
+    await rejectTodo(task.id, '暂不处理')
+    pendingInboxDetailActive.value = false
+    closeTaskDetail()
+    await notificationCenterRef.value?.refreshPendingTodos()
+    feedbackStore.success('已拒绝待办')
+  } catch {
+    // 全局拦截器已统一提示错误。
+  } finally {
+    pendingActionProcessing.value = false
+  }
 }
 
 function isCompletedEvent(event: CalendarEvent) {
@@ -737,45 +898,175 @@ function weekRangeLabel(anchorDate: string) {
 
 <template>
   <section class="detail-workspace" aria-label="首页详细模式">
-    <section class="detail-board" aria-label="首页详细模式工作区">
-      <aside class="detail-left-panel" aria-label="快捷入口">
-      <section class="side-card">
-        <div class="panel-title">
-          <h2>快捷入口</h2>
-          <button class="panel-mini-btn" type="button" @click="notifyCustomizeQuick">自定义</button>
+    <section
+      class="detail-board"
+      :class="{ 'left-panel-active': leftPanelMode !== 'tools' }"
+      aria-label="首页详细模式工作区"
+    >
+      <aside class="detail-left-panel" :aria-label="leftPanelAriaLabel">
+        <template v-if="leftPanelMode === 'tools'">
+          <section class="side-card">
+            <div class="panel-title">
+              <h2>快捷入口</h2>
+              <button class="panel-mini-btn" type="button" @click="notifyCustomizeQuick">自定义</button>
+            </div>
+
+            <div class="tool-list">
+              <button
+                v-for="tool in dashboardTools"
+                :key="tool.name"
+                type="button"
+                class="tool-item"
+                :class="{ active: activeToolName === tool.name }"
+                @click="handleToolClick(tool)"
+              >
+                <span class="tool-icon" :class="tool.tone" aria-hidden="true">
+                  <component :is="tool.icon" />
+                </span>
+                <span class="tool-name">{{ tool.name }}</span>
+              </button>
+            </div>
+          </section>
+
+          <section class="side-card">
+            <div class="panel-title">
+              <h2>AI 提醒</h2>
+              <small>建议</small>
+            </div>
+            <div class="side-note">
+              <h3>{{ leftSuggestionTitle }}</h3>
+              <p>{{ leftSuggestionText }}</p>
+            </div>
+          </section>
+
+          <div class="customize">
+            <button type="button" @click="notifyCustomizeTools">⇄　自定义工具</button>
+          </div>
+        </template>
+
+        <div v-else-if="leftPanelMode === 'create'" class="left-panel-create-card">
+          <DayPreviewPanel
+            ref="dayPreviewPanelRef"
+            :key="quickCreateKey"
+            form-only
+            show-close
+            :date="selectedDate"
+            :date-label="selectedDateLabel"
+            :events="[]"
+            :special-days="[]"
+            :current-user="currentUser"
+            :assignable-users="assignableUsers"
+            :quick-create-prompt="quickCreatePrompt"
+            :quick-create-key="quickCreateKey"
+            @create-todo="handleCreateTodo"
+            @dirty-change="isCreateFormDirty = $event"
+            @notify="notifyFromPreview"
+            @close="requestCloseCreateModal()"
+          />
         </div>
 
-        <div class="tool-list">
-          <button
-            v-for="tool in dashboardTools"
-            :key="tool.name"
-            type="button"
-            class="tool-item"
-            :class="{ active: activeToolName === tool.name }"
-            @click="handleToolClick(tool)"
-          >
-            <span class="tool-icon" :class="tool.tone" aria-hidden="true">
-              <component :is="tool.icon" />
-            </span>
-            <span class="tool-name">{{ tool.name }}</span>
-          </button>
-        </div>
-      </section>
+        <section
+          v-else-if="leftPanelMode === 'detail' && activeTask && taskDetailPanel"
+          class="left-panel-detail"
+        >
+          <header class="detail-panel-head">
+            <div class="detail-panel-head-main">
+              <span class="detail-panel-kicker">任务详情</span>
+              <div class="detail-panel-badges">
+                <span class="detail-type-badge" :class="taskDetailPanel.typeTone">
+                  {{ taskDetailPanel.typeLabel }}
+                </span>
+                <span class="detail-status-badge" :class="taskDetailPanel.statusTone">
+                  {{ taskDetailPanel.statusLabel }}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="detail-panel-close"
+              aria-label="关闭详情"
+              @click="closeTaskDetail"
+            >
+              <IconX aria-hidden="true" />
+            </button>
+          </header>
 
-      <section class="side-card">
-        <div class="panel-title">
-          <h2>AI 提醒</h2>
-          <small>建议</small>
-        </div>
-        <div class="side-note">
-          <h3>{{ leftSuggestionTitle }}</h3>
-          <p>{{ leftSuggestionText }}</p>
-        </div>
-      </section>
+          <div class="detail-panel-body">
+            <p v-if="detailLoadingId === activeTask.id" class="detail-loading">正在加载详情...</p>
 
-      <div class="customize">
-        <button type="button" @click="notifyCustomizeTools">⇄　自定义工具</button>
-      </div>
+            <template v-else>
+              <h2 class="detail-panel-title">{{ taskDetailPanel.title }}</h2>
+              <p class="detail-panel-desc">{{ taskDetailPanel.content }}</p>
+
+              <section class="detail-time-card" aria-label="时间安排">
+                <span class="detail-time-icon" aria-hidden="true">
+                  <IconClock3 />
+                </span>
+                <div class="detail-time-main">
+                  <span class="detail-field-label">时间安排</span>
+                  <div class="detail-time-lines">
+                    <template v-if="Array.isArray(taskDetailPanel.time)">
+                      <span class="detail-time-line">{{ taskDetailPanel.time[0] }}</span>
+                      <span class="detail-time-separator" aria-hidden="true">→</span>
+                      <span class="detail-time-line">{{ taskDetailPanel.time[1] }}</span>
+                    </template>
+                    <span v-else class="detail-time-line">{{ taskDetailPanel.time }}</span>
+                  </div>
+                </div>
+              </section>
+
+              <section class="detail-meta-grid" aria-label="任务信息">
+                <article
+                  v-for="item in taskDetailPanel.meta"
+                  :key="item.key"
+                  class="detail-meta-item"
+                >
+                  <span class="detail-meta-icon" aria-hidden="true">
+                    <IconTag v-if="item.key === 'type'" />
+                    <IconUser v-else-if="item.key === 'assigner'" />
+                    <IconUserCheck v-else />
+                  </span>
+                  <div class="detail-meta-copy">
+                    <span class="detail-field-label">{{ item.label }}</span>
+                    <strong>{{ item.value }}</strong>
+                  </div>
+                </article>
+              </section>
+            </template>
+          </div>
+
+          <footer class="detail-panel-footer">
+            <div class="detail-panel-actions" :class="{ 'is-pending-inbox': showPendingInboxActions }">
+              <template v-if="showPendingInboxActions">
+                <button
+                  type="button"
+                  class="detail-action accept"
+                  :disabled="pendingActionProcessing"
+                  @click="handleAcceptPendingTodo"
+                >
+                  {{ pendingActionProcessing ? '处理中…' : '接受' }}
+                </button>
+                <button
+                  type="button"
+                  class="detail-action reject"
+                  :disabled="pendingActionProcessing"
+                  @click="handleRejectPendingTodo"
+                >
+                  拒绝
+                </button>
+              </template>
+              <button
+                v-else
+                type="button"
+                class="detail-action primary"
+                :disabled="activeTask.completable === false"
+                @click="toggleDetailTaskStatus"
+              >
+                {{ activeTask.status === 'done' ? '恢复待处理' : '标记完成' }}
+              </button>
+            </div>
+          </footer>
+        </section>
       </aside>
 
       <main class="detail-main-panel" aria-label="当日待办清单">
@@ -934,73 +1225,6 @@ function weekRangeLabel(anchorDate: string) {
               </section>
             </template>
           </div>
-
-          <div
-            class="task-detail-overlay"
-            :class="{ open: isTaskDetailOpen }"
-            aria-hidden="true"
-            @click="closeTaskDetail"
-          ></div>
-
-          <aside
-            class="task-detail-drawer"
-            :class="{ open: isTaskDetailOpen }"
-            :aria-hidden="!isTaskDetailOpen"
-            aria-label="任务详情"
-          >
-            <template v-if="activeTask">
-              <div class="drawer-head">
-                <span class="drawer-kicker">任务详情</span>
-                <button type="button" class="drawer-close-btn" aria-label="关闭详情" @click="closeTaskDetail">
-                  <IconX aria-hidden="true" />
-                </button>
-              </div>
-
-              <h3 class="drawer-title">{{ getTaskDetail(activeTask).title }}</h3>
-
-              <div class="drawer-tags">
-                <span
-                  class="task-tag"
-                  :class="activeTask.type === 'meeting' ? 'meeting' : 'todo'"
-                >
-                  {{ getTaskTypeLabel(activeTask) }}
-                </span>
-              </div>
-
-              <p v-if="detailLoadingId === activeTask.id" class="detail-loading">正在加载详情...</p>
-              <div v-else class="drawer-grid">
-                <div class="drawer-row">
-                  <span>时间</span>
-                  <strong>{{ formatTaskDetailTime(activeTask) }}</strong>
-                </div>
-                <div class="drawer-row">
-                  <span>状态</span>
-                  <strong>{{ getTaskStatusLabel(activeTask) }}</strong>
-                </div>
-                <div class="drawer-row">
-                  <span>来源</span>
-                  <strong>{{ getProjectText(activeTask) }}</strong>
-                </div>
-                <div class="drawer-row">
-                  <span>负责人</span>
-                  <strong>{{ getAssigneeText(activeTask) }}</strong>
-                </div>
-              </div>
-
-              <div class="drawer-note">{{ getDescriptionText(activeTask) }}</div>
-
-              <div class="drawer-actions">
-                <button
-                  type="button"
-                  class="drawer-action primary"
-                  :disabled="activeTask.completable === false"
-                  @click="toggleDetailTaskStatus"
-                >
-                  {{ activeTask.status === 'done' ? '恢复待处理' : '标记完成' }}
-                </button>
-              </div>
-            </template>
-          </aside>
         </div>
 
         <form class="quick-create side-content-card" @submit.prevent="submitQuickCreate">
@@ -1032,6 +1256,7 @@ function weekRangeLabel(anchorDate: string) {
       <aside class="detail-side-panel" aria-label="消息通知和日历">
         <section class="notification-card side-content-card" aria-label="消息通知">
           <DashboardNotificationCenter
+            ref="notificationCenterRef"
             layout="embedded"
             @calendar-refresh="refreshTodos()"
             @open-todo="openTodoFromNotification"
@@ -1129,44 +1354,6 @@ function weekRangeLabel(anchorDate: string) {
       </aside>
     </section>
   </section>
-
-  <Teleport to="body">
-    <Transition name="detail-create-modal">
-      <div
-        v-if="isCreateModalOpen"
-        class="detail-create-modal"
-        role="presentation"
-        @click.self="requestCloseCreateModal()"
-      >
-        <div
-          class="detail-create-card"
-          role="dialog"
-          aria-modal="true"
-          aria-label="新增待办"
-          @click.stop
-        >
-          <DayPreviewPanel
-            ref="dayPreviewPanelRef"
-            :key="quickCreateKey"
-            form-only
-            show-close
-            :date="selectedDate"
-            :date-label="selectedDateLabel"
-            :events="[]"
-            :special-days="[]"
-            :current-user="currentUser"
-            :assignable-users="assignableUsers"
-            :quick-create-prompt="quickCreatePrompt"
-            :quick-create-key="quickCreateKey"
-            @create-todo="handleCreateTodo"
-            @dirty-change="isCreateFormDirty = $event"
-            @notify="notifyFromPreview"
-            @close="requestCloseCreateModal()"
-          />
-        </div>
-      </div>
-    </Transition>
-  </Teleport>
 </template>
 <style scoped>
 .detail-workspace {
@@ -1209,10 +1396,11 @@ function weekRangeLabel(anchorDate: string) {
 }
 
 .detail-board {
+  --detail-side-col: minmax(444px, 472px);
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(300px, 328px) minmax(0, 1fr) minmax(444px, 472px);
+  grid-template-columns: var(--detail-side-col) minmax(0, 1fr) var(--detail-side-col);
   gap: 0;
   overflow: hidden;
   border: 1px solid var(--home-glass-border);
@@ -1265,6 +1453,347 @@ function weekRangeLabel(anchorDate: string) {
 .detail-left-panel::-webkit-scrollbar-thumb {
   background: rgba(81, 120, 173, 0.16);
   border-radius: 10px;
+}
+
+.left-panel-create-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.44);
+  border: 1px solid rgba(255, 255, 255, 0.64);
+  padding: 16px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.left-panel-create-card :deep(.preview-panel) {
+  flex: 1;
+  min-height: 0;
+}
+
+.left-panel-detail {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 22px;
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.78), rgba(246, 250, 255, 0.56));
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 18px 36px -28px rgba(38, 67, 109, 0.22);
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.detail-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 16px;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.72);
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.detail-panel-head-main {
+  min-width: 0;
+}
+
+.detail-panel-kicker {
+  display: block;
+  color: var(--detail-blue);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.1px;
+}
+
+.detail-panel-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.detail-type-badge,
+.detail-status-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.detail-type-badge.meeting {
+  color: #1d4fbf;
+  background: rgba(47, 124, 255, 0.12);
+  border: 1px solid rgba(47, 124, 255, 0.16);
+}
+
+.detail-type-badge.todo {
+  color: #5b49d6;
+  background: rgba(109, 92, 255, 0.12);
+  border: 1px solid rgba(109, 92, 255, 0.16);
+}
+
+.detail-status-badge.accepted {
+  color: #1d4fbf;
+  background: rgba(219, 234, 254, 0.92);
+}
+
+.detail-status-badge.done {
+  color: #047857;
+  background: rgba(220, 252, 231, 0.92);
+}
+
+.detail-status-badge.rejected {
+  color: #b91c1c;
+  background: rgba(254, 226, 226, 0.92);
+}
+
+.detail-status-badge.pending {
+  color: #b45309;
+  background: rgba(254, 243, 199, 0.96);
+}
+
+.detail-status-badge.waiting {
+  color: #475569;
+  background: rgba(241, 245, 249, 0.96);
+}
+
+.detail-panel-close {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 12px;
+  color: #60708d;
+  background: rgba(255, 255, 255, 0.82);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.detail-panel-close:hover {
+  background: #fff;
+  border-color: rgba(47, 124, 255, 0.18);
+  transform: translateY(-1px);
+}
+
+.detail-panel-close svg {
+  width: 18px;
+  height: 18px;
+}
+
+.detail-panel-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px 12px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.detail-panel-title {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.42;
+  letter-spacing: -0.35px;
+  color: #101936;
+  font-weight: 800;
+}
+
+.detail-panel-desc {
+  margin: -6px 0 0;
+  color: #5c6b82;
+  font-size: 14px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.detail-field-label {
+  display: block;
+  margin-bottom: 6px;
+  color: #8795aa;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+
+.detail-time-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 15px 16px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(47, 124, 255, 0.1), rgba(47, 124, 255, 0.03));
+  border: 1px solid rgba(47, 124, 255, 0.12);
+}
+
+.detail-time-icon {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  color: var(--detail-blue);
+  background: rgba(255, 255, 255, 0.78);
+  display: grid;
+  place-items: center;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+
+.detail-time-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.detail-time-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.detail-time-lines {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail-time-line {
+  color: #101936;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.detail-time-separator {
+  color: #94a3b8;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.detail-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.detail-meta-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.detail-meta-icon {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  color: #60708d;
+  background: rgba(241, 245, 249, 0.92);
+  display: grid;
+  place-items: center;
+}
+
+.detail-meta-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.detail-meta-copy {
+  min-width: 0;
+}
+
+.detail-meta-copy strong {
+  display: block;
+  color: #101936;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.detail-panel-footer {
+  flex: 0 0 auto;
+  padding: 14px 20px 18px;
+  border-top: 1px solid rgba(226, 232, 240, 0.72);
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.detail-panel-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.detail-panel-actions.is-pending-inbox {
+  grid-template-columns: 1fr 1fr;
+}
+
+.detail-action {
+  height: 46px;
+  border: 0;
+  border-radius: 14px;
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    opacity 0.18s ease;
+}
+
+.detail-action:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.detail-action.accept {
+  color: #047857;
+  background: rgba(220, 252, 231, 0.96);
+  border: 1px solid rgba(16, 185, 129, 0.14);
+}
+
+.detail-action.reject {
+  color: #b91c1c;
+  background: rgba(254, 226, 226, 0.96);
+  border: 1px solid rgba(239, 68, 68, 0.12);
+}
+
+.detail-action.primary {
+  color: #fff;
+  background: linear-gradient(135deg, #2f72ed, #4d91ff);
+  box-shadow: 0 10px 20px rgba(52, 120, 246, 0.24);
+}
+
+.detail-action:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.detail-loading {
+  margin: 8px 0 0;
+  color: #60708d;
+  font-size: 14px;
 }
 
 .side-card {
@@ -1962,159 +2491,6 @@ function weekRangeLabel(anchorDate: string) {
   box-shadow: none;
 }
 
-.task-detail-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 8;
-  border-radius: inherit;
-  background: rgba(25, 45, 75, 0.14);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.2s ease;
-}
-
-.task-detail-overlay.open {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.task-detail-drawer {
-  position: absolute;
-  z-index: 9;
-  top: 10px;
-  right: 10px;
-  bottom: 10px;
-  width: min(455px, 64%);
-  padding: 22px;
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.96);
-  border: 1px solid rgba(255, 255, 255, 0.88);
-  box-shadow: -18px 0 42px rgba(38, 67, 109, 0.18);
-  transform: translateX(calc(100% + 24px));
-  transition: transform 0.28s cubic-bezier(0.22, 0.88, 0.24, 1);
-  overflow-y: auto;
-  scrollbar-width: thin;
-}
-
-.task-detail-drawer.open {
-  transform: translateX(0);
-}
-
-.drawer-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.drawer-kicker {
-  color: var(--detail-blue);
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.8px;
-}
-
-.drawer-close-btn {
-  width: 36px;
-  height: 36px;
-  border: 0;
-  border-radius: 12px;
-  color: #60708d;
-  background: #f1f5fa;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-}
-
-.drawer-close-btn svg {
-  width: 18px;
-  height: 18px;
-}
-
-.drawer-title {
-  margin: 18px 0 10px;
-  font-size: 23px;
-  line-height: 1.45;
-  letter-spacing: -0.3px;
-  color: #101936;
-  font-weight: 900;
-}
-
-.drawer-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.drawer-grid {
-  margin-top: 20px;
-  display: grid;
-  gap: 11px;
-}
-
-.drawer-row {
-  display: grid;
-  grid-template-columns: 86px 1fr;
-  gap: 12px;
-  padding: 12px 0;
-  border-bottom: 1px solid #edf1f6;
-  font-size: 13px;
-}
-
-.drawer-row span {
-  color: #60708d;
-}
-
-.drawer-row strong {
-  color: #101936;
-  font-weight: 700;
-  text-align: right;
-  word-break: break-word;
-}
-
-.drawer-note {
-  margin-top: 18px;
-  padding: 15px;
-  border-radius: 15px;
-  color: #5c6b82;
-  background: #f5f8fc;
-  font-size: 13px;
-  line-height: 1.7;
-}
-
-.drawer-actions {
-  margin-top: 20px;
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 10px;
-}
-
-.drawer-action {
-  height: 44px;
-  border: 0;
-  border-radius: 14px;
-  font-size: 14px;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.drawer-action.primary {
-  color: #fff;
-  background: var(--detail-blue);
-  box-shadow: 0 9px 18px rgba(52, 120, 246, 0.24);
-}
-
-.drawer-action:disabled {
-  opacity: 0.48;
-  cursor: not-allowed;
-  box-shadow: none;
-}
-
-.detail-loading {
-  margin: 16px 0 0;
-  color: #60708d;
-  font-size: 13px;
-}
-
 .quick-create {
   flex: 0 0 auto;
   display: flex;
@@ -2175,54 +2551,6 @@ function weekRangeLabel(anchorDate: string) {
 .quick-create button[type='submit'] svg {
   width: 18px;
   height: 18px;
-}
-
-.detail-create-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 1200;
-  display: grid;
-  place-items: center;
-  padding: 28px;
-  background: rgba(25, 45, 75, 0.16);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-}
-
-.detail-create-card {
-  width: min(600px, calc(100vw - 56px));
-  height: min(760px, calc(100vh - 56px));
-  box-sizing: border-box;
-  border: 1px solid rgba(255, 255, 255, 0.88);
-  border-radius: 26px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 30px 70px rgba(35, 62, 102, 0.28);
-  padding: 24px;
-  overflow: hidden;
-}
-
-.detail-create-card :deep(.preview-panel) {
-  height: 100%;
-}
-
-.detail-create-modal-enter-active,
-.detail-create-modal-leave-active {
-  transition: opacity 0.2s ease;
-}
-
-.detail-create-modal-enter-active .detail-create-card,
-.detail-create-modal-leave-active .detail-create-card {
-  transition: transform 0.25s cubic-bezier(0.22, 0.88, 0.24, 1);
-}
-
-.detail-create-modal-enter-from,
-.detail-create-modal-leave-to {
-  opacity: 0;
-}
-
-.detail-create-modal-enter-from .detail-create-card,
-.detail-create-modal-leave-to .detail-create-card {
-  transform: translateY(18px) scale(0.98);
 }
 
 .detail-side-panel {
@@ -2684,7 +3012,7 @@ function weekRangeLabel(anchorDate: string) {
 
 @media (max-width: 1440px) {
   .detail-board {
-    grid-template-columns: minmax(272px, 300px) minmax(0, 1fr) minmax(416px, 448px);
+    --detail-side-col: minmax(416px, 448px);
   }
 }
 
@@ -2693,9 +3021,22 @@ function weekRangeLabel(anchorDate: string) {
     display: none;
   }
 
+  .detail-board.left-panel-active .detail-left-panel {
+    display: flex;
+  }
+
+  .detail-board.left-panel-active .detail-main-panel,
+  .detail-board.left-panel-active .detail-side-panel {
+    display: none;
+  }
+
   .detail-board {
     grid-template-columns: minmax(0, 1fr);
     overflow: auto;
+  }
+
+  .detail-board.left-panel-active {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .detail-main-panel {

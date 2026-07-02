@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import IconChevronDown from '~icons/lucide/chevron-down'
 import IconLogOut from '~icons/lucide/log-out'
@@ -53,12 +53,15 @@ const userStore = useUserStore()
 const feedbackStore = useFeedbackStore()
 
 const userMenuPanelRef = ref<HTMLElement | null>(null)
+const userMenuPortalRef = ref<HTMLElement | null>(null)
+const embeddedProfileTriggerRef = ref<HTMLElement | null>(null)
 const settingsMenuWrapRef = ref<HTMLElement | null>(null)
 const settingsMenuPanelRef = ref<HTMLElement | null>(null)
 const glassTriggerRef = ref<HTMLElement | null>(null)
 const glassPanelRef = ref<HTMLElement | null>(null)
 const glassPanelPosition = ref({ top: 0, right: 16 })
 const settingsMenuPosition = ref({ top: 0, right: 16 })
+const userMenuPosition = ref({ top: 0, left: 16, width: 240, arrowCenter: 120 })
 const { glassSettings, glassStyle, resetGlassSettings } = useDashboardGlassSettings()
 const isGlassPanelOpen = ref(false)
 const isSettingsMenuOpen = ref(false)
@@ -81,6 +84,21 @@ const settingsMenuPanelStyle = computed(() => {
   return {
     top: `${position.top}px`,
     right: `${position.right}px`,
+  }
+})
+
+const userMenuTeleportTarget = computed(() => props.portalTarget ?? 'body')
+
+const userMenuPanelStyle = computed(() => {
+  if (!props.embedded || !props.portalTarget) return undefined
+
+  const position = userMenuPosition.value
+  return {
+    top: `${position.top}px`,
+    left: `${position.left}px`,
+    width: `${position.width}px`,
+    '--user-menu-arrow-center': `${position.arrowCenter}px`,
+    ...glassStyle.value,
   }
 })
 
@@ -107,13 +125,74 @@ watch(isNotificationPanelOpen, (open) => {
   closeSettingsMenu()
 })
 
+watch(isUserMenuOpen, async (open) => {
+  if (open && props.embedded) {
+    await nextTick()
+    updateUserMenuPosition()
+  }
+})
+
+watch(
+  () => props.portalTarget,
+  () => {
+    if (isUserMenuOpen.value && props.embedded) updateUserMenuPosition()
+  },
+)
+
+function updateUserMenuPosition() {
+  const wrap = userMenuPanelRef.value
+  if (!wrap) return
+
+  const avatar = wrap.querySelector('.embedded-profile img')
+  const anchor =
+    avatar instanceof HTMLElement
+      ? avatar
+      : embeddedProfileTriggerRef.value ?? wrap.querySelector('.embedded-profile')
+  if (!(anchor instanceof HTMLElement)) return
+
+  const anchorRect = anchor.getBoundingClientRect()
+  const padding = 12
+  const panelWidth = 240
+
+  if (props.embedded && props.portalTarget) {
+    const containerRect = props.portalTarget.getBoundingClientRect()
+    let left = anchorRect.left + anchorRect.width / 2 - containerRect.left - panelWidth / 2
+    left = Math.max(padding, Math.min(left, containerRect.width - panelWidth - padding))
+    const top = Math.max(padding, anchorRect.bottom - containerRect.top + 8)
+    const panelRightAbs = containerRect.left + left + panelWidth
+    const avatarCenterX = anchorRect.left + anchorRect.width / 2
+    const arrowCenter = Math.max(28, Math.min(panelWidth - 28, panelRightAbs - avatarCenterX))
+
+    userMenuPosition.value = {
+      top,
+      left,
+      width: panelWidth,
+      arrowCenter,
+    }
+    return
+  }
+
+  userMenuPosition.value = {
+    top: anchorRect.bottom + 14,
+    left: anchorRect.left,
+    width: panelWidth,
+    arrowCenter: 31,
+  }
+}
+
 function toggleUserMenu() {
   if (!isUserMenuOpen.value) {
     closeNotificationPanel()
     closeGlassPanel()
     closeSettingsMenu()
+    if (props.embedded) updateUserMenuPosition()
   }
+
   isUserMenuOpen.value = !isUserMenuOpen.value
+
+  if (props.embedded && isUserMenuOpen.value) {
+    void nextTick(() => updateUserMenuPosition())
+  }
 }
 
 function updateSettingsMenuPosition() {
@@ -212,12 +291,15 @@ async function handleLogout() {
 
 function handleDocumentPointerDown(event: PointerEvent) {
   const target = event.target as Node
-  const userMenuElement = userMenuPanelRef.value
   const glassElement = glassPanelRef.value
   const settingsMenuElement = settingsMenuPanelRef.value
 
-  if (isUserMenuOpen.value && userMenuElement && !userMenuElement.contains(target)) {
-    closeUserMenu()
+  if (isUserMenuOpen.value) {
+    const insideUserMenu =
+      userMenuPanelRef.value?.contains(target) || userMenuPortalRef.value?.contains(target)
+    if (!insideUserMenu) {
+      closeUserMenu()
+    }
   }
 
   const glassTriggerElement = glassTriggerRef.value
@@ -262,13 +344,21 @@ onBeforeUnmount(() => {
     :class="{
       'without-tools': !props.showToolDock,
       'is-embedded': props.embedded,
+      'notification-open': props.embedded && isNotificationPanelOpen,
+      'user-menu-open': props.embedded && isUserMenuOpen,
     }"
     :style="props.embedded ? undefined : glassStyle"
     aria-label="顶部导航"
     data-tour-target="dashboard-topbar"
   >
-    <div v-if="props.embedded" ref="userMenuPanelRef" class="embedded-profile-wrap">
+    <div
+      v-if="props.embedded"
+      ref="userMenuPanelRef"
+      class="embedded-profile-wrap"
+      :class="{ 'is-open': isUserMenuOpen }"
+    >
       <button
+        ref="embeddedProfileTriggerRef"
         class="embedded-profile"
         type="button"
         aria-label="个人中心"
@@ -283,33 +373,37 @@ onBeforeUnmount(() => {
         </span>
       </button>
 
-      <Transition name="user-menu-popover">
-        <section
-          v-if="isUserMenuOpen"
-          id="dashboard-user-menu"
-          class="user-menu-panel"
-          aria-label="个人中心"
-        >
-          <span class="user-menu-panel__arrow" aria-hidden="true" />
-          <header class="user-menu-panel__header">
-            <img :src="avatarUrl" alt="" />
-            <div>
-              <strong>{{ displayName }}</strong>
-              <span>{{ department }}</span>
-            </div>
-          </header>
-
-          <button
-            class="user-menu-panel__logout"
-            type="button"
-            :disabled="isLoggingOut"
-            @click="handleLogout"
+      <Teleport :to="userMenuTeleportTarget" :disabled="!props.embedded || !props.portalTarget">
+        <Transition name="user-menu-popover">
+          <section
+            v-if="isUserMenuOpen"
+            id="dashboard-user-menu"
+            ref="userMenuPortalRef"
+            class="user-menu-panel is-scoped-portal"
+            :style="userMenuPanelStyle"
+            aria-label="个人中心"
           >
-            <IconLogOut aria-hidden="true" />
-            <span>{{ isLoggingOut ? '正在退出…' : '退出登录' }}</span>
-          </button>
-        </section>
-      </Transition>
+            <span class="user-menu-panel__arrow" aria-hidden="true" />
+            <header class="user-menu-panel__header">
+              <img :src="avatarUrl" alt="" />
+              <div>
+                <strong>{{ displayName }}</strong>
+                <span>{{ department }}</span>
+              </div>
+            </header>
+
+            <button
+              class="user-menu-panel__logout"
+              type="button"
+              :disabled="isLoggingOut"
+              @click="handleLogout"
+            >
+              <IconLogOut aria-hidden="true" />
+              <span>{{ isLoggingOut ? '正在退出…' : '退出登录' }}</span>
+            </button>
+          </section>
+        </Transition>
+      </Teleport>
     </div>
 
     <div v-else class="brand-block" aria-label="华力企业级AI平台">
@@ -913,6 +1007,54 @@ onBeforeUnmount(() => {
   z-index: 30;
 }
 
+.user-menu-panel.is-scoped-portal {
+  top: auto;
+  right: auto;
+  left: auto;
+  z-index: 12;
+  overflow: visible;
+  border: 1px solid rgba(255, 255, 255, var(--glass-border-opacity, 0.58));
+  background: radial-gradient(
+      circle at 22% 20%,
+      rgba(255, 255, 255, var(--glass-highlight-opacity, 0.62)),
+      rgba(255, 255, 255, 0) 34%
+    ),
+    linear-gradient(
+      145deg,
+      rgba(255, 255, 255, var(--glass-gradient-start, 0.24)),
+      rgba(238, 246, 255, var(--glass-gradient-end, 0.16))
+    ),
+    rgba(248, 252, 255, calc(var(--glass-base-opacity, 0.18) + 0.04));
+  backdrop-filter: blur(calc(var(--glass-blur, 24px) + 4px))
+    saturate(calc(var(--glass-saturate, 1.16) + 0.12));
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur, 24px) + 4px))
+    saturate(calc(var(--glass-saturate, 1.16) + 0.12));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.68),
+    0 20px 36px -24px rgba(15, 23, 42, 0.24);
+}
+
+.user-menu-panel.is-scoped-portal .user-menu-panel__arrow::before {
+  border-color: rgba(255, 255, 255, var(--glass-border-opacity, 0.64));
+  background: rgba(248, 252, 255, calc(var(--glass-base-opacity, 0.18) + 0.34));
+  backdrop-filter: blur(var(--glass-blur, 24px));
+  -webkit-backdrop-filter: blur(var(--glass-blur, 24px));
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.72),
+    0 -2px 6px -4px rgba(15, 23, 42, 0.12);
+}
+
+.user-menu-panel.is-scoped-portal .user-menu-panel__header,
+.user-menu-panel.is-scoped-portal .user-menu-panel__logout {
+  position: relative;
+  z-index: 1;
+  background: inherit;
+}
+
+.user-menu-panel.is-scoped-portal .user-menu-panel__header {
+  border-radius: 18px 18px 0 0;
+}
+
 .user-menu-panel__arrow {
   position: absolute;
   top: -11px;
@@ -1116,7 +1258,7 @@ onBeforeUnmount(() => {
   height: 60px;
   min-height: 60px;
   margin: 8px auto 0;
-  padding: 0 24px;
+  padding: 5px 24px;
   display: grid;
   grid-template-columns: minmax(270px, 0.78fr) minmax(560px, auto) minmax(270px, 0.78fr);
   align-items: center;
@@ -1125,6 +1267,11 @@ onBeforeUnmount(() => {
 
 .dashboard-topbar.without-tools {
   grid-template-columns: minmax(270px, 1fr) auto;
+}
+
+.dashboard-topbar.is-embedded.notification-open,
+.dashboard-topbar.is-embedded.user-menu-open {
+  z-index: 13;
 }
 
 .dashboard-topbar.is-embedded {
@@ -1153,6 +1300,14 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
+  z-index: 1;
+}
+
+.embedded-profile-wrap.is-open .embedded-profile img {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.94),
+    0 0 0 2px rgba(67, 139, 255, 0.18),
+    0 10px 22px -14px rgba(67, 139, 255, 0.42);
 }
 
 .embedded-profile {

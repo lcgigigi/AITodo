@@ -134,3 +134,92 @@ export function compareEvents(a: CalendarEvent, b: CalendarEvent) {
   if ((a.time || '') !== (b.time || '')) return (a.time || '').localeCompare(b.time || '')
   return a.title.localeCompare(b.title, 'zh-CN')
 }
+
+function normalizeShowDateTime(value?: string) {
+  if (!value) return ''
+  const normalized = value.replace('T', ' ').trim()
+  return normalized.replace(/^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}):\d{2}$/, '$1')
+}
+
+export function formatTodoDetailTimeField(event: CalendarEvent): string | string[] {
+  const timeType = event.timeType ?? (event.endDate ? 2 : 1)
+  const start = normalizeShowDateTime(event.startDateShow)
+  const end = normalizeShowDateTime(event.endDateShow)
+
+  if (timeType === 2) {
+    if (start && end) {
+      return [start, end]
+    }
+    if (start) {
+      return start
+    }
+    return formatEventTime(event)
+  }
+
+  if (start) {
+    return start
+  }
+
+  return formatEventTime(event)
+}
+
+export function getSmartTodoKindLabel(event: CalendarEvent) {
+  return event.type === 'meeting' ? '会议' : '普通待办'
+}
+
+export function getBackendTodoStatusLabel(event: CalendarEvent) {
+  if (event.receiveStatus === 2) return '待接受'
+  if (event.receiveStatus === 1 && event.backendStatus !== 6 && event.backendStatus !== 9) {
+    return '已接受'
+  }
+
+  switch (event.backendStatus) {
+    case 0:
+      return '待处理'
+    case 3:
+      return '已接受'
+    case 6:
+      return '已完成'
+    case 9:
+      return '已拒绝'
+    case 99:
+      return '已删除'
+    default:
+      return '待处理'
+  }
+}
+
+export function getTodoCreatorDisplayName(event: CalendarEvent) {
+  return event.creatorName || event.creatorId || '未指定'
+}
+
+export function isSelfAssignedTodo(event: CalendarEvent) {
+  if (event.scope === 'self') return true
+
+  const creatorId = event.creatorId?.trim()
+  if (!creatorId) return false
+
+  const assigneeIds =
+    event.assigneeId
+      ?.split(',')
+      .map((id) => id.trim())
+      .filter(Boolean) ?? []
+
+  return assigneeIds.length === 1 && assigneeIds[0] === creatorId
+}
+
+export function shouldShowTodoAssignerField(event: CalendarEvent) {
+  return !isSelfAssignedTodo(event)
+}
+
+export function getTodoAssigneeDisplayName(event: CalendarEvent) {
+  return event.assigneeName || event.owner || '未指定'
+}
+
+export function getTodoHandlerDisplayName(event: CalendarEvent) {
+  return event.handlerName || event.currentHandlerId || '未指定'
+}
+
+export function getTodoContentDisplay(event: CalendarEvent) {
+  return event.content?.trim() || '暂无内容'
+}

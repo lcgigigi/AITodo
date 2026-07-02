@@ -34,7 +34,7 @@ const SYS_MESSAGE_PAGE_SIZE = 10
 
 type DashboardNotificationOptions = {
   onCalendarRefresh?: () => void
-  onOpenTodo?: (payload: { id: string; date?: string }) => void
+  onOpenTodo?: (payload: { id: string; date?: string; source?: 'pending-inbox' }) => void
   onClose?: () => void
 }
 
@@ -42,7 +42,7 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
   const userStore = useUserStore()
   const feedbackStore = useFeedbackStore()
 
-  const activeNotificationTab = ref<NotificationTab>('sys-message')
+  const activeNotificationTab = ref<NotificationTab>('pending-todo')
   const sysMessageFilter = ref<SysMessageFilter>('unread')
   const isSysMessageLoading = ref(false)
   const isSysMessageLoadingMore = ref(false)
@@ -60,7 +60,10 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
   const activeActionMode = ref<PendingActionMode>(null)
   const rejectReason = ref('')
   const processingId = ref('')
+  const pendingTodosLoaded = ref(false)
+  const sysMessagesLoaded = ref(false)
 
+  let initializePromise: Promise<void> | null = null
   let sysMessageSocket: WebSocket | null = null
   let sysMessageReconnectTimer: ReturnType<typeof setTimeout> | null = null
   let sysMessageReconnectAttempts = 0
@@ -156,16 +159,18 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
     }
   }
 
-  async function refreshSysMessages(pageNum = 1) {
+  async function refreshSysMessages(pageNum = 1, options?: { silent?: boolean }) {
     if (!currentUser.value.id) {
       resetSysMessageState()
+      sysMessagesLoaded.value = false
       return
     }
 
     const isFirstPage = pageNum === 1
-    if (isFirstPage) {
+    const showLoading = isFirstPage && !options?.silent
+    if (showLoading) {
       isSysMessageLoading.value = true
-    } else {
+    } else if (!isFirstPage) {
       isSysMessageLoadingMore.value = true
     }
     sysMessageError.value = ''
@@ -179,6 +184,9 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
       sysMessages.value = mergeSysMessages(isFirstPage ? [] : sysMessages.value, result.rows)
       sysMessageTotal.value = result.total
       sysMessagePageNum.value = result.pageNum
+      if (isFirstPage) {
+        sysMessagesLoaded.value = true
+      }
 
       if (sysMessageFilter.value === 'unread') {
         unreadSysMessageCount.value = result.total
@@ -189,7 +197,9 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
       if (isFirstPage) sysMessages.value = []
       sysMessageError.value = error instanceof Error ? error.message : '加载站内消息失败'
     } finally {
-      isSysMessageLoading.value = false
+      if (showLoading) {
+        isSysMessageLoading.value = false
+      }
       isSysMessageLoadingMore.value = false
     }
   }
@@ -203,18 +213,18 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
     activeNotificationTab.value = tab
 
     if (tab === 'sys-message') {
-      void refreshSysMessages()
+      void refreshSysMessages(1, { silent: sysMessagesLoaded.value })
       return
     }
 
-    void refreshPendingTodos()
+    void refreshPendingTodos({ silent: pendingTodosLoaded.value })
   }
 
   function setSysMessageFilter(filter: SysMessageFilter) {
     if (sysMessageFilter.value === filter) return
 
     sysMessageFilter.value = filter
-    void refreshSysMessages()
+    void refreshSysMessages(1, { silent: sysMessagesLoaded.value })
   }
 
   function applySysMessageReadState(message: SysMessage) {
@@ -436,22 +446,29 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
     }
   }
 
-  async function refreshPendingTodos() {
+  async function refreshPendingTodos(options?: { silent?: boolean }) {
     if (!currentUser.value.id) {
       pendingTodos.value = []
+      pendingTodosLoaded.value = false
       return
     }
 
-    isPendingLoading.value = true
+    const showLoading = !options?.silent
+    if (showLoading) {
+      isPendingLoading.value = true
+    }
     pendingError.value = ''
 
     try {
       pendingTodos.value = await loadPendingTodos(currentUser.value, assignableUsers.value)
+      pendingTodosLoaded.value = true
     } catch (error) {
       pendingTodos.value = []
       pendingError.value = error instanceof Error ? error.message : '加载待接受待办失败'
     } finally {
-      isPendingLoading.value = false
+      if (showLoading) {
+        isPendingLoading.value = false
+      }
     }
   }
 
@@ -483,7 +500,7 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
     try {
       await acceptTodos(id)
       resetPendingAction()
-      await refreshPendingTodos()
+      await refreshPendingTodos({ silent: pendingTodosLoaded.value })
       options.onCalendarRefresh?.()
     } catch (error) {
       pendingError.value = error instanceof Error ? error.message : '接受待办失败'
@@ -497,7 +514,7 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
     try {
       await rejectTodo(id, rejectReason.value.trim() || '暂不处理')
       resetPendingAction()
-      await refreshPendingTodos()
+      await refreshPendingTodos({ silent: pendingTodosLoaded.value })
       options.onCalendarRefresh?.()
     } catch (error) {
       pendingError.value = error instanceof Error ? error.message : '拒绝待办失败'
@@ -507,14 +524,37 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
   }
 
   function handleOpenTodo(event: CalendarEvent) {
-    options.onOpenTodo?.({ id: event.id, date: event.date })
+    options.onOpenTodo?.({ id: event.id, date: event.date, source: 'pending-inbox' })
     options.onClose?.()
   }
 
   async function initializeNotifications() {
+    if (initializePromise) {
+      return initializePromise
+    }
+
+    initializePromise = (async () => {
+      await refreshAssignableUsers()
+      await Promise.all([refreshSysMessages(), refreshPendingTodos()])
+      connectSysMessageSocket()
+    })()
+
+    try {
+      await initializePromise
+    } finally {
+      initializePromise = null
+    }
+  }
+
+  async function refreshNotificationsOnOpen() {
+    if (!pendingTodosLoaded.value && !sysMessagesLoaded.value) {
+      await initializeNotifications()
+      return
+    }
+
     await refreshAssignableUsers()
-    await Promise.all([refreshSysMessages(), refreshPendingTodos()])
-    connectSysMessageSocket()
+    void refreshSysMessages(1, { silent: sysMessagesLoaded.value })
+    void refreshPendingTodos({ silent: pendingTodosLoaded.value })
   }
 
   onMounted(() => {
@@ -527,6 +567,8 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
       if (nextId === previousId) return
       stopSysMessageSocket()
       resetSysMessageState()
+      pendingTodosLoaded.value = false
+      sysMessagesLoaded.value = false
       void refreshAssignableUsers().then(() => refreshPendingTodos())
       void refreshSysMessages()
       if (nextId) connectSysMessageSocket()
@@ -578,6 +620,7 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
     handleRejectTodo,
     handleOpenTodo,
     initializeNotifications,
+    refreshNotificationsOnOpen,
     stopSysMessageSocket,
   }
 }

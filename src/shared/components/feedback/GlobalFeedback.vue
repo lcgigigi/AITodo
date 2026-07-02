@@ -11,7 +11,7 @@ import type { FeedbackType } from '@/stores/feedback.store'
 import { useFeedbackStore } from '@/stores/feedback.store'
 
 const feedbackStore = useFeedbackStore()
-const { isLoading, currentToast } = storeToRefs(feedbackStore)
+const { currentToast } = storeToRefs(feedbackStore)
 
 const toastMeta: Record<FeedbackType, { title: string; icon: Component }> = {
   success: {
@@ -36,12 +36,6 @@ const toastMeta: Record<FeedbackType, { title: string; icon: Component }> = {
 <template>
   <Teleport to="body">
     <div class="global-feedback">
-      <Transition name="global-loading-fade">
-        <div v-if="isLoading" class="global-loading" aria-hidden="true">
-          <span class="global-loading__bar" />
-        </div>
-      </Transition>
-
       <div class="global-toast-region" aria-live="polite" aria-relevant="additions text">
         <Transition name="global-toast" mode="out-in">
           <article
@@ -88,27 +82,6 @@ const toastMeta: Record<FeedbackType, { title: string; icon: Component }> = {
 <style scoped>
 .global-feedback {
   pointer-events: none;
-}
-
-.global-loading {
-  position: fixed;
-  z-index: 2000;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  overflow: hidden;
-  background: color-mix(in srgb, var(--app-primary) 12%, transparent);
-}
-
-.global-loading__bar {
-  display: block;
-  width: 32%;
-  height: 100%;
-  border-radius: 0 999px 999px 0;
-  background: linear-gradient(90deg, transparent, var(--app-primary), #22c55e);
-  box-shadow: 0 0 18px color-mix(in srgb, var(--app-primary) 45%, transparent);
-  animation: global-loading-slide 1s ease-in-out infinite;
 }
 
 .global-toast-region {
@@ -267,16 +240,6 @@ const toastMeta: Record<FeedbackType, { title: string; icon: Component }> = {
   --toast-accent: #f59e0b;
 }
 
-.global-loading-fade-enter-active,
-.global-loading-fade-leave-active {
-  transition: opacity 0.18s ease;
-}
-
-.global-loading-fade-enter-from,
-.global-loading-fade-leave-to {
-  opacity: 0;
-}
-
 .global-toast-enter-active,
 .global-toast-leave-active {
   transition:
@@ -292,15 +255,6 @@ const toastMeta: Record<FeedbackType, { title: string; icon: Component }> = {
 .global-toast-leave-to {
   opacity: 0;
   transform: translateY(-16px) scale(0.95);
-}
-
-@keyframes global-loading-slide {
-  0% {
-    transform: translateX(-120%);
-  }
-  100% {
-    transform: translateX(320%);
-  }
 }
 
 @keyframes global-toast-breathe {
@@ -340,19 +294,11 @@ const toastMeta: Record<FeedbackType, { title: string; icon: Component }> = {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .global-loading__bar {
-    animation: none;
-    width: 100%;
-    border-radius: 0;
-  }
-
   .global-toast__progress,
   .global-toast__icon {
     animation: none;
   }
 
-  .global-loading-fade-enter-active,
-  .global-loading-fade-leave-active,
   .global-toast-enter-active,
   .global-toast-leave-active {
     transition: none;

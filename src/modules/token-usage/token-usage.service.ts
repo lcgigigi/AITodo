@@ -134,7 +134,6 @@ async function requestTokenUsageData<T>(url: string, fallbackMessage: string) {
     method: 'GET',
     url,
     timeout: TOKEN_USAGE_REQUEST_TIMEOUT,
-    showLoading: false,
   })
 
   return unwrapTokenUsageResponse(response.data, fallbackMessage)
