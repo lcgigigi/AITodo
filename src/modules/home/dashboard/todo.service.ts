@@ -460,6 +460,15 @@ function normalizeBackendTodos(
     .sort(compareEvents)
 }
 
+function matchAssignableUser(token: string, assignableUsers: CalendarUser[]) {
+  if (!token) return undefined
+
+  return assignableUsers.find(
+    (user) =>
+      user.id === token || user.name === token || token.includes(user.name),
+  )
+}
+
 function findAssignees(
   assigneeId: string | number | undefined,
   assigneeIds: string | undefined,
@@ -479,10 +488,7 @@ function findAssignees(
     return findAssignee(assigneeId, currentUser, assignableUsers, fallback)
   }
 
-  const matched = ids.map((id) => {
-    const user = assignableUsers.find((item) => item.id === id)
-    return user ?? { id, name: id }
-  })
+  const matched = ids.map((token) => matchAssignableUser(token, assignableUsers) ?? { id: token, name: token })
 
   return {
     id: matched.map((user) => user.id).join(','),
@@ -497,13 +503,7 @@ function findAssignee(
   fallback: ParsedTodoDraft,
 ) {
   const normalizedAssignee = toId(assigneeText)
-  const matchedAssignee = assignableUsers.find(
-    (user) =>
-      normalizedAssignee &&
-      (user.id === normalizedAssignee ||
-        user.name === normalizedAssignee ||
-        normalizedAssignee.includes(user.name)),
-  )
+  const matchedAssignee = matchAssignableUser(normalizedAssignee, assignableUsers)
 
   if (matchedAssignee) return matchedAssignee
 
@@ -831,7 +831,9 @@ export async function loadPendingTodos(currentUser: CalendarUser, users: Calenda
     '查询待接受待办失败',
   )
 
-  return normalizeBackendTodos(items, currentUser, users)
+  return normalizeBackendTodos(items, currentUser, users).filter(
+    (event) => event.backendStatus !== 9,
+  )
 }
 
 export async function loadTodayTodos(

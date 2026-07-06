@@ -10,11 +10,15 @@ import bgNoon from '@/assets/noon.png'
 import bgAfternoon from '@/assets/afternoon.png'
 import bgNight from '@/assets/night.png'
 import { useFeedbackStore } from '@/stores/feedback.store'
+import { useDashboardTodosStore } from '@/stores/dashboard-todos.store'
 import { useUserStore } from '@/stores/user.store'
 import CalendarWorkspace from './dashboard/CalendarWorkspace.vue'
 import DashboardTopBar from './dashboard/DashboardTopBar.vue'
 import DetailedDashboardWorkspace from './dashboard/DetailedDashboardWorkspace.vue'
 import OnboardingTour from './dashboard/components/OnboardingTour.vue'
+import { getHomeTimePeriod } from './dashboard/homeTimeOfDay'
+import { useHomeClock } from './dashboard/useHomeClock'
+import { ymd } from './dashboard/todoDisplay'
 import { dispatchDashboardOnboardingTourStart } from './dashboard/onboardingTour'
 import {
   selectEmailProvider as submitEmailProvider,
@@ -73,19 +77,22 @@ const emailProviderOptions: EmailProviderOption[] = [
 const calendarWorkspaceRef = ref<CalendarWorkspaceExpose | null>(null)
 const detailedDashboardWorkspaceRef = ref<DetailedDashboardWorkspaceExpose | null>(null)
 const homeViewMode = ref<HomeViewMode>('simple')
+const sharedSelectedDate = ref(ymd(new Date()))
 const selectedEmailProvider = ref<SmartTodoEmailProvider | ''>('')
 const isEmailProviderSaving = ref(false)
 const userStore = useUserStore()
 const feedbackStore = useFeedbackStore()
+const dashboardTodosStore = useDashboardTodosStore()
+const { now } = useHomeClock()
 
-const hour = new Date().getHours()
-let bgIndex = 0
-if (hour >= 11 && hour < 14) bgIndex = 1
-else if (hour >= 14 && hour < 18) bgIndex = 2
-else if (hour >= 18 || hour < 6) bgIndex = 3
+const bgImages = {
+  morning: bgMorning,
+  noon: bgNoon,
+  afternoon: bgAfternoon,
+  night: bgNight,
+} as const
 
-const bgImages = [bgMorning, bgNoon, bgAfternoon, bgNight]
-const currentBgImage = bgImages[bgIndex]
+const currentBgImage = computed(() => bgImages[getHomeTimePeriod(now.value)])
 
 const shouldShowEmailProviderGate = computed(() => {
   const checkEmail = userStore.profile?.checkEmail
@@ -93,12 +100,7 @@ const shouldShowEmailProviderGate = computed(() => {
 })
 
 function handleCalendarRefresh() {
-  if (homeViewMode.value === 'detail') {
-    void detailedDashboardWorkspaceRef.value?.refreshTodos()
-    return
-  }
-
-  void calendarWorkspaceRef.value?.refreshTodos()
+  void dashboardTodosStore.reloadCurrentRange()
 }
 
 async function handleOpenTodo(payload: { id: string; date?: string }) {
@@ -155,23 +157,26 @@ async function confirmEmailProvider() {
       <DashboardTopBar
         v-if="homeViewMode === 'detail'"
         hide-notifications
-        :show-tool-dock="false"
         @calendar-refresh="handleCalendarRefresh"
         @open-todo="handleOpenTodo"
         @start-onboarding="startOnboardingTour"
       />
       <div class="dashboard-content">
-        <CalendarWorkspace
-          v-if="homeViewMode === 'simple'"
-          ref="calendarWorkspaceRef"
-          @switch-mode="setHomeViewMode"
-          @start-onboarding="startOnboardingTour"
-        />
-        <DetailedDashboardWorkspace
-          v-else
-          ref="detailedDashboardWorkspaceRef"
-          @switch-mode="setHomeViewMode"
-        />
+        <KeepAlive>
+          <CalendarWorkspace
+            v-if="homeViewMode === 'simple'"
+            ref="calendarWorkspaceRef"
+            v-model:selected-date="sharedSelectedDate"
+            @switch-mode="setHomeViewMode"
+            @start-onboarding="startOnboardingTour"
+          />
+          <DetailedDashboardWorkspace
+            v-else
+            ref="detailedDashboardWorkspaceRef"
+            v-model:selected-date="sharedSelectedDate"
+            @switch-mode="setHomeViewMode"
+          />
+        </KeepAlive>
       </div>
     </main>
 

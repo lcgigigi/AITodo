@@ -21,7 +21,10 @@ import IconTrendingUp from '~icons/lucide/trending-up'
 import IconTrophy from '~icons/lucide/trophy'
 import IconUserRound from '~icons/lucide/user-round'
 import {
+  getTokenUsagePeriodDayCount,
   loadAdminTokenDashboard,
+  resolveTokenUsageDateRange,
+  sumDailyTokenUsage,
   type AdminTokenUsageDashboard,
   type AdminTokenUsageModule,
   type TokenUsagePeriodCode,
@@ -238,13 +241,21 @@ function getPeriodName(periodCode: TokenUsagePeriodCode) {
 }
 
 function getPeriodTokenUsage(module: AdminTokenUsageModule, periodCode: TokenUsagePeriodCode) {
-  return module.periodList.find((period) => period.periodCode === periodCode)?.tokenUsage ?? 0
+  return sumDailyTokenUsage(module.dailyList, periodCode)
 }
 
-function getPeriodDayCount(periodCode: TokenUsagePeriodCode) {
-  if (periodCode === 'today') return 1
-  if (periodCode === 'last7Days') return 7
-  return 30
+function getSelectedTrendDates(periodCode: TokenUsagePeriodCode) {
+  const dates = new Set<string>()
+
+  for (const dept of tokenDashboard.value?.deptList ?? []) {
+    for (const module of dept.moduleList) {
+      for (const point of module.dailyList) {
+        dates.add(point.usageDate)
+      }
+    }
+  }
+
+  return [...dates].sort().slice(-getTokenUsagePeriodDayCount(periodCode))
 }
 
 function formatDateLabel(date: string) {
@@ -261,20 +272,6 @@ function formatTokenCompact(value: number) {
     notation: 'compact',
     maximumFractionDigits: 1,
   }).format(value)
-}
-
-function getSelectedTrendDates(periodCode: TokenUsagePeriodCode) {
-  const dates = new Set<string>()
-
-  for (const dept of tokenDashboard.value?.deptList ?? []) {
-    for (const module of dept.moduleList) {
-      for (const point of module.dailyList) {
-        dates.add(point.usageDate)
-      }
-    }
-  }
-
-  return [...dates].sort().slice(-getPeriodDayCount(periodCode))
 }
 
 function aggregateModuleDailyList(moduleList: AdminTokenUsageModule[], selectedDates: Set<string>) {
@@ -825,7 +822,7 @@ async function refreshTokenDashboard() {
   dashboardError.value = ''
 
   try {
-    tokenDashboard.value = await loadAdminTokenDashboard()
+    tokenDashboard.value = await loadAdminTokenDashboard(resolveTokenUsageDateRange('last30Days'))
     await nextTick()
     currentDisplayedTotal = trendDataset.value.selectedTotal || 0
     renderAllCharts()

@@ -1,8 +1,24 @@
 import { httpClient } from '@/shared/request/http'
+import {
+  type TokenUsageDateRange,
+  type TokenUsageDailyPoint,
+  type TokenUsagePeriodCode,
+} from './token-usage.helpers'
+
+export type {
+  TokenUsageDateRange,
+  TokenUsageDailyPoint,
+  TokenUsagePeriodCode,
+} from './token-usage.helpers'
+export {
+  collectTrendDates,
+  getTokenUsagePeriodDayCount,
+  getTokenUsagePeriodName,
+  resolveTokenUsageDateRange,
+  sumDailyTokenUsage,
+} from './token-usage.helpers'
 
 const TOKEN_USAGE_REQUEST_TIMEOUT = 60_000
-
-export type TokenUsagePeriodCode = 'today' | 'last7Days' | 'last30Days' | string
 
 interface TokenUsageResponse<T = unknown> {
   code?: number
@@ -50,11 +66,6 @@ interface AdminTokenDeptPayload {
 interface AdminTokenDashboardPayload {
   totalTokenUsage?: number | string | null
   deptList?: AdminTokenDeptPayload[] | null
-}
-
-export interface TokenUsageDailyPoint {
-  usageDate: string
-  tokenUsage: number
 }
 
 export interface TokenUsageModulePeriod {
@@ -109,6 +120,11 @@ export interface AdminTokenUsageDashboard {
   deptList: AdminTokenUsageDept[]
 }
 
+export interface TokenUsageDeptOption {
+  deptId: string
+  deptName: string
+}
+
 function getResponseMessage(response: TokenUsageResponse, fallbackMessage: string) {
   return response.msg || response.message || fallbackMessage
 }
@@ -129,10 +145,15 @@ function unwrapTokenUsageResponse<T>(response: TokenUsageResponse<T>, fallbackMe
   return response.data
 }
 
-async function requestTokenUsageData<T>(url: string, fallbackMessage: string) {
+async function requestTokenUsageData<T>(
+  url: string,
+  fallbackMessage: string,
+  params?: Record<string, string>,
+) {
   const response = await httpClient.request<TokenUsageResponse<T>>({
     method: 'GET',
     url,
+    params,
     timeout: TOKEN_USAGE_REQUEST_TIMEOUT,
   })
 
@@ -213,10 +234,25 @@ function normalizeAdminDept(item: AdminTokenDeptPayload): AdminTokenUsageDept {
   }
 }
 
-export async function loadCurrentUserTokenUsage(): Promise<CurrentUserTokenUsage> {
+function normalizeDeptOption(item: AdminTokenDeptPayload): TokenUsageDeptOption {
+  const deptId = toText(item.deptId)
+
+  return {
+    deptId,
+    deptName: toText(item.deptName) || deptId || '未命名部门',
+  }
+}
+
+export async function loadCurrentUserTokenUsage(
+  range: TokenUsageDateRange,
+): Promise<CurrentUserTokenUsage> {
   const payload = await requestTokenUsageData<CurrentUserTokenUsagePayload>(
     '/token-usage/current-user',
     '查询当前用户 Token 用量失败',
+    {
+      startDate: range.startDate,
+      endDate: range.endDate,
+    },
   )
 
   return {
@@ -228,14 +264,29 @@ export async function loadCurrentUserTokenUsage(): Promise<CurrentUserTokenUsage
   }
 }
 
-export async function loadAdminTokenDashboard(): Promise<AdminTokenUsageDashboard> {
+export async function loadAdminTokenDashboard(
+  range: TokenUsageDateRange,
+): Promise<AdminTokenUsageDashboard> {
   const payload = await requestTokenUsageData<AdminTokenDashboardPayload>(
     '/token-usage/admin-dashboard',
     '查询管理员 Token 看板失败',
+    {
+      startDate: range.startDate,
+      endDate: range.endDate,
+    },
   )
 
   return {
     totalTokenUsage: toNumber(payload.totalTokenUsage),
     deptList: (payload.deptList ?? []).map(normalizeAdminDept),
   }
+}
+
+export async function loadTokenUsageDeptList(): Promise<TokenUsageDeptOption[]> {
+  const payload = await requestTokenUsageData<AdminTokenDeptPayload[]>(
+    '/token-usage/dept-list',
+    '查询二级部门列表失败',
+  )
+
+  return (payload ?? []).map(normalizeDeptOption).filter((dept) => dept.deptId || dept.deptName)
 }

@@ -6,7 +6,7 @@ import IconExternalLink from '~icons/lucide/external-link'
 import IconTrash2 from '~icons/lucide/trash-2'
 import IconX from '~icons/lucide/x'
 import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
-import { formatEventTime } from '@/modules/home/dashboard/todoDisplay'
+import type { InboxItem } from '@/modules/home/dashboard/notification.inbox'
 import { useDashboardGlassSettings } from '@/modules/home/dashboard/useDashboardGlassSettings'
 import { useDashboardNotifications } from '@/modules/home/dashboard/useDashboardNotifications'
 
@@ -60,45 +60,36 @@ function closePanel() {
 }
 
 const {
-  activeNotificationTab,
-  sysMessageFilter,
-  isSysMessageLoading,
-  isSysMessageLoadingMore,
-  sysMessageError,
-  sysMessages,
-  unreadSysMessageCount,
+  inboxFilter,
+  isInboxLoading,
+  isInboxLoadingMore,
+  isInboxListLoading,
+  inboxError,
+  filteredInboxItems,
+  actionableInboxCount,
+  inboxTotalCount,
   unreadNotificationCount,
   processingSysMessageId,
-  isPendingLoading,
   pendingError,
-  pendingTodos,
   activeActionId,
   activeActionMode,
   rejectReason,
   processingId,
-  hasMoreSysMessages,
-  sysMessageSummary,
-  isPendingConfirmOnly,
-  getSysMessageStatusText,
-  getSysMessageBizLabel,
-  isSysMessageOpenable,
-  formatSysMessageTime,
-  getSysMessagePreview,
-  refreshSysMessages,
-  loadMoreSysMessages,
-  setNotificationTab,
-  setSysMessageFilter,
-  handleMarkSysMessageRead,
-  handleMarkAllSysMessagesRead,
-  handleDeleteSysMessage,
-  handleOpenSysMessage,
+  hasMoreInboxMessages,
+  formatInboxTime,
+  isInboxItemOpenable,
+  refreshInbox,
+  loadMoreInboxMessages,
+  setInboxFilter,
+  handleMarkInboxItemRead,
+  handleMarkAllInboxRead,
+  handleDeleteInboxItem,
+  handleOpenInboxItem,
   refreshPendingTodos,
   resetPendingAction,
-  pendingSummary,
   togglePendingAction,
   handleAcceptTodo,
   handleRejectTodo,
-  handleOpenTodo,
   initializeNotifications,
   refreshNotificationsOnOpen,
 } = useDashboardNotifications({
@@ -109,6 +100,11 @@ const {
 
 const isEmbedded = computed(() => props.layout === 'embedded')
 const isPopoverOpen = computed(() => (isEmbedded.value ? true : props.open))
+
+function shouldShowInboxSummary(item: InboxItem) {
+  if (item.kind === 'todo_pending') return Boolean(item.summary)
+  return Boolean(item.summary && item.summary !== '暂无消息内容')
+}
 
 const scopedBackdropStyle = computed(() => {
   if (!isScopedPortal.value) return undefined
@@ -326,15 +322,13 @@ defineExpose({
           <header class="notification-panel__header">
             <div>
               <strong>消息中心</strong>
-              <span>{{ sysMessageSummary }} · 待处理 {{ pendingTodos.length }}</span>
             </div>
             <button
-              v-if="activeNotificationTab === 'sys-message'"
               type="button"
               aria-label="全部标记已读"
               title="全部标记已读"
-              :disabled="unreadSysMessageCount === 0 || processingSysMessageId === 'all'"
-              @click="handleMarkAllSysMessagesRead()"
+              :disabled="actionableInboxCount === 0 || processingSysMessageId === 'all'"
+              @click="handleMarkAllInboxRead()"
             >
               <IconCheckCheck />
             </button>
@@ -349,122 +343,143 @@ defineExpose({
             </button>
           </header>
 
-          <div
-            class="notification-tabs"
-            role="tablist"
-            aria-label="消息分类"
-            data-tour-target="notification-tabs"
-          >
+          <div class="notification-filter" aria-label="消息筛选">
             <button
               type="button"
-              role="tab"
-              :aria-selected="activeNotificationTab === 'pending-todo'"
-              :class="{ active: activeNotificationTab === 'pending-todo' }"
-              @click="setNotificationTab('pending-todo')"
+              :class="{ active: inboxFilter === 'actionable' }"
+              @click="setInboxFilter('actionable')"
             >
-              待接受待办
-              <span>{{ pendingTodos.length }}</span>
+              待处理
+              <span>{{ actionableInboxCount }}</span>
             </button>
             <button
               type="button"
-              role="tab"
-              :aria-selected="activeNotificationTab === 'sys-message'"
-              :class="{ active: activeNotificationTab === 'sys-message' }"
-              @click="setNotificationTab('sys-message')"
+              :class="{ active: inboxFilter === 'all' }"
+              @click="setInboxFilter('all')"
             >
-              站内消息
-              <span>{{ unreadSysMessageCount }}</span>
+              全部
+              <span>{{ inboxTotalCount }}</span>
             </button>
           </div>
 
-          <template v-if="activeNotificationTab === 'sys-message'">
-            <div class="notification-filter" aria-label="站内消息筛选">
-              <button
-                type="button"
-                :class="{ active: sysMessageFilter === 'unread' }"
-                @click="setSysMessageFilter('unread')"
-              >
-                未读
-              </button>
-              <button
-                type="button"
-                :class="{ active: sysMessageFilter === 'all' }"
-                @click="setSysMessageFilter('all')"
-              >
-                全部
-              </button>
-            </div>
+          <div class="notification-list" data-tour-target="notification-list">
+            <AppStateBlock
+              v-if="inboxError || pendingError"
+              class="notification-state"
+              type="error"
+              title="消息加载失败"
+              :description="inboxError || pendingError"
+              action-label="重新加载"
+              size="sm"
+              variant="inline"
+              @action="refreshInbox()"
+            />
+            <AppStateBlock
+              v-else-if="isInboxListLoading"
+              class="notification-state"
+              type="loading"
+              title="正在加载消息"
+              description="待办通知和协作消息会在这里汇总展示。"
+              size="sm"
+              variant="inline"
+            />
+            <AppStateBlock
+              v-else-if="!filteredInboxItems.length"
+              class="notification-state"
+              type="empty"
+              :title="inboxFilter === 'actionable' ? '暂无待处理消息' : '暂无消息'"
+              description="别人派发给你的待办、会议提醒和系统通知都会出现在这里。"
+              size="sm"
+              variant="inline"
+            />
 
-            <div class="notification-list" data-tour-target="notification-list">
-              <AppStateBlock
-                v-if="sysMessageError"
-                class="notification-state"
-                type="error"
-                title="站内消息加载失败"
-                :description="sysMessageError"
-                action-label="重新加载"
-                size="sm"
-                variant="inline"
-                @action="refreshSysMessages()"
+            <article
+              v-for="item in filteredInboxItems"
+              :key="item.id"
+              class="notification-item"
+              :class="{
+                'is-unread': item.isUnread,
+                'is-clickable': item.kind === 'todo_pending',
+              }"
+              :role="item.kind === 'todo_pending' ? 'button' : undefined"
+              :tabindex="item.kind === 'todo_pending' ? 0 : undefined"
+              @click="item.kind === 'todo_pending' ? handleOpenInboxItem(item) : undefined"
+              @keydown.enter="item.kind === 'todo_pending' ? handleOpenInboxItem(item) : undefined"
+              @keydown.space.prevent="
+                item.kind === 'todo_pending' ? handleOpenInboxItem(item) : undefined
+              "
+            >
+              <span
+                class="notification-item__marker"
+                :class="item.markerClass"
+                aria-hidden="true"
               />
-              <AppStateBlock
-                v-else-if="isSysMessageLoading"
-                class="notification-state"
-                type="loading"
-                title="正在加载站内消息"
-                description="消息同步后会自动展示。"
-                size="sm"
-                variant="inline"
-              />
-              <AppStateBlock
-                v-else-if="!sysMessages.length"
-                class="notification-state"
-                type="empty"
-                :title="sysMessageFilter === 'unread' ? '暂无未读消息' : '暂无站内消息'"
-                description="新的待办、会议和系统通知会出现在这里。"
-                size="sm"
-                variant="inline"
-              />
-
-              <article
-                v-for="message in sysMessages"
-                :key="message.id"
-                class="notification-item"
-                :class="{ 'is-unread': message.msgStatus === 0 }"
-              >
-                <span
-                  class="notification-item__marker"
-                  :class="message.bizType === 2 ? 'is-green' : 'is-blue'"
-                  aria-hidden="true"
-                />
-                <div class="notification-item__content">
-                  <div class="notification-item__title-row">
-                    <strong>{{ message.msgSubject }}</strong>
-                    <time>{{ formatSysMessageTime(message.createTime) }}</time>
-                  </div>
-                  <p>{{ getSysMessagePreview(message.msgContent) || '暂无消息内容' }}</p>
-                  <div class="notification-item__meta-row">
-                    <span>{{ getSysMessageBizLabel(message) }}</span>
-                    <span>{{ getSysMessageStatusText(message) }}</span>
-                  </div>
-
-                  <div class="notification-item__actions">
-                    <button
-                      v-if="isSysMessageOpenable(message)"
-                      type="button"
-                      class="action-btn is-view has-icon"
-                      :disabled="processingSysMessageId === message.id"
-                      @click="handleOpenSysMessage(message)"
+              <div class="notification-item__content">
+                <div class="notification-item__title-row">
+                  <div class="notification-item__title-group">
+                    <strong>{{ item.title }}</strong>
+                    <span
+                      class="notification-item__tag"
+                      :class="{
+                        'is-pending': item.kind === 'todo_pending',
+                        'is-meeting': item.kind === 'meeting',
+                      }"
                     >
-                      <IconExternalLink aria-hidden="true" />
-                      <span>{{ processingSysMessageId === message.id ? '打开中…' : '查看' }}</span>
+                      {{ item.statusLabel }}
+                    </span>
+                  </div>
+                  <time>{{ formatInboxTime(item.createTime) }}</time>
+                </div>
+                <p v-if="shouldShowInboxSummary(item)">{{ item.summary }}</p>
+
+                <div class="notification-item__actions" @click.stop>
+                  <template v-if="item.kind === 'todo_pending'">
+                    <button
+                      type="button"
+                      class="action-btn is-accept"
+                      :disabled="processingId === item.todoId"
+                      @click="handleAcceptTodo(item.todoId!)"
+                    >
+                      {{
+                        processingId === item.todoId && activeActionMode !== 'reject'
+                          ? '处理中…'
+                          : '接受'
+                      }}
                     </button>
                     <button
-                      v-if="message.msgStatus === 0"
+                      type="button"
+                      class="action-btn is-reject"
+                      :disabled="processingId === item.todoId"
+                      @click="togglePendingAction(item.todoId!, 'reject')"
+                    >
+                      拒绝
+                    </button>
+                    <button
+                      type="button"
+                      class="action-btn is-view"
+                      @click="handleOpenInboxItem(item)"
+                    >
+                      查看
+                    </button>
+                  </template>
+
+                  <template v-else>
+                    <button
+                      v-if="isInboxItemOpenable(item)"
+                      type="button"
+                      class="action-btn is-view has-icon"
+                      :disabled="processingSysMessageId === item.id"
+                      @click="handleOpenInboxItem(item)"
+                    >
+                      <IconExternalLink aria-hidden="true" />
+                      <span>{{ processingSysMessageId === item.id ? '打开中…' : '查看' }}</span>
+                    </button>
+                    <button
+                      v-if="item.isUnread"
                       type="button"
                       class="action-btn is-accept has-icon"
-                      :disabled="processingSysMessageId === message.id"
-                      @click="handleMarkSysMessageRead(message)"
+                      :disabled="processingSysMessageId === item.id"
+                      @click="handleMarkInboxItemRead(item)"
                     >
                       <IconCheckCheck aria-hidden="true" />
                       <span>已读</span>
@@ -472,160 +487,57 @@ defineExpose({
                     <button
                       type="button"
                       class="action-btn is-reject has-icon"
-                      :disabled="processingSysMessageId === message.id"
-                      @click="handleDeleteSysMessage(message)"
+                      :disabled="processingSysMessageId === item.id"
+                      @click="handleDeleteInboxItem(item)"
                     >
                       <IconTrash2 aria-hidden="true" />
                       <span>删除</span>
                     </button>
+                  </template>
+                </div>
+
+                <div
+                  v-if="
+                    item.kind === 'todo_pending' &&
+                    activeActionId === item.todoId &&
+                    activeActionMode === 'reject'
+                  "
+                  class="notification-item__form"
+                  @click.stop
+                >
+                  <input
+                    v-model="rejectReason"
+                    type="text"
+                    class="notification-input"
+                    placeholder="拒绝原因（可选）"
+                  />
+                  <div class="notification-item__form-actions">
+                    <button
+                      type="button"
+                      class="action-btn is-reject"
+                      :disabled="processingId === item.todoId"
+                      @click="handleRejectTodo(item.todoId!)"
+                    >
+                      确认拒绝
+                    </button>
+                    <button type="button" class="action-btn is-muted" @click="resetPendingAction()">
+                      取消
+                    </button>
                   </div>
                 </div>
-              </article>
+              </div>
+            </article>
 
-              <button
-                v-if="hasMoreSysMessages && !isSysMessageLoading"
-                type="button"
-                class="notification-load-more"
-                :disabled="isSysMessageLoadingMore"
-                @click="loadMoreSysMessages()"
-              >
-                {{ isSysMessageLoadingMore ? '加载中…' : '加载更多' }}
-              </button>
-            </div>
-          </template>
-
-          <template v-else>
-            <div class="notification-list" data-tour-target="notification-list">
-              <AppStateBlock
-                v-if="pendingError"
-                class="notification-state"
-                type="error"
-                title="待接受待办加载失败"
-                :description="pendingError"
-                action-label="重新加载"
-                size="sm"
-                variant="inline"
-                @action="refreshPendingTodos()"
-              />
-              <AppStateBlock
-                v-else-if="isPendingLoading"
-                class="notification-state"
-                type="loading"
-                title="正在加载待接受待办"
-                description="别人派发给你的待办同步后会自动展示。"
-                size="sm"
-                variant="inline"
-              />
-              <AppStateBlock
-                v-else-if="!pendingTodos.length"
-                class="notification-state"
-                type="empty"
-                title="暂无待接受待办"
-                description="需要你确认的协作待办会出现在这里。"
-                size="sm"
-                variant="inline"
-              />
-
-              <article
-                v-for="todo in pendingTodos"
-                :key="todo.id"
-                class="notification-item is-unread is-clickable"
-                role="button"
-                tabindex="0"
-                @click="handleOpenTodo(todo)"
-                @keydown.enter="handleOpenTodo(todo)"
-                @keydown.space.prevent="handleOpenTodo(todo)"
-              >
-                <span class="notification-item__marker is-amber" aria-hidden="true" />
-                <div class="notification-item__content">
-                  <div class="notification-item__title-row">
-                    <strong>{{ todo.title }}</strong>
-                    <time>{{ formatEventTime(todo) }}</time>
-                  </div>
-                  <p>{{ pendingSummary(todo) }}</p>
-                  <div class="notification-item__meta-row">
-                    <span>待接受</span>
-                  </div>
-
-                  <div class="notification-item__actions" @click.stop>
-                    <template v-if="isPendingConfirmOnly(todo)">
-                      <button
-                        type="button"
-                        class="action-btn is-accept"
-                        :disabled="processingId === todo.id"
-                        @click="handleAcceptTodo(todo.id)"
-                      >
-                        {{ processingId === todo.id ? '处理中…' : '确认' }}
-                      </button>
-                    </template>
-                    <template v-else>
-                      <button
-                        type="button"
-                        class="action-btn is-accept"
-                        :disabled="processingId === todo.id"
-                        @click="handleAcceptTodo(todo.id)"
-                      >
-                        {{
-                          processingId === todo.id && activeActionMode !== 'reject'
-                            ? '处理中…'
-                            : '接受'
-                        }}
-                      </button>
-                      <button
-                        type="button"
-                        class="action-btn is-reject"
-                        :disabled="processingId === todo.id"
-                        @click="togglePendingAction(todo.id, 'reject')"
-                      >
-                        拒绝
-                      </button>
-                      <button
-                        type="button"
-                        class="action-btn is-view"
-                        @click="handleOpenTodo(todo)"
-                      >
-                        查看
-                      </button>
-                    </template>
-                  </div>
-
-                  <div
-                    v-if="
-                      !isPendingConfirmOnly(todo) &&
-                      activeActionId === todo.id &&
-                      activeActionMode === 'reject'
-                    "
-                    class="notification-item__form"
-                    @click.stop
-                  >
-                    <input
-                      v-model="rejectReason"
-                      type="text"
-                      class="notification-input"
-                      placeholder="拒绝原因（可选）"
-                    />
-                    <div class="notification-item__form-actions">
-                      <button
-                        type="button"
-                        class="action-btn is-reject"
-                        :disabled="processingId === todo.id"
-                        @click="handleRejectTodo(todo.id)"
-                      >
-                        确认拒绝
-                      </button>
-                      <button
-                        type="button"
-                        class="action-btn is-muted"
-                        @click="resetPendingAction()"
-                      >
-                        取消
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </article>
-            </div>
-          </template>
+            <button
+              v-if="hasMoreInboxMessages && !isInboxLoading && inboxFilter === 'all'"
+              type="button"
+              class="notification-load-more"
+              :disabled="isInboxLoadingMore"
+              @click="loadMoreInboxMessages()"
+            >
+              {{ isInboxLoadingMore ? '加载中…' : '加载更多' }}
+            </button>
+          </div>
         </section>
       </Transition>
     </Teleport>
@@ -646,11 +558,10 @@ defineExpose({
 }
 
 .notification-center.is-open .notification-bell {
-  background: rgba(255, 255, 255, 0.96);
-  color: #438bff;
-  box-shadow:
-    0 0 0 2px rgba(67, 139, 255, 0.16),
-    0 10px 20px -12px rgba(67, 139, 255, 0.42);
+  border-color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.62);
+  color: #111827;
+  box-shadow: 0 12px 26px -18px rgba(15, 23, 42, 0.42);
 }
 
 .notification-center.is-embedded {
@@ -664,10 +575,10 @@ defineExpose({
   position: relative;
   width: 40px;
   height: 40px;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.72);
-  color: #334155;
+  background: transparent;
+  color: #21304f;
   cursor: pointer;
   font: inherit;
   padding: 0;
@@ -675,6 +586,7 @@ defineExpose({
   align-items: center;
   justify-content: center;
   transition:
+    border-color 0.18s ease,
     background 0.18s ease,
     color 0.18s ease,
     transform 0.18s ease,
@@ -687,9 +599,16 @@ defineExpose({
 }
 
 .icon-button:hover {
-  background: rgba(255, 255, 255, 0.92);
-  color: #0f172a;
+  border-color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.62);
+  color: #111827;
   transform: translateY(-1px);
+  box-shadow: 0 12px 26px -18px rgba(15, 23, 42, 0.42);
+}
+
+.icon-button:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.34);
+  outline-offset: 3px;
 }
 
 .icon-button.has-badge span {
@@ -699,7 +618,7 @@ defineExpose({
   min-width: 18px;
   height: 18px;
   box-sizing: border-box;
-  border: 2px solid #ffffff;
+  border: 0;
   border-radius: 999px;
   background: #ef4444;
   color: #ffffff;
@@ -1055,15 +974,24 @@ defineExpose({
 }
 
 .notification-filter {
-  gap: 4px;
+  gap: 6px;
   margin: 0 0 10px;
+  border-radius: 14px;
+  background: rgba(241, 245, 249, 0.78);
+  padding: 4px;
 }
 
 .notification-filter button {
-  min-height: 28px;
-  border-radius: 999px;
+  min-width: 0;
+  min-height: 34px;
+  flex: 1 1 0;
+  border-radius: 11px;
   background: transparent;
   color: #64748b;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   padding: 0 10px;
   font-size: 12px;
   line-height: 1;
@@ -1071,7 +999,26 @@ defineExpose({
 }
 
 .notification-filter button.active {
-  background: rgba(219, 234, 254, 0.88);
+  background: rgba(255, 255, 255, 0.94);
+  color: #0f172a;
+  box-shadow: 0 8px 16px -14px rgba(15, 23, 42, 0.48);
+}
+
+.notification-filter button span {
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: rgba(226, 232, 240, 0.88);
+  color: #475569;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.notification-filter button.active span {
+  background: rgba(219, 234, 254, 0.92);
   color: #1d4ed8;
 }
 
@@ -1079,11 +1026,22 @@ defineExpose({
   position: relative;
   z-index: 1;
   max-height: min(430px, calc(100vh - 150px));
-  overflow: auto;
-  padding-right: 2px;
+  overflow-y: auto;
+  padding: 0 8px 8px 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  scrollbar-color: rgba(81, 120, 173, 0.18) transparent;
+  scrollbar-width: thin;
+}
+
+.notification-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.notification-list::-webkit-scrollbar-thumb {
+  background: rgba(81, 120, 173, 0.16);
+  border-radius: 10px;
 }
 
 .notification-item {
@@ -1144,15 +1102,23 @@ defineExpose({
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .notification-item__title-row {
   min-width: 0;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
+}
+
+.notification-item__title-group {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .notification-item__title-row strong {
@@ -1164,6 +1130,27 @@ defineExpose({
   font-weight: 900;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.notification-item__tag {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: rgba(241, 245, 249, 0.96);
+  color: #64748b;
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 850;
+  padding: 3px 6px;
+}
+
+.notification-item__tag.is-pending {
+  background: rgba(254, 243, 199, 0.92);
+  color: #b45309;
+}
+
+.notification-item__tag.is-meeting {
+  background: rgba(220, 252, 231, 0.92);
+  color: #15803d;
 }
 
 .notification-item__title-row time {
@@ -1178,29 +1165,12 @@ defineExpose({
   display: -webkit-box;
   overflow: hidden;
   margin: 0;
-  color: #475569;
+  color: #64748b;
   font-size: 12px;
-  line-height: 1.55;
-  font-weight: 700;
+  line-height: 1.45;
+  font-weight: 650;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-}
-
-.notification-item__meta-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.notification-item__meta-row span {
-  align-self: flex-start;
-  border-radius: 999px;
-  background: rgba(241, 245, 249, 0.92);
-  color: #64748b;
-  font-size: 11px;
-  line-height: 1;
-  font-weight: 850;
-  padding: 6px 8px;
 }
 
 .notification-state {

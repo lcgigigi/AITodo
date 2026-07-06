@@ -353,6 +353,43 @@ describe('todo.service real backend adapter', () => {
     })
   })
 
+  it('maps analyze result assigneeId by name to assignable user id', async () => {
+    vi.mocked(httpClient.request).mockResolvedValueOnce({
+      data: {
+        code: 200,
+        msg: '操作成功',
+        data: {
+          task: '开会',
+          timeType: 'deadline',
+          date: '',
+          time: '',
+          startDate: '2026-07-03 15:17',
+          endDate: '2026-07-03 17:15',
+          assigneeId: '徐逸臣',
+          remark: '',
+          type: 2,
+        },
+      },
+    })
+
+    const parsed = await analyzeTodoText(
+      '下午让徐逸臣开会',
+      currentUser,
+      [currentUser, { id: '1102999', name: '徐逸臣', role: 'employee' }],
+      {
+        date: '2026-07-03',
+        title: '',
+      },
+    )
+
+    expect(parsed).toMatchObject({
+      title: '开会',
+      assigneeId: '1102999',
+      assigneeName: '徐逸臣',
+      type: 2,
+    })
+  })
+
   it('sends assigneeIds and meeting type when creating todos', async () => {
     vi.mocked(httpClient.request).mockImplementation((config) => {
       if (config.url === '/smart-todo/create') {
@@ -732,6 +769,37 @@ describe('todo.service real backend adapter', () => {
         completable: false,
         status: 'todo',
       },
+    ])
+  })
+
+  it('filters rejected todos out of pending inbox list', async () => {
+    vi.mocked(httpClient.request).mockResolvedValueOnce(
+      backendResponse([
+        {
+          id: 123,
+          title: '待接受任务',
+          timeType: 1,
+          startDateShow: '2026-06-07 17:00:00',
+          status: 0,
+          assigneeId: '1102080',
+          creatorId: '1101001',
+          receiveStatus: 2,
+        },
+        {
+          id: 456,
+          title: '已拒绝任务',
+          timeType: 1,
+          startDateShow: '2026-06-07 18:00:00',
+          status: 9,
+          assigneeId: '1102080',
+          creatorId: '1101001',
+          handleDesc: '时间冲突',
+        },
+      ]) as never,
+    )
+
+    await expect(loadPendingTodos(currentUser, assignableUsers)).resolves.toMatchObject([
+      { id: '123', backendStatus: 0 },
     ])
   })
 })

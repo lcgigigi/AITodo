@@ -28,7 +28,9 @@ import makeUrl from '@/assets/agent-center/make.png'
 import moreAbilityUrl from '@/assets/agent-center/newagnet.png'
 import DashboardTopBar from '@/modules/home/dashboard/DashboardTopBar.vue'
 import {
+  getTokenUsagePeriodName,
   loadCurrentUserTokenUsage,
+  resolveTokenUsageDateRange,
   type CurrentUserTokenUsage,
   type TokenUsagePeriodCode,
 } from '@/modules/token-usage/token-usage.service'
@@ -152,44 +154,18 @@ function formatTrendDateLabel(date: string) {
   return month && day ? `${month}-${day}` : date
 }
 
-function getTokenPeriodDayCount(periodCode: TokenUsagePeriodCode) {
-  if (periodCode === 'today') return 1
-  if (periodCode === 'last7Days') return 7
-  return 30
-}
-
-function getSelectedTrendDates(usage: CurrentUserTokenUsage, periodCode: TokenUsagePeriodCode) {
-  const dates = new Set<string>()
-
-  for (const module of usage.trendList) {
-    for (const point of module.dailyList) {
-      dates.add(point.usageDate)
-    }
-  }
-
-  return [...dates].sort().slice(-getTokenPeriodDayCount(periodCode))
-}
-
-const selectedTokenPeriod = computed(() => {
-  const usage = currentUserTokenUsage.value
-  if (!usage) return undefined
-
-  return (
-    usage.periodList.find((period) => period.periodCode === selectedTokenPeriodCode.value) ??
-    usage.periodList[0]
-  )
-})
+const selectedTokenPeriodLabel = computed(() =>
+  getTokenUsagePeriodName(selectedTokenPeriodCode.value),
+)
 
 const tokenTrendTimeline = computed<TokenTrendPoint[]>(() => {
   const usage = currentUserTokenUsage.value
   if (!usage) return []
 
-  const selectedDates = getSelectedTrendDates(usage, selectedTokenPeriodCode.value)
   const dailyTotalMap = new Map<string, number>()
 
   for (const module of usage.trendList) {
     for (const point of module.dailyList) {
-      if (selectedDates.length && !selectedDates.includes(point.usageDate)) continue
       dailyTotalMap.set(
         point.usageDate,
         (dailyTotalMap.get(point.usageDate) ?? 0) + point.tokenUsage,
@@ -197,57 +173,29 @@ const tokenTrendTimeline = computed<TokenTrendPoint[]>(() => {
     }
   }
 
-  const points = selectedDates
-    .map((date) => ({
+  return [...dailyTotalMap.entries()]
+    .sort(([leftDate], [rightDate]) => leftDate.localeCompare(rightDate))
+    .map(([date, value]) => ({
       date,
       label: formatTrendDateLabel(date),
-      value: dailyTotalMap.get(date) ?? 0,
+      value,
     }))
-    .filter((point) => point.date)
-
-  if (points.length) return points
-
-  return selectedTokenPeriod.value
-    ? [
-        {
-          date: '',
-          label: selectedTokenPeriod.value.periodName,
-          value: selectedTokenPeriod.value.totalTokenUsage,
-        },
-      ]
-    : []
 })
 
 const selectedTokenModuleUsages = computed<TokenModuleUsage[]>(() => {
   const usage = currentUserTokenUsage.value
-  const period = selectedTokenPeriod.value
   if (!usage) return []
-
-  if (period?.moduleList.length) {
-    return period.moduleList.map((module) => ({
-      moduleCode: module.moduleCode,
-      moduleName: module.moduleName,
-      tokenUsage: module.tokenUsage,
-    }))
-  }
-
-  const selectedDates = new Set(getSelectedTrendDates(usage, selectedTokenPeriodCode.value))
 
   return usage.trendList.map((module) => ({
     moduleCode: module.moduleCode,
     moduleName: module.moduleName,
-    tokenUsage: module.dailyList
-      .filter((point) => selectedDates.has(point.usageDate))
-      .reduce((sum, point) => sum + point.tokenUsage, 0),
+    tokenUsage: module.totalTokenUsage,
   }))
 })
 
-const tokenTotalConsumption = computed(() => {
-  const periodTotal = selectedTokenPeriod.value?.totalTokenUsage ?? 0
-  if (periodTotal > 0) return periodTotal
-
-  return selectedTokenModuleUsages.value.reduce((sum, module) => sum + module.tokenUsage, 0)
-})
+const tokenTotalConsumption = computed(() =>
+  selectedTokenModuleUsages.value.reduce((sum, module) => sum + module.tokenUsage, 0),
+)
 
 const tokenRanking = computed<TokenRankingEntry[]>(() => {
   const total = tokenTotalConsumption.value
@@ -280,7 +228,11 @@ const tokenDateRangeLabel = computed(() => {
   const points = tokenTrendTimeline.value.filter((point) => point.date)
   if (points.length > 1) return `${points[0].date} ~ ${points[points.length - 1].date}`
   if (points.length === 1) return points[0].date
-  return selectedTokenPeriod.value?.periodName ?? '暂无周期'
+
+  const range = resolveTokenUsageDateRange(selectedTokenPeriodCode.value)
+  return range.startDate === range.endDate
+    ? range.startDate
+    : `${range.startDate} ~ ${range.endDate}`
 })
 
 const tokenDailyAverage = computed(() => {
@@ -290,7 +242,7 @@ const tokenDailyAverage = computed(() => {
 
 const hasTokenUsageContent = computed(() => {
   const usage = currentUserTokenUsage.value
-  return Boolean(usage && (usage.periodList.length > 0 || usage.trendList.length > 0))
+  return Boolean(usage && usage.trendList.length > 0)
 })
 
 const tokenUsageStateType = computed<'loading' | 'empty' | 'error' | null>(() => {
@@ -331,7 +283,9 @@ async function refreshTokenUsage() {
   tokenUsageError.value = ''
 
   try {
-    currentUserTokenUsage.value = await loadCurrentUserTokenUsage()
+    currentUserTokenUsage.value = await loadCurrentUserTokenUsage(
+      resolveTokenUsageDateRange(selectedTokenPeriodCode.value),
+    )
     await nextTick()
     renderAllCharts()
   } catch (error) {
@@ -788,9 +742,8 @@ watch(sidebarCollapsed, async () => {
   resizeCharts()
 })
 
-watch(selectedTokenPeriodCode, async () => {
-  await nextTick()
-  renderAllCharts()
+watch(selectedTokenPeriodCode, () => {
+  void refreshTokenUsage()
 })
 </script>
 
@@ -1006,7 +959,7 @@ watch(selectedTokenPeriodCode, async () => {
                 </span>
                 <div>
                   <p>
-                    {{ selectedTokenPeriod?.periodName ?? '当前周期' }}总消耗
+                    {{ selectedTokenPeriodLabel }}总消耗
                     <strong>{{ formatTokenNumber(tokenTotalConsumption) }}</strong>
                     <IconTrendingUp aria-hidden="true" />
                   </p>

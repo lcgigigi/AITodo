@@ -189,6 +189,31 @@ export function getBackendTodoStatusLabel(event: CalendarEvent) {
   }
 }
 
+export type DetailStatusFilter = 'all' | 'pending' | 'done' | 'other'
+
+export function isCompletedTodoEvent(event: CalendarEvent) {
+  return event.backendStatus === 6 || event.status === 'done'
+}
+
+export function isPendingProcessTodoEvent(event: CalendarEvent) {
+  if (isCompletedTodoEvent(event)) return false
+
+  const label = getBackendTodoStatusLabel(event)
+  return label === '待处理' || label === '已接受'
+}
+
+export function isOtherStatusTodoEvent(event: CalendarEvent) {
+  if (isCompletedTodoEvent(event) || isPendingProcessTodoEvent(event)) return false
+  return true
+}
+
+export function matchesDetailStatusFilter(event: CalendarEvent, filter: DetailStatusFilter) {
+  if (filter === 'all') return true
+  if (filter === 'done') return isCompletedTodoEvent(event)
+  if (filter === 'pending') return isPendingProcessTodoEvent(event)
+  return isOtherStatusTodoEvent(event)
+}
+
 export function getTodoCreatorDisplayName(event: CalendarEvent) {
   return event.creatorName || event.creatorId || '未指定'
 }
@@ -222,4 +247,43 @@ export function getTodoHandlerDisplayName(event: CalendarEvent) {
 
 export function getTodoContentDisplay(event: CalendarEvent) {
   return event.content?.trim() || '暂无内容'
+}
+
+export function isWeakTodoTitle(title: string) {
+  const trimmed = title.trim()
+  if (!trimmed) return true
+  if (/^\d+$/.test(trimmed)) return true
+  return trimmed.length <= 1
+}
+
+function getAiFocusTypeLabel(event: CalendarEvent) {
+  if (event.type === 'meeting') return '会议'
+  if (event.type === 'approval') return '审批'
+  return '待办'
+}
+
+export function formatAiFocusTodoLabel(event: CalendarEvent) {
+  const title = event.title?.trim() || '未命名待办'
+  if (!isWeakTodoTitle(title)) {
+    return `「${title}」`
+  }
+
+  const typeLabel = getAiFocusTypeLabel(event)
+  const timeLabel = formatEventTime(event)
+  const hasSpecificTime = Boolean(event.time) && timeLabel !== '全天'
+
+  if (hasSpecificTime) {
+    return `${timeLabel} 的${typeLabel}「${title}」`
+  }
+
+  const assignee = getTodoAssigneeDisplayName(event)
+  if (assignee !== '未指定' && shouldShowTodoAssignerField(event)) {
+    return `${assignee} 的${typeLabel}「${title}」`
+  }
+
+  if (timeLabel === '全天') {
+    return `全天${typeLabel}「${title}」`
+  }
+
+  return `${typeLabel}「${title}」`
 }

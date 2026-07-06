@@ -4,8 +4,6 @@ import IconCheck from '~icons/lucide/check'
 import IconChevronLeft from '~icons/lucide/chevron-left'
 import IconChevronRight from '~icons/lucide/chevron-right'
 import IconClock3 from '~icons/lucide/clock-3'
-import IconPlus from '~icons/lucide/plus'
-import IconSendHorizontal from '~icons/lucide/send-horizontal'
 import IconTag from '~icons/lucide/tag'
 import IconUser from '~icons/lucide/user'
 import IconUserCheck from '~icons/lucide/user-check'
@@ -17,10 +15,12 @@ import { useRouter } from 'vue-router'
 import { dashboardTools, navigateDashboardTool, type DashboardTool, type DashboardToolTarget } from './dashboardTools'
 import CalendarWeekTimeline from './components/CalendarWeekTimeline.vue'
 import DashboardNotificationCenter from './components/DashboardNotificationCenter.vue'
+import TodoQuickCreateBar from './components/TodoQuickCreateBar.vue'
 import DayPreviewPanel from './DayPreviewPanel.vue'
 import type { CalendarDay, CalendarEvent, CalendarTodoDraft } from './types'
 import {
   compareEvents,
+  formatAiFocusTodoLabel,
   formatEventTime,
   formatTodoDetailTimeField,
   getBackendTodoStatusLabel,
@@ -29,14 +29,19 @@ import {
   getTodoAssigneeDisplayName,
   getTodoContentDisplay,
   getTodoCreatorDisplayName,
+  isCompletedTodoEvent,
+  isPendingProcessTodoEvent,
+  matchesDetailStatusFilter,
   shouldShowTodoAssignerField,
   isAllDayEvent,
   isRangeEvent,
   ymd,
+  type DetailStatusFilter,
 } from './todoDisplay'
 import {
   acceptTodos,
   createTodo as serviceCreateTodo,
+  deleteTodo as serviceDeleteTodo,
   getTodoMonthRange,
   getTodoWeekRange,
   loadTodoDetail,
@@ -53,7 +58,6 @@ type DayPreviewPanelExpose = {
 type LeftPanelMode = 'tools' | 'create' | 'detail'
 
 type DetailMode = 'simple' | 'detail'
-type DetailStatusFilter = 'all' | 'done' | 'other'
 type DetailTypeFilter = 'all' | 'task' | 'meeting'
 type DetailTone = 'blue' | 'green' | 'orange' | 'violet' | 'cyan' | 'slate'
 
@@ -76,8 +80,15 @@ type MonthDay = {
   dots: DetailTone[]
 }
 
+const DEFAULT_STATUS_FILTER: DetailStatusFilter = 'pending'
+
+const props = defineProps<{
+  selectedDate: string
+}>()
+
 const emit = defineEmits<{
   'switch-mode': [mode: DetailMode]
+  'update:selectedDate': [date: string]
 }>()
 
 const router = useRouter()
@@ -86,11 +97,10 @@ const feedbackStore = useFeedbackStore()
 const now = ref(new Date())
 const todayDate = computed(() => ymd(now.value))
 const currentMonth = ref(new Date(now.value.getFullYear(), now.value.getMonth(), 1))
-const selectedDate = ref(todayDate.value)
 const calendarViewMode = ref<'month' | 'week'>('month')
 const showCalendarRangeSwitch = false
 const taskDetails = ref<Record<string, CalendarEvent>>({})
-const statusFilter = ref<DetailStatusFilter>('all')
+const statusFilter = ref<DetailStatusFilter>(DEFAULT_STATUS_FILTER)
 const typeFilter = ref<DetailTypeFilter>('all')
 const activeTaskId = ref('')
 const detailLoadingId = ref('')
@@ -104,10 +114,12 @@ const notificationCenterRef = ref<{ refreshPendingTodos: () => Promise<void> } |
 const activeToolName = ref('')
 const pendingActionProcessing = ref(false)
 const pendingInboxDetailActive = ref(false)
+const pendingDeleteTaskId = ref('')
+const deleteActionProcessing = ref(false)
 
 function getActiveTodoLoadRange() {
   return calendarViewMode.value === 'week'
-    ? getTodoWeekRange(selectedDate.value)
+    ? getTodoWeekRange(props.selectedDate)
     : getTodoMonthRange(currentMonth.value)
 }
 
@@ -129,6 +141,7 @@ let hasInitializedTodoRange = false
 
 const statusFilters: StatusFilterItem[] = [
   { value: 'all', label: '全部' },
+  { value: 'pending', label: '待处理' },
   { value: 'done', label: '已完成' },
   { value: 'other', label: '其他' },
 ]
@@ -138,26 +151,25 @@ const typeFilters: TypeFilterItem[] = [
   { value: 'meeting', label: '会议' },
 ]
 
-const selectedDateEvents = computed(() => eventMap.value.get(selectedDate.value) ?? [])
+const selectedDateEvents = computed(() => eventMap.value.get(props.selectedDate) ?? [])
 const pendingEvents = computed(() =>
-  selectedDateEvents.value.filter((event) => event.status !== 'done' && !isRejectedEvent(event)),
+  selectedDateEvents.value.filter((event) => isPendingProcessTodoEvent(event)),
 )
-const selectedDateLabel = computed(() => formatDateTitle(selectedDate.value))
-const mainTitle = computed(() => (selectedDate.value === todayDate.value ? '今日待办' : '当日待办'))
-
-const eventsForStatusCounts = computed(() =>
-  selectedDateEvents.value.filter((event) => matchesTypeFilter(event, typeFilter.value)),
-)
+const selectedDateLabel = computed(() => formatDateTitle(props.selectedDate))
+const mainTitle = computed(() => (props.selectedDate === todayDate.value ? '今日待办' : '当日待办'))
 
 const statusFilterCounts = computed<Record<DetailStatusFilter, number>>(() => ({
-  all: eventsForStatusCounts.value.length,
-  done: eventsForStatusCounts.value.filter(isCompletedEvent).length,
-  other: eventsForStatusCounts.value.filter(isOtherStatusEvent).length,
+  all: selectedDateEvents.value.length,
+  pending: selectedDateEvents.value.filter(isPendingProcessTodoEvent).length,
+  done: selectedDateEvents.value.filter(isCompletedTodoEvent).length,
+  other: selectedDateEvents.value.filter((event) => matchesDetailStatusFilter(event, 'other')).length,
 }))
 
 const filteredTasks = computed(() =>
   selectedDateEvents.value.filter(
-    (event) => matchesStatusFilter(event, statusFilter.value) && matchesTypeFilter(event, typeFilter.value),
+    (event) =>
+      matchesDetailStatusFilter(event, statusFilter.value) &&
+      matchesTypeFilter(event, typeFilter.value),
   ),
 )
 
@@ -179,7 +191,7 @@ const taskListSections = computed(() => {
 })
 
 const hasActiveTaskFilters = computed(
-  () => statusFilter.value !== 'all' || typeFilter.value !== 'all',
+  () => statusFilter.value !== DEFAULT_STATUS_FILTER || typeFilter.value !== 'all',
 )
 
 const isFilterEmpty = computed(
@@ -193,6 +205,12 @@ const emptyStateCopy = computed(() => {
       desc: '在下方输入框用一句话描述，即可快速创建待办。',
     }
   }
+  if (statusFilter.value === 'pending') {
+    return {
+      title: '暂无待处理事项',
+      desc: '当前没有需要继续推进的待办或已接受任务。',
+    }
+  }
   if (statusFilter.value === 'done') {
     return {
       title: '暂无已完成事项',
@@ -202,7 +220,7 @@ const emptyStateCopy = computed(() => {
   if (statusFilter.value === 'other') {
     return {
       title: '暂无其他状态事项',
-      desc: '当前筛选下没有待处理、已接受或已拒绝的待办。',
+      desc: '待接受、已拒绝等协作状态事项会出现在这里。',
     }
   }
   if (typeFilter.value === 'meeting') {
@@ -216,13 +234,18 @@ const emptyStateCopy = computed(() => {
     desc: '试试切换状态或类型筛选，或清除筛选查看全部安排。',
   }
 })
-const taskEmptyActionLabel = computed(() => (isFilterEmpty.value ? '查看全部' : ''))
+const taskEmptyActionLabel = computed(() => {
+  if (isLoading.value || filteredTasks.value.length) return ''
+  if (!selectedDateEvents.value.length) return ''
+  if (statusFilter.value === 'all' && typeFilter.value === 'all') return ''
+  return '查看全部'
+})
 
 const monthDays = computed(() => buildMonthDays())
 const weekCalendarDays = computed(() => buildWeekCalendarDays())
 const calendarHeaderLabel = computed(() =>
   calendarViewMode.value === 'week'
-    ? weekRangeLabel(selectedDate.value)
+    ? weekRangeLabel(props.selectedDate)
     : monthLabel(currentMonth.value),
 )
 const todoLoadRangeKey = computed(() => {
@@ -237,7 +260,7 @@ const doneCount = computed(
 )
 const totalCount = computed(() => trackEvents.value.length)
 const pendingCount = computed(() => Math.max(totalCount.value - doneCount.value, 0))
-const daySubject = computed(() => (selectedDate.value === todayDate.value ? '今日' : '当日'))
+const daySubject = computed(() => (props.selectedDate === todayDate.value ? '今日' : '当日'))
 
 const leftSuggestionTitle = computed(() => {
   if (!totalCount.value) return '暂无待办安排'
@@ -259,21 +282,28 @@ const leftSuggestionText = computed(() => {
     return `还有 ${pendingCount.value} 项待处理，建议按时间顺序继续推进。`
   }
 
+  const focusLabel = formatAiFocusTodoLabel(nextTask)
   const remaining = Math.max(pendingCount.value - 1, 0)
   if (remaining) {
-    return `当前最需要关注的是“${nextTask.title}”，建议先完成它，再处理其余 ${remaining} 项任务。`
+    return `当前最需要关注的是${focusLabel}，建议先完成它，再处理其余 ${remaining} 项任务。`
   }
 
-  return `当前最需要关注的是“${nextTask.title}”，完成后即可清空待处理事项。`
+  return `当前最需要关注的是${focusLabel}，完成后即可清空待处理事项。`
 })
 
 const activeTask = computed(() => {
   if (!activeTaskId.value) return null
 
-  const fromList = selectedDateEvents.value.find((event) => event.id === activeTaskId.value)
-  if (fromList) return fromList
+  const cached = taskDetails.value[activeTaskId.value]
+  const fromList =
+    selectedDateEvents.value.find((event) => event.id === activeTaskId.value) ??
+    findEventById(activeTaskId.value)
 
-  return taskDetails.value[activeTaskId.value] ?? null
+  if (cached && fromList) {
+    return { ...cached, ...fromList }
+  }
+
+  return fromList ?? cached ?? null
 })
 
 const showPendingInboxActions = computed(() => {
@@ -323,8 +353,22 @@ const taskDetailPanel = computed(() => {
   }
 })
 
+const isActiveDetailLoading = computed(
+  () => Boolean(activeTaskId.value && detailLoadingId.value === activeTaskId.value),
+)
+
+const showDetailDeleteAction = computed(() => {
+  const task = activeTask.value
+  if (!task) return false
+  return isCompletedTodoEvent(task)
+})
+
+const isDetailDeleteConfirming = computed(
+  () => Boolean(activeTaskId.value && pendingDeleteTaskId.value === activeTaskId.value),
+)
+
 const leftPanelAriaLabel = computed(() => {
-  if (leftPanelMode.value === 'create') return '新增待办'
+  if (leftPanelMode.value === 'create') return '完整创建'
   if (leftPanelMode.value === 'detail') return '任务详情'
   return '快捷入口'
 })
@@ -388,9 +432,66 @@ function notifyCustomizeTools() {
 }
 
 async function refreshTodos() {
+  const preserveDetailId =
+    leftPanelMode.value === 'detail' && activeTaskId.value ? activeTaskId.value : ''
+  const preservedDetail = preserveDetailId ? taskDetails.value[preserveDetailId] : null
+
   await refreshDashboardTodos()
-  taskDetails.value = {}
+
+  if (preserveDetailId) {
+    taskDetails.value = preservedDetail ? { [preserveDetailId]: preservedDetail } : {}
+  } else {
+    taskDetails.value = {}
+  }
+
   ensureSelectedDateInLoadedRange()
+
+  if (!preserveDetailId) return
+
+  pendingInboxDetailActive.value = false
+
+  const updatedTask = findEventById(preserveDetailId)
+  if (updatedTask) {
+    if (preservedDetail) {
+      taskDetails.value = {
+        [preserveDetailId]: {
+          ...preservedDetail,
+          ...updatedTask,
+        },
+      }
+    }
+    await loadTaskDetail(updatedTask, true, { silent: Boolean(preservedDetail) })
+    return
+  }
+
+  if (preservedDetail) {
+    await loadTaskDetail(preservedDetail, true, { silent: true })
+    return
+  }
+
+  detailLoadingId.value = preserveDetailId
+  try {
+    const detail = await loadTodoDetail(
+      preserveDetailId,
+      currentUser.value,
+      assignableUsers.value,
+    )
+    taskDetails.value = {
+      [preserveDetailId]: detail,
+    }
+  } catch {
+    closeTaskDetail()
+  } finally {
+    detailLoadingId.value = ''
+  }
+}
+
+function findEventById(id: string) {
+  for (const events of eventMap.value.values()) {
+    const match = events.find((event) => event.id === id)
+    if (match) return match
+  }
+  return null
 }
 
 async function openTodoFromNotification(payload: {
@@ -419,6 +520,7 @@ async function openTodoFromNotification(payload: {
     pendingInboxDetailActive.value = payload.source === 'pending-inbox'
     leftPanelMode.value = 'detail'
     activeTaskId.value = detailEvent.id
+    pendingDeleteTaskId.value = ''
   } catch {
     pendingInboxDetailActive.value = false
     feedbackStore.error('查询待办详情失败')
@@ -432,9 +534,13 @@ defineExpose({
   openTodoFromNotification,
 })
 
+function updateSelectedDate(date: string) {
+  emit('update:selectedDate', date)
+}
+
 function ensureSelectedDateInLoadedRange() {
   if (calendarViewMode.value === 'week') return
-  const value = new Date(`${selectedDate.value}T12:00:00`)
+  const value = new Date(`${props.selectedDate}T12:00:00`)
   if (
     value.getFullYear() === currentMonth.value.getFullYear() &&
     value.getMonth() === currentMonth.value.getMonth()
@@ -447,20 +553,20 @@ function ensureSelectedDateInLoadedRange() {
     today.getFullYear() === currentMonth.value.getFullYear() &&
     today.getMonth() === currentMonth.value.getMonth()
   ) {
-    selectedDate.value = todayDate.value
+    updateSelectedDate(todayDate.value)
     return
   }
 
-  selectedDate.value = ymd(
-    new Date(currentMonth.value.getFullYear(), currentMonth.value.getMonth(), 1),
+  updateSelectedDate(
+    ymd(new Date(currentMonth.value.getFullYear(), currentMonth.value.getMonth(), 1)),
   )
 }
 
 async function changeCalendarPeriod(delta: number) {
   if (calendarViewMode.value === 'week') {
-    const next = new Date(`${selectedDate.value}T12:00:00`)
+    const next = new Date(`${props.selectedDate}T12:00:00`)
     next.setDate(next.getDate() + delta * 7)
-    selectedDate.value = ymd(next)
+    updateSelectedDate(ymd(next))
     closeTaskDetail()
     resetTaskFilters()
     return
@@ -479,24 +585,29 @@ function setCalendarViewMode(mode: 'month' | 'week') {
   calendarViewMode.value = mode
 
   if (mode === 'month') {
-    const nextDate = new Date(`${selectedDate.value}T12:00:00`)
+    const nextDate = new Date(`${props.selectedDate}T12:00:00`)
     currentMonth.value = new Date(nextDate.getFullYear(), nextDate.getMonth(), 1)
   }
 }
 
 async function goToday() {
   now.value = new Date()
-  selectedDate.value = todayDate.value
+  updateSelectedDate(todayDate.value)
   currentMonth.value = new Date(now.value.getFullYear(), now.value.getMonth(), 1)
 }
 
 function selectCalendarDate(date: string) {
-  selectedDate.value = date
+  updateSelectedDate(date)
   closeTaskDetail()
   resetTaskFilters()
 }
 
 function resetTaskFilters() {
+  statusFilter.value = DEFAULT_STATUS_FILTER
+  typeFilter.value = 'all'
+}
+
+function showAllTasks() {
   statusFilter.value = 'all'
   typeFilter.value = 'all'
 }
@@ -516,7 +627,7 @@ function handleTypeFilterClick(type: Exclude<DetailTypeFilter, 'all'>) {
 }
 
 function getStatusPoolEvents(filter: DetailStatusFilter) {
-  return selectedDateEvents.value.filter((event) => matchesStatusFilter(event, filter))
+  return selectedDateEvents.value.filter((event) => matchesDetailStatusFilter(event, filter))
 }
 
 function getTypeCountForStatus(status: DetailStatusFilter, type: Exclude<DetailTypeFilter, 'all'>) {
@@ -539,21 +650,31 @@ async function openTaskDetail(task: CalendarEvent) {
   pendingInboxDetailActive.value = false
   leftPanelMode.value = 'detail'
   activeTaskId.value = task.id
+  pendingDeleteTaskId.value = ''
   await loadTaskDetail(task)
 }
 
 function closeTaskDetail() {
   activeTaskId.value = ''
   pendingInboxDetailActive.value = false
+  pendingDeleteTaskId.value = ''
   if (leftPanelMode.value === 'detail') {
     leftPanelMode.value = 'tools'
   }
 }
 
-async function loadTaskDetail(task: CalendarEvent, force = false) {
+async function loadTaskDetail(
+  task: CalendarEvent,
+  force = false,
+  options?: { silent?: boolean },
+) {
   if (!currentUser.value.id || (!force && taskDetails.value[task.id])) return
 
-  detailLoadingId.value = task.id
+  const silent = options?.silent ?? false
+  if (!silent) {
+    detailLoadingId.value = task.id
+  }
+
   try {
     const detail = await loadTodoDetail(task.id, currentUser.value, assignableUsers.value)
     taskDetails.value = {
@@ -561,9 +682,13 @@ async function loadTaskDetail(task: CalendarEvent, force = false) {
       [task.id]: detail,
     }
   } catch {
-    feedbackStore.error('查询待办详情失败')
+    if (!silent) {
+      feedbackStore.error('查询待办详情失败')
+    }
   } finally {
-    detailLoadingId.value = ''
+    if (!silent) {
+      detailLoadingId.value = ''
+    }
   }
 }
 
@@ -632,7 +757,7 @@ async function handleCreateTodo(payload: CalendarTodoDraft) {
     if (payload.date) {
       const parsedDate = new Date(`${payload.date}T12:00:00`)
       currentMonth.value = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), 1)
-      selectedDate.value = payload.date
+      updateSelectedDate(payload.date)
     }
     quickCreateText.value = ''
     closeCreateModal()
@@ -737,6 +862,7 @@ async function handleRejectPendingTodo() {
     await rejectTodo(task.id, '暂不处理')
     pendingInboxDetailActive.value = false
     closeTaskDetail()
+    await refreshTodos()
     await notificationCenterRef.value?.refreshPendingTodos()
     feedbackStore.success('已拒绝待办')
   } catch {
@@ -746,18 +872,35 @@ async function handleRejectPendingTodo() {
   }
 }
 
-function isCompletedEvent(event: CalendarEvent) {
-  return event.backendStatus === 6 || event.status === 'done'
+function requestDeleteActiveTask() {
+  const task = activeTask.value
+  if (!task || !showDetailDeleteAction.value || isActiveDetailLoading.value) return
+  pendingDeleteTaskId.value = task.id
 }
 
-function isOtherStatusEvent(event: CalendarEvent) {
-  return !isCompletedEvent(event)
+function cancelDeleteActiveTask() {
+  pendingDeleteTaskId.value = ''
 }
 
-function matchesStatusFilter(event: CalendarEvent, filter: DetailStatusFilter) {
-  if (filter === 'all') return true
-  if (filter === 'done') return isCompletedEvent(event)
-  return isOtherStatusEvent(event)
+async function confirmDeleteActiveTask() {
+  const task = activeTask.value
+  if (!task || deleteActionProcessing.value || pendingDeleteTaskId.value !== task.id) return
+
+  deleteActionProcessing.value = true
+  try {
+    await serviceDeleteTodo(task.id)
+    const nextDetails = { ...taskDetails.value }
+    delete nextDetails[task.id]
+    taskDetails.value = nextDetails
+    pendingDeleteTaskId.value = ''
+    closeTaskDetail()
+    await refreshTodos()
+    feedbackStore.success('待办已删除')
+  } catch {
+    // 全局拦截器已统一提示错误。
+  } finally {
+    deleteActionProcessing.value = false
+  }
 }
 
 function matchesTypeFilter(event: CalendarEvent, filter: DetailTypeFilter) {
@@ -767,7 +910,7 @@ function matchesTypeFilter(event: CalendarEvent, filter: DetailTypeFilter) {
 }
 
 function buildWeekCalendarDays(): CalendarDay[] {
-  const start = new Date(`${selectedDate.value}T12:00:00`)
+  const start = new Date(`${props.selectedDate}T12:00:00`)
   const offset = (start.getDay() + 6) % 7
   start.setDate(start.getDate() - offset)
 
@@ -804,7 +947,7 @@ function buildMonthDays(): MonthDay[] {
       day: cursor.getDate(),
       inMonth: cursor.getFullYear() === year && cursor.getMonth() === month,
       isToday: key === todayDate.value,
-      isSelected: key === selectedDate.value,
+      isSelected: key === props.selectedDate,
       dots: getDayDots(dayEvents),
     }
     cursor.setDate(cursor.getDate() + 1)
@@ -907,6 +1050,17 @@ function weekRangeLabel(anchorDate: string) {
         <template v-if="leftPanelMode === 'tools'">
           <section class="side-card">
             <div class="panel-title">
+              <h2>AI 提醒</h2>
+              <small>建议</small>
+            </div>
+            <div class="side-note">
+              <h3>{{ leftSuggestionTitle }}</h3>
+              <p>{{ leftSuggestionText }}</p>
+            </div>
+          </section>
+
+          <section class="side-card">
+            <div class="panel-title">
               <h2>快捷入口</h2>
               <button class="panel-mini-btn" type="button" @click="notifyCustomizeQuick">自定义</button>
             </div>
@@ -914,7 +1068,7 @@ function weekRangeLabel(anchorDate: string) {
             <div class="tool-list">
               <button
                 v-for="tool in dashboardTools"
-                :key="tool.name"
+                :key="tool.id"
                 type="button"
                 class="tool-item"
                 :class="{ active: activeToolName === tool.name }"
@@ -925,17 +1079,6 @@ function weekRangeLabel(anchorDate: string) {
                 </span>
                 <span class="tool-name">{{ tool.name }}</span>
               </button>
-            </div>
-          </section>
-
-          <section class="side-card">
-            <div class="panel-title">
-              <h2>AI 提醒</h2>
-              <small>建议</small>
-            </div>
-            <div class="side-note">
-              <h3>{{ leftSuggestionTitle }}</h3>
-              <p>{{ leftSuggestionText }}</p>
             </div>
           </section>
 
@@ -950,7 +1093,7 @@ function weekRangeLabel(anchorDate: string) {
             :key="quickCreateKey"
             form-only
             show-close
-            :date="selectedDate"
+            :date="props.selectedDate"
             :date-label="selectedDateLabel"
             :events="[]"
             :special-days="[]"
@@ -966,9 +1109,10 @@ function weekRangeLabel(anchorDate: string) {
         </div>
 
         <section
-          v-else-if="leftPanelMode === 'detail' && activeTask && taskDetailPanel"
+          v-else-if="leftPanelMode === 'detail' && activeTaskId"
           class="left-panel-detail"
         >
+          <template v-if="activeTask && taskDetailPanel">
           <header class="detail-panel-head">
             <div class="detail-panel-head-main">
               <span class="detail-panel-kicker">任务详情</span>
@@ -991,8 +1135,45 @@ function weekRangeLabel(anchorDate: string) {
             </button>
           </header>
 
-          <div class="detail-panel-body">
-            <p v-if="detailLoadingId === activeTask.id" class="detail-loading">正在加载详情...</p>
+          <div
+            class="detail-panel-body"
+            :class="{ 'is-loading': isActiveDetailLoading }"
+            :aria-busy="isActiveDetailLoading"
+          >
+            <div
+              v-if="isActiveDetailLoading"
+              class="detail-panel-skeleton"
+              aria-hidden="true"
+            >
+              <div class="detail-skeleton-title detail-skeleton-block"></div>
+              <div class="detail-skeleton-desc detail-skeleton-block"></div>
+              <div class="detail-skeleton-desc detail-skeleton-block is-short"></div>
+
+              <div class="detail-skeleton-time-card">
+                <div class="detail-skeleton-icon detail-skeleton-block"></div>
+                <div class="detail-skeleton-time-copy">
+                  <div class="detail-skeleton-label detail-skeleton-block"></div>
+                  <div class="detail-skeleton-line detail-skeleton-block"></div>
+                </div>
+              </div>
+
+              <div class="detail-skeleton-meta-grid">
+                <div class="detail-skeleton-meta-item">
+                  <div class="detail-skeleton-icon detail-skeleton-block"></div>
+                  <div class="detail-skeleton-meta-copy">
+                    <div class="detail-skeleton-label detail-skeleton-block"></div>
+                    <div class="detail-skeleton-line detail-skeleton-block"></div>
+                  </div>
+                </div>
+                <div class="detail-skeleton-meta-item">
+                  <div class="detail-skeleton-icon detail-skeleton-block"></div>
+                  <div class="detail-skeleton-meta-copy">
+                    <div class="detail-skeleton-label detail-skeleton-block"></div>
+                    <div class="detail-skeleton-line detail-skeleton-block"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
 
             <template v-else>
               <h2 class="detail-panel-title">{{ taskDetailPanel.title }}</h2>
@@ -1036,12 +1217,19 @@ function weekRangeLabel(anchorDate: string) {
           </div>
 
           <footer class="detail-panel-footer">
-            <div class="detail-panel-actions" :class="{ 'is-pending-inbox': showPendingInboxActions }">
+            <div
+              class="detail-panel-actions"
+              :class="{
+                'is-pending-inbox': showPendingInboxActions,
+                'is-completed-detail': showDetailDeleteAction && !isDetailDeleteConfirming,
+                'is-delete-confirm': isDetailDeleteConfirming,
+              }"
+            >
               <template v-if="showPendingInboxActions">
                 <button
                   type="button"
                   class="detail-action accept"
-                  :disabled="pendingActionProcessing"
+                  :disabled="pendingActionProcessing || isActiveDetailLoading"
                   @click="handleAcceptPendingTodo"
                 >
                   {{ pendingActionProcessing ? '处理中…' : '接受' }}
@@ -1049,23 +1237,53 @@ function weekRangeLabel(anchorDate: string) {
                 <button
                   type="button"
                   class="detail-action reject"
-                  :disabled="pendingActionProcessing"
+                  :disabled="pendingActionProcessing || isActiveDetailLoading"
                   @click="handleRejectPendingTodo"
                 >
                   拒绝
                 </button>
               </template>
-              <button
-                v-else
-                type="button"
-                class="detail-action primary"
-                :disabled="activeTask.completable === false"
-                @click="toggleDetailTaskStatus"
-              >
-                {{ activeTask.status === 'done' ? '恢复待处理' : '标记完成' }}
-              </button>
+              <template v-else-if="isDetailDeleteConfirming">
+                <span class="detail-delete-confirm">确定删除？</span>
+                <button
+                  type="button"
+                  class="detail-action secondary"
+                  :disabled="deleteActionProcessing"
+                  @click="cancelDeleteActiveTask"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  class="detail-action delete"
+                  :disabled="deleteActionProcessing"
+                  @click="confirmDeleteActiveTask"
+                >
+                  {{ deleteActionProcessing ? '删除中…' : '确认删除' }}
+                </button>
+              </template>
+              <template v-else>
+                <button
+                  type="button"
+                  class="detail-action primary"
+                  :disabled="activeTask.completable === false || isActiveDetailLoading"
+                  @click="toggleDetailTaskStatus"
+                >
+                  {{ activeTask.status === 'done' ? '恢复待处理' : '标记完成' }}
+                </button>
+                <button
+                  v-if="showDetailDeleteAction"
+                  type="button"
+                  class="detail-action delete"
+                  :disabled="isActiveDetailLoading"
+                  @click="requestDeleteActiveTask"
+                >
+                  删除
+                </button>
+              </template>
             </div>
           </footer>
+          </template>
         </section>
       </aside>
 
@@ -1153,7 +1371,7 @@ function weekRangeLabel(anchorDate: string) {
               :action-label="taskEmptyActionLabel"
               size="sm"
               variant="inline"
-              @action="resetTaskFilters()"
+              @action="showAllTasks()"
             />
 
             <template v-else-if="!isLoading && !loadError">
@@ -1227,30 +1445,12 @@ function weekRangeLabel(anchorDate: string) {
           </div>
         </div>
 
-        <form class="quick-create side-content-card" @submit.prevent="submitQuickCreate">
-          <button
-            type="button"
-            class="quick-create-plus"
-            aria-label="新增待办"
-            @click="openCreateModal()"
-          >
-            <IconPlus aria-hidden="true" />
-          </button>
-          <input
-            v-model="quickCreateText"
-            type="text"
-            autocomplete="off"
-            aria-label="一句话新增待办"
-            placeholder="记录一个新事项，按 Enter 快速创建"
-          />
-          <button
-            type="submit"
-            :disabled="!quickCreateText.trim()"
-            aria-label="打开新建待办卡片"
-          >
-            <IconSendHorizontal aria-hidden="true" />
-          </button>
-        </form>
+        <TodoQuickCreateBar
+          v-model="quickCreateText"
+          variant="detail"
+          @full-create="openCreateModal()"
+          @submit="submitQuickCreate"
+        />
       </main>
 
       <aside class="detail-side-panel" aria-label="消息通知和日历">
@@ -1311,8 +1511,13 @@ function weekRangeLabel(anchorDate: string) {
                   周
                 </button>
               </div>
-              <button type="button" class="compact-mode-btn" @click="emit('switch-mode', 'simple')">
-                缩略模式
+              <button
+                type="button"
+                class="compact-mode-btn"
+                aria-label="切换到简约模式"
+                @click="emit('switch-mode', 'simple')"
+              >
+                简约模式
               </button>
               <div class="calendar-action-group">
                 <button type="button" class="today-chip" @click="goToday">今天</button>
@@ -1324,7 +1529,7 @@ function weekRangeLabel(anchorDate: string) {
             <CalendarWeekTimeline
               v-if="calendarViewMode === 'week'"
               :days="weekCalendarDays"
-              :selected-date="selectedDate"
+              :selected-date="props.selectedDate"
               @select="selectCalendarDate"
             />
             <div v-else class="calendar-grid" :aria-label="`${calendarHeaderLabel}日历`">
@@ -1748,6 +1953,22 @@ function weekRangeLabel(anchorDate: string) {
   grid-template-columns: 1fr 1fr;
 }
 
+.detail-panel-actions.is-completed-detail {
+  grid-template-columns: 1fr 1fr;
+}
+
+.detail-panel-actions.is-delete-confirm {
+  grid-template-columns: minmax(0, 1.1fr) 1fr 1fr;
+  align-items: center;
+}
+
+.detail-delete-confirm {
+  color: #64748b;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
 .detail-action {
   height: 46px;
   border: 0;
@@ -1777,6 +1998,18 @@ function weekRangeLabel(anchorDate: string) {
   border: 1px solid rgba(239, 68, 68, 0.12);
 }
 
+.detail-action.secondary {
+  color: #475569;
+  background: rgba(241, 245, 249, 0.96);
+  border: 1px solid rgba(226, 232, 240, 0.92);
+}
+
+.detail-action.delete {
+  color: #b91c1c;
+  background: rgba(254, 226, 226, 0.96);
+  border: 1px solid rgba(239, 68, 68, 0.12);
+}
+
 .detail-action.primary {
   color: #fff;
   background: linear-gradient(135deg, #2f72ed, #4d91ff);
@@ -1790,10 +2023,118 @@ function weekRangeLabel(anchorDate: string) {
   transform: none;
 }
 
-.detail-loading {
-  margin: 8px 0 0;
-  color: #60708d;
-  font-size: 14px;
+.detail-panel-body.is-loading {
+  pointer-events: none;
+}
+
+.detail-panel-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.detail-skeleton-block {
+  border-radius: 10px;
+  background: linear-gradient(
+    90deg,
+    rgba(226, 232, 240, 0.52) 0%,
+    rgba(248, 250, 252, 0.96) 50%,
+    rgba(226, 232, 240, 0.52) 100%
+  );
+  background-size: 240px 100%;
+  animation: detail-skeleton-shimmer 1.15s ease-in-out infinite;
+}
+
+.detail-skeleton-title {
+  width: 58%;
+  height: 28px;
+  border-radius: 12px;
+}
+
+.detail-skeleton-desc {
+  width: 100%;
+  height: 14px;
+}
+
+.detail-skeleton-desc.is-short {
+  width: 72%;
+}
+
+.detail-skeleton-time-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 15px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.42);
+  border: 1px solid rgba(226, 232, 240, 0.72);
+}
+
+.detail-skeleton-icon {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+}
+
+.detail-skeleton-time-copy,
+.detail-skeleton-meta-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.detail-skeleton-label {
+  width: 56px;
+  height: 10px;
+  border-radius: 6px;
+}
+
+.detail-skeleton-line {
+  width: 78%;
+  height: 16px;
+  border-radius: 8px;
+}
+
+.detail-skeleton-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.detail-skeleton-meta-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+}
+
+.detail-skeleton-meta-item .detail-skeleton-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+}
+
+.detail-skeleton-meta-item .detail-skeleton-line {
+  width: 64%;
+  height: 14px;
+}
+
+@keyframes detail-skeleton-shimmer {
+  0% {
+    background-position: -240px 0;
+  }
+
+  100% {
+    background-position: calc(240px + 100%) 0;
+  }
 }
 
 .side-card {
@@ -2489,68 +2830,6 @@ function weekRangeLabel(anchorDate: string) {
   border-color: #9fb1c5;
   background: #fff;
   box-shadow: none;
-}
-
-.quick-create {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 10px 0 0;
-  height: 56px;
-  border-radius: 17px;
-  padding: 8px 9px 8px 12px;
-  box-sizing: border-box;
-  background: rgba(255, 255, 255, 0.74);
-  border: 1px solid rgba(214, 225, 238, 0.9);
-}
-
-.quick-create-plus {
-  flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
-  border: 0;
-  border-radius: 11px;
-  color: var(--detail-blue);
-  background: rgba(52, 120, 246, 0.09);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-}
-
-.quick-create-plus svg {
-  width: 18px;
-  height: 18px;
-}
-.quick-create input {
-  flex: 1;
-  border: none;
-  outline: none;
-  background: transparent;
-  font-size: 14px;
-  color: #101936;
-}
-.quick-create input::placeholder {
-  color: #9aa8bb;
-}
-.quick-create button[type='submit'] {
-  width: 39px;
-  height: 39px;
-  border-radius: 13px;
-  border: none;
-  background: linear-gradient(135deg, #2f72ed, #4d91ff);
-  color: white;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  box-shadow: 0 8px 18px rgba(52, 120, 246, 0.23);
-}
-.quick-create button[type='submit']:disabled {
-  opacity: 0.5;
-}
-.quick-create button[type='submit'] svg {
-  width: 18px;
-  height: 18px;
 }
 
 .detail-side-panel {

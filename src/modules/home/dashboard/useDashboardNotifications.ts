@@ -1,11 +1,19 @@
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import {
   acceptTodos,
   loadAssignableUsers,
   loadPendingTodos,
   rejectTodo,
 } from '@/modules/home/dashboard/todo.service'
-import { formatEventTime } from '@/modules/home/dashboard/todoDisplay'
+import {
+  buildInboxItems,
+  countActionableInboxItems,
+  filterInboxItems,
+  findRelatedUnreadMessages,
+  isInboxItemOpenable,
+  type InboxFilter,
+  type InboxItem,
+} from '@/modules/home/dashboard/notification.inbox'
 import {
   buildSysMessageWebSocketUrl,
   deleteSysMessages,
@@ -14,7 +22,6 @@ import {
   markSysMessagesRead,
   normalizeSysMessagePush,
   type SysMessage,
-  type SysMessageFilter,
 } from '@/modules/home/dashboard/sys-message.service'
 import {
   hasSysMessage,
@@ -27,7 +34,6 @@ import type { CalendarEvent, CalendarUser } from '@/modules/home/dashboard/types
 import { useFeedbackStore } from '@/stores/feedback.store'
 import { useUserStore } from '@/stores/user.store'
 
-export type NotificationTab = 'sys-message' | 'pending-todo'
 type PendingActionMode = 'reject' | null
 
 const SYS_MESSAGE_PAGE_SIZE = 10
@@ -42,15 +48,13 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
   const userStore = useUserStore()
   const feedbackStore = useFeedbackStore()
 
-  const activeNotificationTab = ref<NotificationTab>('pending-todo')
-  const sysMessageFilter = ref<SysMessageFilter>('unread')
-  const isSysMessageLoading = ref(false)
-  const isSysMessageLoadingMore = ref(false)
-  const sysMessageError = ref('')
+  const inboxFilter = ref<InboxFilter>('actionable')
+  const isInboxLoading = ref(false)
+  const isInboxLoadingMore = ref(false)
+  const inboxError = ref('')
   const sysMessages = ref<SysMessage[]>([])
   const sysMessageTotal = ref(0)
   const sysMessagePageNum = ref(1)
-  const unreadSysMessageCount = ref(0)
   const processingSysMessageId = ref('')
   const isPendingLoading = ref(false)
   const pendingError = ref('')
@@ -68,6 +72,7 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
   let sysMessageReconnectTimer: ReturnType<typeof setTimeout> | null = null
   let sysMessageReconnectAttempts = 0
   let isSysMessageSocketStopped = false
+  let isNotificationCenterActive = true
 
   const currentUser = computed<CalendarUser>(() => ({
     id: userStore.profile?.id ?? '',
@@ -79,43 +84,22 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
     teamMemberIds: userStore.profile?.teamMemberIds,
   }))
 
-  const unreadNotificationCount = computed(() => unreadSysMessageCount.value)
-  const hasMoreSysMessages = computed(
+  const inboxItems = computed(() => buildInboxItems(pendingTodos.value, sysMessages.value))
+  const filteredInboxItems = computed(() => filterInboxItems(inboxItems.value, inboxFilter.value))
+  const actionableInboxCount = computed(() => countActionableInboxItems(inboxItems.value))
+  const unreadNotificationCount = computed(() => actionableInboxCount.value)
+  const hasMoreInboxMessages = computed(
     () => sysMessagePageNum.value * SYS_MESSAGE_PAGE_SIZE < sysMessageTotal.value,
   )
-  const sysMessageSummary = computed(() =>
-    sysMessageFilter.value === 'unread'
-      ? `未读 ${unreadSysMessageCount.value}`
-      : `全部 ${sysMessageTotal.value}`,
-  )
-
-  function isPendingConfirmOnly(todo: CalendarEvent) {
-    return todo.backendStatus === 9
-  }
+  const inboxTotalCount = computed(() => inboxItems.value.length)
 
   function resetSysMessageState() {
     sysMessages.value = []
     sysMessageTotal.value = 0
     sysMessagePageNum.value = 1
-    unreadSysMessageCount.value = 0
-    sysMessageError.value = ''
   }
 
-  function getSysMessageStatusText(message: SysMessage) {
-    return message.msgStatus === 0 ? '未读' : '已读'
-  }
-
-  function getSysMessageBizLabel(message: SysMessage) {
-    if (message.bizType === 1) return '智能待办'
-    if (message.bizType === 2) return '会议'
-    return message.msgType === 1 ? '系统消息' : '消息'
-  }
-
-  function isSysMessageOpenable(message: SysMessage) {
-    return Boolean(message.bizId) && (message.bizType === 1 || message.bizType === 2)
-  }
-
-  function formatSysMessageTime(value?: string) {
+  function formatInboxTime(value?: string) {
     if (!value) return ''
 
     const normalized = value.includes('T') ? value : value.replace(' ', 'T')
@@ -137,28 +121,6 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
   }
 
-  function getSysMessagePreview(content: string) {
-    return content
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .join(' · ')
-  }
-
-  async function refreshUnreadSysMessageCount() {
-    if (!currentUser.value.id) {
-      unreadSysMessageCount.value = 0
-      return
-    }
-
-    try {
-      const result = await loadSysMessages({ pageNum: 1, pageSize: 1, msgStatus: 0 })
-      unreadSysMessageCount.value = result.total
-    } catch {
-      // 未读数失败不阻断消息列表，弹层内会展示列表错误。
-    }
-  }
-
   async function refreshSysMessages(pageNum = 1, options?: { silent?: boolean }) {
     if (!currentUser.value.id) {
       resetSysMessageState()
@@ -169,17 +131,17 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
     const isFirstPage = pageNum === 1
     const showLoading = isFirstPage && !options?.silent
     if (showLoading) {
-      isSysMessageLoading.value = true
+      isInboxLoading.value = true
     } else if (!isFirstPage) {
-      isSysMessageLoadingMore.value = true
+      isInboxLoadingMore.value = true
     }
-    sysMessageError.value = ''
+    inboxError.value = ''
 
     try {
       const result = await loadSysMessages({
         pageNum,
         pageSize: SYS_MESSAGE_PAGE_SIZE,
-        msgStatus: sysMessageFilter.value === 'unread' ? 0 : undefined,
+        msgStatus: inboxFilter.value === 'actionable' ? 0 : undefined,
       })
       sysMessages.value = mergeSysMessages(isFirstPage ? [] : sysMessages.value, result.rows)
       sysMessageTotal.value = result.total
@@ -187,52 +149,34 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
       if (isFirstPage) {
         sysMessagesLoaded.value = true
       }
-
-      if (sysMessageFilter.value === 'unread') {
-        unreadSysMessageCount.value = result.total
-      } else {
-        void refreshUnreadSysMessageCount()
-      }
     } catch (error) {
       if (isFirstPage) sysMessages.value = []
-      sysMessageError.value = error instanceof Error ? error.message : '加载站内消息失败'
+      const message = error instanceof Error ? error.message : '加载消息失败'
+      inboxError.value = message
     } finally {
       if (showLoading) {
-        isSysMessageLoading.value = false
+        isInboxLoading.value = false
       }
-      isSysMessageLoadingMore.value = false
+      isInboxLoadingMore.value = false
     }
   }
 
-  async function loadMoreSysMessages() {
-    if (isSysMessageLoadingMore.value || !hasMoreSysMessages.value) return
+  async function loadMoreInboxMessages() {
+    if (isInboxLoadingMore.value || !hasMoreInboxMessages.value) return
     await refreshSysMessages(sysMessagePageNum.value + 1)
   }
 
-  function setNotificationTab(tab: NotificationTab) {
-    activeNotificationTab.value = tab
+  function setInboxFilter(filter: InboxFilter) {
+    if (inboxFilter.value === filter) return
 
-    if (tab === 'sys-message') {
-      void refreshSysMessages(1, { silent: sysMessagesLoaded.value })
-      return
-    }
-
-    void refreshPendingTodos({ silent: pendingTodosLoaded.value })
-  }
-
-  function setSysMessageFilter(filter: SysMessageFilter) {
-    if (sysMessageFilter.value === filter) return
-
-    sysMessageFilter.value = filter
+    inboxFilter.value = filter
     void refreshSysMessages(1, { silent: sysMessagesLoaded.value })
   }
 
   function applySysMessageReadState(message: SysMessage) {
     if (message.msgStatus !== 0) return
 
-    unreadSysMessageCount.value = Math.max(0, unreadSysMessageCount.value - 1)
-
-    if (sysMessageFilter.value === 'unread') {
+    if (inboxFilter.value === 'actionable') {
       sysMessages.value = removeSysMessageIdsFromList(sysMessages.value, [message.rawId])
       sysMessageTotal.value = Math.max(0, sysMessageTotal.value - 1)
       return
@@ -248,77 +192,87 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
     applySysMessageReadState(message)
   }
 
-  async function handleMarkSysMessageRead(message: SysMessage) {
-    if (message.msgStatus !== 0 || processingSysMessageId.value) return
+  async function markRelatedSysMessagesRead(todoId: string) {
+    const related = findRelatedUnreadMessages(sysMessages.value, todoId)
+    if (!related.length) return
 
-    processingSysMessageId.value = message.id
-    sysMessageError.value = ''
+    await markSysMessagesRead(related.map((message) => message.rawId))
+    related.forEach((message) => applySysMessageReadState(message))
+  }
+
+  async function handleMarkInboxItemRead(item: InboxItem) {
+    if (!item.message || item.message.msgStatus !== 0 || processingSysMessageId.value) return
+
+    processingSysMessageId.value = item.message.id
+    inboxError.value = ''
 
     try {
-      await readSysMessage(message)
+      await readSysMessage(item.message)
     } catch (error) {
-      sysMessageError.value = error instanceof Error ? error.message : '标记消息已读失败'
+      inboxError.value = error instanceof Error ? error.message : '标记消息已读失败'
     } finally {
       processingSysMessageId.value = ''
     }
   }
 
-  async function handleMarkAllSysMessagesRead() {
-    if (unreadSysMessageCount.value === 0 || processingSysMessageId.value) return
+  async function handleMarkAllInboxRead() {
+    if (actionableInboxCount.value === 0 || processingSysMessageId.value) return
 
     processingSysMessageId.value = 'all'
-    sysMessageError.value = ''
+    inboxError.value = ''
 
     try {
       await markAllSysMessagesRead()
-      unreadSysMessageCount.value = 0
-
-      if (sysMessageFilter.value === 'unread') {
-        sysMessages.value = []
+      sysMessages.value =
+        inboxFilter.value === 'actionable' ? [] : markAllSysMessagesReadInList(sysMessages.value)
+      if (inboxFilter.value === 'actionable') {
         sysMessageTotal.value = 0
-      } else {
-        sysMessages.value = markAllSysMessagesReadInList(sysMessages.value)
       }
     } catch (error) {
-      sysMessageError.value = error instanceof Error ? error.message : '全部标记已读失败'
+      inboxError.value = error instanceof Error ? error.message : '全部标记已读失败'
     } finally {
       processingSysMessageId.value = ''
     }
   }
 
-  async function handleDeleteSysMessage(message: SysMessage) {
-    if (processingSysMessageId.value) return
+  async function handleDeleteInboxItem(item: InboxItem) {
+    if (!item.message || processingSysMessageId.value) return
 
-    processingSysMessageId.value = message.id
-    sysMessageError.value = ''
+    processingSysMessageId.value = item.message.id
+    inboxError.value = ''
 
     try {
-      await deleteSysMessages([message.rawId])
-      sysMessages.value = removeSysMessageIdsFromList(sysMessages.value, [message.rawId])
+      await deleteSysMessages([item.message.rawId])
+      sysMessages.value = removeSysMessageIdsFromList(sysMessages.value, [item.message.rawId])
       sysMessageTotal.value = Math.max(0, sysMessageTotal.value - 1)
-
-      if (message.msgStatus === 0) {
-        unreadSysMessageCount.value = Math.max(0, unreadSysMessageCount.value - 1)
-      }
     } catch (error) {
-      sysMessageError.value = error instanceof Error ? error.message : '删除消息失败'
+      inboxError.value = error instanceof Error ? error.message : '删除消息失败'
     } finally {
       processingSysMessageId.value = ''
     }
   }
 
-  async function handleOpenSysMessage(message: SysMessage) {
-    if (!isSysMessageOpenable(message) || processingSysMessageId.value) return
+  async function handleOpenInboxItem(item: InboxItem) {
+    if (!isInboxItemOpenable(item) || processingSysMessageId.value) return
 
-    processingSysMessageId.value = message.id
-    sysMessageError.value = ''
+    const todoId = item.todoId ?? item.todo?.id
+    if (!todoId) return
+
+    processingSysMessageId.value = item.id
+    inboxError.value = ''
 
     try {
-      await readSysMessage(message)
-      options.onOpenTodo?.({ id: message.bizId ?? '' })
+      if (item.message) {
+        await readSysMessage(item.message)
+      }
+      options.onOpenTodo?.({
+        id: todoId,
+        date: item.todo?.date,
+        source: item.kind === 'todo_pending' ? 'pending-inbox' : undefined,
+      })
       options.onClose?.()
     } catch (error) {
-      sysMessageError.value = error instanceof Error ? error.message : '打开关联待办失败'
+      inboxError.value = error instanceof Error ? error.message : '打开关联待办失败'
     } finally {
       processingSysMessageId.value = ''
     }
@@ -332,7 +286,7 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
 
   function scheduleSysMessageReconnect() {
     clearSysMessageReconnectTimer()
-    if (isSysMessageSocketStopped || !currentUser.value.id) return
+    if (isSysMessageSocketStopped || !isNotificationCenterActive || !currentUser.value.id) return
 
     const delay = Math.min(30_000, 3_000 + sysMessageReconnectAttempts * 2_000)
     sysMessageReconnectAttempts += 1
@@ -353,7 +307,7 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
 
     const alreadyExists = hasSysMessage(sysMessages.value, message.id)
     const shouldShowInCurrentFilter =
-      sysMessageFilter.value === 'all' || message.msgStatus === 0 || alreadyExists
+      inboxFilter.value === 'all' || message.msgStatus === 0 || alreadyExists
 
     if (shouldShowInCurrentFilter) {
       sysMessages.value = mergeSysMessages(sysMessages.value, [message], { prepend: true })
@@ -363,8 +317,8 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
       }
     }
 
-    if (!alreadyExists && message.msgStatus === 0) {
-      unreadSysMessageCount.value += 1
+    if (message.bizType === 1 && message.bizId) {
+      void refreshPendingTodos({ silent: pendingTodosLoaded.value })
     }
 
     feedbackStore.info(message.msgSubject || '收到新的站内消息')
@@ -392,7 +346,9 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
   }
 
   function connectSysMessageSocket() {
-    if (!currentUser.value.id || typeof WebSocket === 'undefined') return
+    if (!isNotificationCenterActive || !currentUser.value.id || typeof WebSocket === 'undefined') {
+      return
+    }
 
     const url = buildSysMessageWebSocketUrl(currentUser.value.id)
     if (!url) return
@@ -458,13 +414,16 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
       isPendingLoading.value = true
     }
     pendingError.value = ''
+    inboxError.value = ''
 
     try {
       pendingTodos.value = await loadPendingTodos(currentUser.value, assignableUsers.value)
       pendingTodosLoaded.value = true
     } catch (error) {
       pendingTodos.value = []
-      pendingError.value = error instanceof Error ? error.message : '加载待接受待办失败'
+      const message = error instanceof Error ? error.message : '加载待接受待办失败'
+      pendingError.value = message
+      inboxError.value = message
     } finally {
       if (showLoading) {
         isPendingLoading.value = false
@@ -472,16 +431,19 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
     }
   }
 
+  async function refreshInbox(options?: { silent?: boolean }) {
+    inboxError.value = ''
+    const silent = options?.silent ?? (pendingTodosLoaded.value && sysMessagesLoaded.value)
+    await Promise.all([
+      refreshPendingTodos({ silent }),
+      refreshSysMessages(1, { silent }),
+    ])
+  }
+
   function resetPendingAction() {
     activeActionId.value = ''
     activeActionMode.value = null
     rejectReason.value = ''
-  }
-
-  function pendingSummary(event: CalendarEvent) {
-    const creator = event.creatorName ? `${event.creatorName} 派发` : '待接受待办'
-    const schedule = formatEventTime(event)
-    return `${creator} · ${schedule}`
   }
 
   function togglePendingAction(id: string, mode: Exclude<PendingActionMode, null>) {
@@ -500,10 +462,11 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
     try {
       await acceptTodos(id)
       resetPendingAction()
+      await markRelatedSysMessagesRead(id)
       await refreshPendingTodos({ silent: pendingTodosLoaded.value })
       options.onCalendarRefresh?.()
     } catch (error) {
-      pendingError.value = error instanceof Error ? error.message : '接受待办失败'
+      inboxError.value = error instanceof Error ? error.message : '接受待办失败'
     } finally {
       processingId.value = ''
     }
@@ -514,18 +477,14 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
     try {
       await rejectTodo(id, rejectReason.value.trim() || '暂不处理')
       resetPendingAction()
+      await markRelatedSysMessagesRead(id)
       await refreshPendingTodos({ silent: pendingTodosLoaded.value })
       options.onCalendarRefresh?.()
     } catch (error) {
-      pendingError.value = error instanceof Error ? error.message : '拒绝待办失败'
+      inboxError.value = error instanceof Error ? error.message : '拒绝待办失败'
     } finally {
       processingId.value = ''
     }
-  }
-
-  function handleOpenTodo(event: CalendarEvent) {
-    options.onOpenTodo?.({ id: event.id, date: event.date, source: 'pending-inbox' })
-    options.onClose?.()
   }
 
   async function initializeNotifications() {
@@ -535,7 +494,7 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
 
     initializePromise = (async () => {
       await refreshAssignableUsers()
-      await Promise.all([refreshSysMessages(), refreshPendingTodos()])
+      await refreshInbox()
       connectSysMessageSocket()
     })()
 
@@ -553,12 +512,34 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
     }
 
     await refreshAssignableUsers()
-    void refreshSysMessages(1, { silent: sysMessagesLoaded.value })
-    void refreshPendingTodos({ silent: pendingTodosLoaded.value })
+    void refreshInbox({ silent: true })
+  }
+
+  async function activateNotifications() {
+    isNotificationCenterActive = true
+
+    if (!currentUser.value.id) return
+
+    if (!pendingTodosLoaded.value && !sysMessagesLoaded.value) {
+      await initializeNotifications()
+      return
+    }
+
+    connectSysMessageSocket()
+  }
+
+  function deactivateNotifications() {
+    isNotificationCenterActive = false
+    stopSysMessageSocket()
   }
 
   onMounted(() => {
+    isNotificationCenterActive = true
     void initializeNotifications()
+  })
+
+  onActivated(() => {
+    void activateNotifications()
   })
 
   watch(
@@ -569,56 +550,52 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
       resetSysMessageState()
       pendingTodosLoaded.value = false
       sysMessagesLoaded.value = false
-      void refreshAssignableUsers().then(() => refreshPendingTodos())
-      void refreshSysMessages()
-      if (nextId) connectSysMessageSocket()
+      void refreshAssignableUsers().then(() => refreshInbox())
+      if (nextId && isNotificationCenterActive) connectSysMessageSocket()
     },
   )
+
+  onDeactivated(() => {
+    deactivateNotifications()
+  })
 
   onBeforeUnmount(() => {
     stopSysMessageSocket()
   })
 
+  const isInboxListLoading = computed(() => isInboxLoading.value || isPendingLoading.value)
+
   return {
-    activeNotificationTab,
-    sysMessageFilter,
-    isSysMessageLoading,
-    isSysMessageLoadingMore,
-    sysMessageError,
-    sysMessages,
-    unreadSysMessageCount,
+    inboxFilter,
+    isInboxLoading,
+    isInboxLoadingMore,
+    isInboxListLoading,
+    inboxError,
+    filteredInboxItems,
+    actionableInboxCount,
+    inboxTotalCount,
     unreadNotificationCount,
     processingSysMessageId,
-    isPendingLoading,
     pendingError,
-    pendingTodos,
     activeActionId,
     activeActionMode,
     rejectReason,
     processingId,
-    hasMoreSysMessages,
-    sysMessageSummary,
-    isPendingConfirmOnly,
-    getSysMessageStatusText,
-    getSysMessageBizLabel,
-    isSysMessageOpenable,
-    formatSysMessageTime,
-    getSysMessagePreview,
-    refreshSysMessages,
-    loadMoreSysMessages,
-    setNotificationTab,
-    setSysMessageFilter,
-    handleMarkSysMessageRead,
-    handleMarkAllSysMessagesRead,
-    handleDeleteSysMessage,
-    handleOpenSysMessage,
+    hasMoreInboxMessages,
+    formatInboxTime,
+    isInboxItemOpenable,
+    refreshInbox,
+    loadMoreInboxMessages,
+    setInboxFilter,
+    handleMarkInboxItemRead,
+    handleMarkAllInboxRead,
+    handleDeleteInboxItem,
+    handleOpenInboxItem,
     refreshPendingTodos,
     resetPendingAction,
-    pendingSummary,
     togglePendingAction,
     handleAcceptTodo,
     handleRejectTodo,
-    handleOpenTodo,
     initializeNotifications,
     refreshNotificationsOnOpen,
     stopSysMessageSocket,

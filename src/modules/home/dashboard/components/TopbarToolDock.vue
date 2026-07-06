@@ -27,7 +27,7 @@ function selectTool(tool: DashboardTool) {
   <nav class="tool-dock" aria-label="AI工具">
     <button
       v-for="tool in dashboardTools"
-      :key="tool.name"
+      :key="tool.id"
       class="tool-dock-item"
       :class="`tone-${tool.tone}`"
       type="button"

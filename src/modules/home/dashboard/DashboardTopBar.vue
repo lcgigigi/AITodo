@@ -17,12 +17,10 @@ import {
   logoutSmartTodo,
   syncCalendar,
 } from '@/modules/home/dashboard/todo.service'
-import TopbarToolDock from '@/modules/home/dashboard/components/TopbarToolDock.vue'
-import {
-  navigateDashboardTool,
-  type DashboardToolTarget,
-} from '@/modules/home/dashboard/dashboardTools'
+import { resolveHomeGreetingText } from '@/modules/home/dashboard/homeTimeOfDay'
+import { useHomeClock } from '@/modules/home/dashboard/useHomeClock'
 import { useDashboardGlassSettings } from '@/modules/home/dashboard/useDashboardGlassSettings'
+import { useDashboardTodosStore } from '@/stores/dashboard-todos.store'
 import { useFeedbackStore } from '@/stores/feedback.store'
 import { useUserStore } from '@/stores/user.store'
 
@@ -35,13 +33,11 @@ const emit = defineEmits<{
 
 const props = withDefaults(
   defineProps<{
-    showToolDock?: boolean
     embedded?: boolean
     hideNotifications?: boolean
     portalTarget?: HTMLElement | null
   }>(),
   {
-    showToolDock: true,
     embedded: false,
     hideNotifications: false,
     portalTarget: null,
@@ -73,9 +69,8 @@ const isLoggingOut = ref(false)
 const displayName = computed(() => userStore.profile?.name ?? '刘美华')
 const department = computed(() => userStore.profile?.department ?? '信息技术部')
 const avatarUrl = computed(() => userStore.profile?.avatar ?? girlImage)
-const greetingText = computed(() => {
-  return '早上好'
-})
+const { now } = useHomeClock()
+const greetingText = computed(() => resolveHomeGreetingText(now.value))
 
 const settingsMenuPanelStyle = computed(() => {
   if (!props.embedded) return undefined
@@ -254,14 +249,6 @@ function toggleGlassPanel() {
   isGlassPanelOpen.value = !isGlassPanelOpen.value
 }
 
-function openTopbarTool(tool: DashboardToolTarget) {
-  closeNotificationPanel()
-  closeUserMenu()
-  closeGlassPanel()
-  closeSettingsMenu()
-  void navigateDashboardTool(router, tool)
-}
-
 function openOnboardingTour() {
   closeNotificationPanel()
   closeUserMenu()
@@ -283,6 +270,7 @@ async function handleLogout() {
   } catch {
     // 即使接口失败也清除本地登录态
   } finally {
+    useDashboardTodosStore().reset()
     userStore.logout()
     isLoggingOut.value = false
     void router.replace({ path: routeConfig.loginRoute })
@@ -342,7 +330,6 @@ onBeforeUnmount(() => {
   <header
     class="dashboard-topbar"
     :class="{
-      'without-tools': !props.showToolDock,
       'is-embedded': props.embedded,
       'notification-open': props.embedded && isNotificationPanelOpen,
       'user-menu-open': props.embedded && isUserMenuOpen,
@@ -428,12 +415,6 @@ onBeforeUnmount(() => {
         详细模式
       </button>
     </div>
-
-    <TopbarToolDock
-      v-else-if="props.showToolDock"
-      data-tour-target="tool-dock"
-      @select="openTopbarTool"
-    />
 
     <div class="topbar-actions" :class="{ 'is-embedded-actions': props.embedded }">
       <DashboardNotificationCenter
@@ -1260,13 +1241,9 @@ onBeforeUnmount(() => {
   margin: 8px auto 0;
   padding: 5px 24px;
   display: grid;
-  grid-template-columns: minmax(270px, 0.78fr) minmax(560px, auto) minmax(270px, 0.78fr);
+  grid-template-columns: minmax(270px, 1fr) auto;
   align-items: center;
   gap: 18px;
-}
-
-.dashboard-topbar.without-tools {
-  grid-template-columns: minmax(270px, 1fr) auto;
 }
 
 .dashboard-topbar.is-embedded.notification-open,
@@ -1558,10 +1535,6 @@ onBeforeUnmount(() => {
 
 @media (max-width: 1280px) {
   .dashboard-topbar {
-    grid-template-columns: minmax(220px, 0.7fr) minmax(0, 1fr) auto;
-  }
-
-  .dashboard-topbar.without-tools {
     grid-template-columns: minmax(220px, 1fr) auto;
   }
 
@@ -1591,7 +1564,7 @@ onBeforeUnmount(() => {
     height: 60px;
     min-height: 60px;
     margin-top: 10px;
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     padding: 0 14px;
   }
 
