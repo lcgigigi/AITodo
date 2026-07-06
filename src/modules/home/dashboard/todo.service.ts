@@ -434,6 +434,13 @@ function normalizeBackendTodo(
     completable,
     backendStatus: item.status,
     receiveStatus: item.receiveStatus ?? undefined,
+    timeType,
+    startDateShow: startDateShow || undefined,
+    endDateShow: endDateShow || undefined,
+    handlerName:
+      userMap.get(currentHandlerId)?.name ||
+      (currentHandlerId ? currentHandlerId : undefined) ||
+      '未指定',
     handleDesc: item.handleDesc?.trim() || undefined,
     currentHandlerId: currentHandlerId || undefined,
     handlerIds: item.handlerIds ?? undefined,
@@ -451,6 +458,15 @@ function normalizeBackendTodos(
     .filter((item) => item.status !== 99)
     .map((item) => normalizeBackendTodo(item, currentUser, users))
     .sort(compareEvents)
+}
+
+function matchAssignableUser(token: string, assignableUsers: CalendarUser[]) {
+  if (!token) return undefined
+
+  return assignableUsers.find(
+    (user) =>
+      user.id === token || user.name === token || token.includes(user.name),
+  )
 }
 
 function findAssignees(
@@ -472,10 +488,7 @@ function findAssignees(
     return findAssignee(assigneeId, currentUser, assignableUsers, fallback)
   }
 
-  const matched = ids.map((id) => {
-    const user = assignableUsers.find((item) => item.id === id)
-    return user ?? { id, name: id }
-  })
+  const matched = ids.map((token) => matchAssignableUser(token, assignableUsers) ?? { id: token, name: token })
 
   return {
     id: matched.map((user) => user.id).join(','),
@@ -490,13 +503,7 @@ function findAssignee(
   fallback: ParsedTodoDraft,
 ) {
   const normalizedAssignee = toId(assigneeText)
-  const matchedAssignee = assignableUsers.find(
-    (user) =>
-      normalizedAssignee &&
-      (user.id === normalizedAssignee ||
-        user.name === normalizedAssignee ||
-        normalizedAssignee.includes(user.name)),
-  )
+  const matchedAssignee = matchAssignableUser(normalizedAssignee, assignableUsers)
 
   if (matchedAssignee) return matchedAssignee
 
@@ -570,16 +577,33 @@ function buildSmartTodoPayload(payload: CalendarTodoDraft | CalendarTodoUpdate):
 }
 
 function buildSmartTodoCreatePayload(payload: CalendarTodoDraft): SmartTodoCreatePayload {
-  const base = buildSmartTodoPayload(payload)
+  const isRange = Boolean(payload.endDate)
+  const content = payload.title.trim()
+  const title = payload.aiPrompt?.trim() || ''
+
+  if (isRange) {
+    const endDate = payload.endDate || payload.date
+    const endTime = payload.endTime?.trim()
+
+    return {
+      title,
+      timeType: 2,
+      startDateShow: buildDateTimeShow(payload.date, payload.time),
+      endDateShow: endTime ? buildDateTimeShow(endDate, endTime) : `${endDate} 23:59:59`,
+      content,
+      assigneeIds: payload.assigneeId?.trim() || undefined,
+      remark: payload.source?.trim() || '',
+      type: resolveTodoKind(payload.type),
+    }
+  }
 
   return {
-    title: base.title,
-    timeType: base.timeType,
-    startDateShow: base.startDateShow,
-    endDateShow: base.endDateShow,
-    content: base.content,
+    title,
+    timeType: 1,
+    startDateShow: buildDateTimeShow(payload.date, payload.time),
+    content,
     assigneeIds: payload.assigneeId?.trim() || undefined,
-    remark: base.remark,
+    remark: payload.source?.trim() || '',
     type: resolveTodoKind(payload.type),
   }
 }
@@ -607,7 +631,6 @@ export async function loginSmartTodo(credentials: SmartTodoLoginCredentials = {}
     },
     {
       timeout: SMART_TODO_REQUEST_TIMEOUT,
-      showLoading: false,
       showError: false,
     },
   )
@@ -638,7 +661,6 @@ export async function loadCurrentUser(options?: {
 }): Promise<SmartTodoCurrentUser> {
   const response = await httpClient.get<SmartTodoInfoResponse>('/getInfo', {
     timeout: SMART_TODO_REQUEST_TIMEOUT,
-    showLoading: false,
     showError: !options?.silent,
   })
   const result = response.data
@@ -678,7 +700,6 @@ export async function selectEmailProvider(provider: SmartTodoEmailProvider) {
     url: '/smart-todo/select-email',
     params: { choice },
     timeout: SMART_TODO_REQUEST_TIMEOUT,
-    showLoading: false,
     showError: false,
   })
   const result = response.data
@@ -810,7 +831,9 @@ export async function loadPendingTodos(currentUser: CalendarUser, users: Calenda
     '查询待接受待办失败',
   )
 
-  return normalizeBackendTodos(items, currentUser, users)
+  return normalizeBackendTodos(items, currentUser, users).filter(
+    (event) => event.backendStatus !== 9,
+  )
 }
 
 export async function loadTodayTodos(
@@ -833,18 +856,38 @@ export async function loadTodayTodos(
   return normalizeBackendTodos(items, currentUser, users)
 }
 
+interface SmartTodoDetailResponse {
+  mainTodo?: SmartTodoBackendItem | null
+  childTodoList?: SmartTodoBackendItem[] | null
+}
+
+function extractTodoDetailItem(
+  data: SmartTodoBackendItem | SmartTodoDetailResponse | null | undefined,
+): SmartTodoBackendItem | null {
+  if (!data) return null
+  if (typeof data === 'object' && 'mainTodo' in data) {
+    return data.mainTodo ?? null
+  }
+  return data as SmartTodoBackendItem
+}
+
 export async function loadTodoDetail(
   id: string,
   currentUser: CalendarUser,
   users: CalendarUser[] = [],
 ) {
-  const item = await requestSmartTodoData<SmartTodoBackendItem>(
+  const data = await requestSmartTodoData<SmartTodoBackendItem | SmartTodoDetailResponse>(
     {
       method: 'GET',
       url: `/smart-todo/${encodeURIComponent(id)}`,
     },
     '查询待办详情失败',
   )
+
+  const item = extractTodoDetailItem(data)
+  if (!item) {
+    throw new Error('查询待办详情失败')
+  }
 
   return normalizeBackendTodo(item, currentUser, users)
 }

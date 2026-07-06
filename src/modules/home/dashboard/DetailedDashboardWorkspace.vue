@@ -1,37 +1,74 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import type { Component } from 'vue'
-import IconAlarmClock from '~icons/lucide/alarm-clock'
-import IconArrowUpRight from '~icons/lucide/arrow-up-right'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import IconCheck from '~icons/lucide/check'
-import IconChevronDown from '~icons/lucide/chevron-down'
 import IconChevronLeft from '~icons/lucide/chevron-left'
 import IconChevronRight from '~icons/lucide/chevron-right'
-import IconCircle from '~icons/lucide/circle'
-import IconSendHorizontal from '~icons/lucide/send-horizontal'
+import IconClock3 from '~icons/lucide/clock-3'
+import IconTag from '~icons/lucide/tag'
+import IconUser from '~icons/lucide/user'
+import IconUserCheck from '~icons/lucide/user-check'
+import IconX from '~icons/lucide/x'
 import { routeConfig } from '@/config/route.config'
+import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
 import { useFeedbackStore } from '@/stores/feedback.store'
 import { useRouter } from 'vue-router'
-import { dashboardTools, navigateDashboardTool, type DashboardToolTarget } from './dashboardTools'
-import type { CalendarEvent, CalendarTodoDraft } from './types'
-import { formatEventTime, ymd } from './todoDisplay'
+import { dashboardTools, navigateDashboardTool, type DashboardTool, type DashboardToolTarget } from './dashboardTools'
+import CalendarWeekTimeline from './components/CalendarWeekTimeline.vue'
+import DashboardNotificationCenter from './components/DashboardNotificationCenter.vue'
+import TodoQuickCreateBar from './components/TodoQuickCreateBar.vue'
+import DayPreviewPanel from './DayPreviewPanel.vue'
+import type { CalendarDay, CalendarEvent, CalendarTodoDraft } from './types'
 import {
+  compareEvents,
+  formatAiFocusTodoLabel,
+  formatEventTime,
+  formatTodoDetailTimeField,
+  getBackendTodoStatusLabel,
+  getEventScheduleDisplay,
+  getSmartTodoKindLabel,
+  getTodoAssigneeDisplayName,
+  getTodoContentDisplay,
+  getTodoCreatorDisplayName,
+  isCompletedTodoEvent,
+  isPendingProcessTodoEvent,
+  matchesDetailStatusFilter,
+  shouldShowTodoAssignerField,
+  isAllDayEvent,
+  isRangeEvent,
+  ymd,
+  type DetailStatusFilter,
+} from './todoDisplay'
+import {
+  acceptTodos,
   createTodo as serviceCreateTodo,
+  deleteTodo as serviceDeleteTodo,
   getTodoMonthRange,
+  getTodoWeekRange,
   loadTodoDetail,
-  parseTodoText,
+  rejectTodo,
   updateTodoStatus as serviceUpdateTodoStatus,
 } from './todo.service'
 import { useDashboardTodos } from './useDashboardTodos'
 
+type DayPreviewPanelExpose = {
+  openCreateForm: () => void
+  showDiscardWarning: (onConfirm?: () => void) => void
+}
+
+type LeftPanelMode = 'tools' | 'create' | 'detail'
+
 type DetailMode = 'simple' | 'detail'
-type DetailFilter = 'all' | 'pending' | 'done' | 'overdue'
+type DetailTypeFilter = 'all' | 'task' | 'meeting'
 type DetailTone = 'blue' | 'green' | 'orange' | 'violet' | 'cyan' | 'slate'
 
-type FilterItem = {
-  value: DetailFilter
+type StatusFilterItem = {
+  value: DetailStatusFilter
   label: string
-  icon?: Component
+}
+
+type TypeFilterItem = {
+  value: Exclude<DetailTypeFilter, 'all'>
+  label: string
 }
 
 type MonthDay = {
@@ -43,8 +80,15 @@ type MonthDay = {
   dots: DetailTone[]
 }
 
+const DEFAULT_STATUS_FILTER: DetailStatusFilter = 'pending'
+
+const props = defineProps<{
+  selectedDate: string
+}>()
+
 const emit = defineEmits<{
   'switch-mode': [mode: DetailMode]
+  'update:selectedDate': [date: string]
 }>()
 
 const router = useRouter()
@@ -53,13 +97,32 @@ const feedbackStore = useFeedbackStore()
 const now = ref(new Date())
 const todayDate = computed(() => ymd(now.value))
 const currentMonth = ref(new Date(now.value.getFullYear(), now.value.getMonth(), 1))
-const selectedDate = ref(todayDate.value)
+const calendarViewMode = ref<'month' | 'week'>('month')
+const showCalendarRangeSwitch = false
 const taskDetails = ref<Record<string, CalendarEvent>>({})
-const activeFilter = ref<DetailFilter>('all')
+const statusFilter = ref<DetailStatusFilter>(DEFAULT_STATUS_FILTER)
+const typeFilter = ref<DetailTypeFilter>('all')
 const activeTaskId = ref('')
 const detailLoadingId = ref('')
 const quickCreateText = ref('')
-const isCreating = ref(false)
+const leftPanelMode = ref<LeftPanelMode>('tools')
+const isCreateFormDirty = ref(false)
+const quickCreatePrompt = ref('')
+const quickCreateKey = ref(0)
+const dayPreviewPanelRef = ref<DayPreviewPanelExpose | null>(null)
+const notificationCenterRef = ref<{ refreshPendingTodos: () => Promise<void> } | null>(null)
+const activeToolName = ref('')
+const pendingActionProcessing = ref(false)
+const pendingInboxDetailActive = ref(false)
+const pendingDeleteTaskId = ref('')
+const deleteActionProcessing = ref(false)
+
+function getActiveTodoLoadRange() {
+  return calendarViewMode.value === 'week'
+    ? getTodoWeekRange(props.selectedDate)
+    : getTodoMonthRange(currentMonth.value)
+}
+
 const {
   assignableUsers,
   currentUser,
@@ -69,62 +132,279 @@ const {
   refreshTodos: refreshDashboardTodos,
   initializeDashboardTodos,
 } = useDashboardTodos({
-  getLoadRange: () => getTodoMonthRange(currentMonth.value),
+  getLoadRange: getActiveTodoLoadRange,
   loadErrorFallback: '加载待办数据失败',
   onUnauthorized: redirectToLogin,
 })
 
-const filters: FilterItem[] = [
+let hasInitializedTodoRange = false
+
+const statusFilters: StatusFilterItem[] = [
   { value: 'all', label: '全部' },
   { value: 'pending', label: '待处理' },
   { value: 'done', label: '已完成' },
-  { value: 'overdue', label: '逾期', icon: IconAlarmClock },
+  { value: 'other', label: '其他' },
 ]
 
-const selectedDateEvents = computed(() => eventMap.value.get(selectedDate.value) ?? [])
-const pendingEvents = computed(() =>
-  selectedDateEvents.value.filter((event) => event.status !== 'done' && !isRejectedEvent(event)),
-)
-const doneCount = computed(
-  () => selectedDateEvents.value.filter((event) => event.status === 'done').length,
-)
-const overdueCount = computed(
-  () => selectedDateEvents.value.filter((event) => isOverdueEvent(event)).length,
-)
-const selectedDateLabel = computed(() => formatDateTitle(selectedDate.value))
-const selectedDateShortLabel = computed(() => formatDateShortTitle(selectedDate.value))
-const mainTitle = computed(() => (selectedDate.value === todayDate.value ? '今日待办' : '当日待办'))
-const filteredTasks = computed(() => {
-  if (activeFilter.value === 'pending') return pendingEvents.value
-  if (activeFilter.value === 'done') {
-    return selectedDateEvents.value.filter((event) => event.status === 'done')
-  }
-  if (activeFilter.value === 'overdue') {
-    return selectedDateEvents.value.filter((event) => isOverdueEvent(event))
-  }
-  return selectedDateEvents.value
-})
+const typeFilters: TypeFilterItem[] = [
+  { value: 'task', label: '待办' },
+  { value: 'meeting', label: '会议' },
+]
 
-const filterCounts = computed<Record<DetailFilter, number>>(() => ({
+const selectedDateEvents = computed(() => eventMap.value.get(props.selectedDate) ?? [])
+const pendingEvents = computed(() =>
+  selectedDateEvents.value.filter((event) => isPendingProcessTodoEvent(event)),
+)
+const selectedDateLabel = computed(() => formatDateTitle(props.selectedDate))
+const mainTitle = computed(() => (props.selectedDate === todayDate.value ? '今日待办' : '当日待办'))
+
+const statusFilterCounts = computed<Record<DetailStatusFilter, number>>(() => ({
   all: selectedDateEvents.value.length,
-  pending: pendingEvents.value.length,
-  done: doneCount.value,
-  overdue: overdueCount.value,
+  pending: selectedDateEvents.value.filter(isPendingProcessTodoEvent).length,
+  done: selectedDateEvents.value.filter(isCompletedTodoEvent).length,
+  other: selectedDateEvents.value.filter((event) => matchesDetailStatusFilter(event, 'other')).length,
 }))
 
+const filteredTasks = computed(() =>
+  selectedDateEvents.value.filter(
+    (event) =>
+      matchesDetailStatusFilter(event, statusFilter.value) &&
+      matchesTypeFilter(event, typeFilter.value),
+  ),
+)
+
+const sortedFilteredTasks = computed(() => [...filteredTasks.value].sort(compareEvents))
+
+const taskListSections = computed(() => {
+  const allDay = sortedFilteredTasks.value.filter((event) => isAllDayEvent(event))
+  const timed = sortedFilteredTasks.value.filter((event) => !isAllDayEvent(event))
+  const sections: Array<{ key: string; label: string; timeline: boolean; tasks: CalendarEvent[] }> = []
+
+  if (timed.length) {
+    sections.push({ key: 'timed', label: '时间安排', timeline: true, tasks: timed })
+  }
+  if (allDay.length) {
+    sections.push({ key: 'allday', label: '全天事项', timeline: false, tasks: allDay })
+  }
+
+  return sections
+})
+
+const hasActiveTaskFilters = computed(
+  () => statusFilter.value !== DEFAULT_STATUS_FILTER || typeFilter.value !== 'all',
+)
+
+const isFilterEmpty = computed(
+  () => hasActiveTaskFilters.value && !filteredTasks.value.length && !isLoading.value,
+)
+
+const emptyStateCopy = computed(() => {
+  if (!selectedDateEvents.value.length) {
+    return {
+      title: '当前日期暂无待办',
+      desc: '在下方输入框用一句话描述，即可快速创建待办。',
+    }
+  }
+  if (statusFilter.value === 'pending') {
+    return {
+      title: '暂无待处理事项',
+      desc: '当前没有需要继续推进的待办或已接受任务。',
+    }
+  }
+  if (statusFilter.value === 'done') {
+    return {
+      title: '暂无已完成事项',
+      desc: '完成待办后会在这里展示记录。',
+    }
+  }
+  if (statusFilter.value === 'other') {
+    return {
+      title: '暂无其他状态事项',
+      desc: '待接受、已拒绝等协作状态事项会出现在这里。',
+    }
+  }
+  if (typeFilter.value === 'meeting') {
+    return {
+      title: '暂无会议事项',
+      desc: '当前日期没有会议安排，可切换筛选或创建新待办。',
+    }
+  }
+  return {
+    title: '当前筛选下暂无待办',
+    desc: '试试切换状态或类型筛选，或清除筛选查看全部安排。',
+  }
+})
+const taskEmptyActionLabel = computed(() => {
+  if (isLoading.value || filteredTasks.value.length) return ''
+  if (!selectedDateEvents.value.length) return ''
+  if (statusFilter.value === 'all' && typeFilter.value === 'all') return ''
+  return '查看全部'
+})
+
 const monthDays = computed(() => buildMonthDays())
-const scheduleEvents = computed(() => selectedDateEvents.value)
+const weekCalendarDays = computed(() => buildWeekCalendarDays())
+const calendarHeaderLabel = computed(() =>
+  calendarViewMode.value === 'week'
+    ? weekRangeLabel(props.selectedDate)
+    : monthLabel(currentMonth.value),
+)
+const todoLoadRangeKey = computed(() => {
+  const range = getActiveTodoLoadRange()
+  return `${range.startDate}:${range.endDate}`
+})
+const trackEvents = computed(() =>
+  selectedDateEvents.value.filter((event) => !isRejectedEvent(event)),
+)
+const doneCount = computed(
+  () => trackEvents.value.filter((event) => event.status === 'done').length,
+)
+const totalCount = computed(() => trackEvents.value.length)
+const pendingCount = computed(() => Math.max(totalCount.value - doneCount.value, 0))
+const daySubject = computed(() => (props.selectedDate === todayDate.value ? '今日' : '当日'))
+
+const leftSuggestionTitle = computed(() => {
+  if (!totalCount.value) return '暂无待办安排'
+  if (!pendingCount.value) return '按计划推进剩余任务'
+  return '优先处理待办事项'
+})
+
+const leftSuggestionText = computed(() => {
+  if (!totalCount.value) {
+    return '当前日期暂无待办，可在中间栏快速创建新事项。'
+  }
+
+  if (!pendingCount.value) {
+    return `${daySubject.value}待办已全部完成，可以复盘成果或安排新的事项。`
+  }
+
+  const nextTask = pendingEvents.value[0]
+  if (!nextTask) {
+    return `还有 ${pendingCount.value} 项待处理，建议按时间顺序继续推进。`
+  }
+
+  const focusLabel = formatAiFocusTodoLabel(nextTask)
+  const remaining = Math.max(pendingCount.value - 1, 0)
+  if (remaining) {
+    return `当前最需要关注的是${focusLabel}，建议先完成它，再处理其余 ${remaining} 项任务。`
+  }
+
+  return `当前最需要关注的是${focusLabel}，完成后即可清空待处理事项。`
+})
+
+const activeTask = computed(() => {
+  if (!activeTaskId.value) return null
+
+  const cached = taskDetails.value[activeTaskId.value]
+  const fromList =
+    selectedDateEvents.value.find((event) => event.id === activeTaskId.value) ??
+    findEventById(activeTaskId.value)
+
+  if (cached && fromList) {
+    return { ...cached, ...fromList }
+  }
+
+  return fromList ?? cached ?? null
+})
+
+const showPendingInboxActions = computed(() => {
+  if (!activeTask.value) return false
+  if (pendingInboxDetailActive.value) return true
+  return isPendingAcceptanceTask(getTaskDetail(activeTask.value))
+})
+
+type DetailStatusTone = 'accepted' | 'done' | 'rejected' | 'pending' | 'waiting'
+
+const taskDetailPanel = computed(() => {
+  const task = activeTask.value
+  if (!task) return null
+
+  const detail = getTaskDetail(task)
+  const meta: Array<{ key: string; label: string; value: string }> = [
+    {
+      key: 'type',
+      label: '类型',
+      value: getSmartTodoKindLabel(detail),
+    },
+  ]
+
+  if (shouldShowTodoAssignerField(detail)) {
+    meta.push({
+      key: 'assigner',
+      label: '指派人',
+      value: getTodoCreatorDisplayName(detail),
+    })
+  }
+
+  meta.push({
+    key: 'receiver',
+    label: '接受人',
+    value: getTodoAssigneeDisplayName(detail),
+  })
+
+  return {
+    title: detail.title || '未命名待办',
+    typeLabel: getTaskTypeLabel(detail),
+    typeTone: detail.type === 'meeting' ? 'meeting' : 'todo',
+    statusLabel: getBackendTodoStatusLabel(detail),
+    statusTone: getDetailStatusTone(detail),
+    time: formatTodoDetailTimeField(detail),
+    content: getTodoContentDisplay(detail),
+    meta,
+  }
+})
+
+const isActiveDetailLoading = computed(
+  () => Boolean(activeTaskId.value && detailLoadingId.value === activeTaskId.value),
+)
+
+const showDetailDeleteAction = computed(() => {
+  const task = activeTask.value
+  if (!task) return false
+  return isCompletedTodoEvent(task)
+})
+
+const isDetailDeleteConfirming = computed(
+  () => Boolean(activeTaskId.value && pendingDeleteTaskId.value === activeTaskId.value),
+)
+
+const leftPanelAriaLabel = computed(() => {
+  if (leftPanelMode.value === 'create') return '完整创建'
+  if (leftPanelMode.value === 'detail') return '任务详情'
+  return '快捷入口'
+})
+
+watch(todoLoadRangeKey, () => {
+  if (!hasInitializedTodoRange) return
+  void refreshTodos()
+})
 
 onMounted(() => {
   void initializeDetailData()
+  window.addEventListener('keydown', onDetailWorkspaceKeydown)
 })
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onDetailWorkspaceKeydown)
+})
+
+function onDetailWorkspaceKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape') return
+  if (leftPanelMode.value === 'create') {
+    requestCloseCreateModal()
+    return
+  }
+  if (leftPanelMode.value === 'detail') {
+    closeTaskDetail()
+  }
+}
 
 async function initializeDetailData() {
   const initialized = await initializeDashboardTodos()
   if (!initialized) return
 
+  hasInitializedTodoRange = true
   taskDetails.value = {}
-  ensureSelectedDateInLoadedMonth()
+  ensureSelectedDateInLoadedRange()
 }
 
 function redirectToLogin() {
@@ -138,14 +418,129 @@ function openDetailTool(tool: DashboardToolTarget) {
   void navigateDashboardTool(router, tool)
 }
 
-async function refreshTodos() {
-  await refreshDashboardTodos()
-  taskDetails.value = {}
-  ensureSelectedDateInLoadedMonth()
+function handleToolClick(tool: DashboardTool) {
+  activeToolName.value = tool.name
+  openDetailTool(tool)
 }
 
-function ensureSelectedDateInLoadedMonth() {
-  const value = new Date(`${selectedDate.value}T12:00:00`)
+function notifyCustomizeQuick() {
+  feedbackStore.info('快捷入口自定义已触发')
+}
+
+function notifyCustomizeTools() {
+  feedbackStore.info('自定义工具入口已触发')
+}
+
+async function refreshTodos() {
+  const preserveDetailId =
+    leftPanelMode.value === 'detail' && activeTaskId.value ? activeTaskId.value : ''
+  const preservedDetail = preserveDetailId ? taskDetails.value[preserveDetailId] : null
+
+  await refreshDashboardTodos()
+
+  if (preserveDetailId) {
+    taskDetails.value = preservedDetail ? { [preserveDetailId]: preservedDetail } : {}
+  } else {
+    taskDetails.value = {}
+  }
+
+  ensureSelectedDateInLoadedRange()
+
+  if (!preserveDetailId) return
+
+  pendingInboxDetailActive.value = false
+
+  const updatedTask = findEventById(preserveDetailId)
+  if (updatedTask) {
+    if (preservedDetail) {
+      taskDetails.value = {
+        [preserveDetailId]: {
+          ...preservedDetail,
+          ...updatedTask,
+        },
+      }
+    }
+    await loadTaskDetail(updatedTask, true, { silent: Boolean(preservedDetail) })
+    return
+  }
+
+  if (preservedDetail) {
+    await loadTaskDetail(preservedDetail, true, { silent: true })
+    return
+  }
+
+  detailLoadingId.value = preserveDetailId
+  try {
+    const detail = await loadTodoDetail(
+      preserveDetailId,
+      currentUser.value,
+      assignableUsers.value,
+    )
+    taskDetails.value = {
+      [preserveDetailId]: detail,
+    }
+  } catch {
+    closeTaskDetail()
+  } finally {
+    detailLoadingId.value = ''
+  }
+}
+
+function findEventById(id: string) {
+  for (const events of eventMap.value.values()) {
+    const match = events.find((event) => event.id === id)
+    if (match) return match
+  }
+  return null
+}
+
+async function openTodoFromNotification(payload: {
+  id: string
+  date?: string
+  source?: 'pending-inbox'
+}) {
+  if (leftPanelMode.value === 'create') {
+    if (isCreateFormDirty.value) {
+      requestCloseCreateModal(() => {
+        void openTodoFromNotification(payload)
+      })
+      return
+    }
+    closeCreateModal()
+  }
+
+  detailLoadingId.value = payload.id
+
+  try {
+    const detailEvent = await loadTodoDetail(payload.id, currentUser.value, assignableUsers.value)
+    taskDetails.value = {
+      ...taskDetails.value,
+      [detailEvent.id]: detailEvent,
+    }
+    pendingInboxDetailActive.value = payload.source === 'pending-inbox'
+    leftPanelMode.value = 'detail'
+    activeTaskId.value = detailEvent.id
+    pendingDeleteTaskId.value = ''
+  } catch {
+    pendingInboxDetailActive.value = false
+    feedbackStore.error('查询待办详情失败')
+  } finally {
+    detailLoadingId.value = ''
+  }
+}
+
+defineExpose({
+  refreshTodos,
+  openTodoFromNotification,
+})
+
+function updateSelectedDate(date: string) {
+  emit('update:selectedDate', date)
+}
+
+function ensureSelectedDateInLoadedRange() {
+  if (calendarViewMode.value === 'week') return
+  const value = new Date(`${props.selectedDate}T12:00:00`)
   if (
     value.getFullYear() === currentMonth.value.getFullYear() &&
     value.getMonth() === currentMonth.value.getMonth()
@@ -158,48 +553,128 @@ function ensureSelectedDateInLoadedMonth() {
     today.getFullYear() === currentMonth.value.getFullYear() &&
     today.getMonth() === currentMonth.value.getMonth()
   ) {
-    selectedDate.value = todayDate.value
+    updateSelectedDate(todayDate.value)
     return
   }
 
-  selectedDate.value = ymd(
-    new Date(currentMonth.value.getFullYear(), currentMonth.value.getMonth(), 1),
+  updateSelectedDate(
+    ymd(new Date(currentMonth.value.getFullYear(), currentMonth.value.getMonth(), 1)),
   )
 }
 
-async function changeMonth(delta: number) {
+async function changeCalendarPeriod(delta: number) {
+  if (calendarViewMode.value === 'week') {
+    const next = new Date(`${props.selectedDate}T12:00:00`)
+    next.setDate(next.getDate() + delta * 7)
+    updateSelectedDate(ymd(next))
+    closeTaskDetail()
+    resetTaskFilters()
+    return
+  }
+
   currentMonth.value = new Date(
     currentMonth.value.getFullYear(),
     currentMonth.value.getMonth() + delta,
     1,
   )
-  await refreshTodos()
+}
+
+function setCalendarViewMode(mode: 'month' | 'week') {
+  if (calendarViewMode.value === mode) return
+
+  calendarViewMode.value = mode
+
+  if (mode === 'month') {
+    const nextDate = new Date(`${props.selectedDate}T12:00:00`)
+    currentMonth.value = new Date(nextDate.getFullYear(), nextDate.getMonth(), 1)
+  }
 }
 
 async function goToday() {
   now.value = new Date()
-  selectedDate.value = todayDate.value
+  updateSelectedDate(todayDate.value)
   currentMonth.value = new Date(now.value.getFullYear(), now.value.getMonth(), 1)
-  await refreshTodos()
 }
 
 function selectCalendarDate(date: string) {
-  selectedDate.value = date
-  activeTaskId.value = ''
-  activeFilter.value = 'all'
+  updateSelectedDate(date)
+  closeTaskDetail()
+  resetTaskFilters()
 }
 
-async function expandTask(task: CalendarEvent) {
-  activeTaskId.value = activeTaskId.value === task.id ? '' : task.id
-  if (activeTaskId.value) {
-    await loadTaskDetail(task)
+function resetTaskFilters() {
+  statusFilter.value = DEFAULT_STATUS_FILTER
+  typeFilter.value = 'all'
+}
+
+function showAllTasks() {
+  statusFilter.value = 'all'
+  typeFilter.value = 'all'
+}
+
+function handleStatusFilterClick(nextFilter: DetailStatusFilter) {
+  if (statusFilter.value === nextFilter && typeFilter.value !== 'all') {
+    typeFilter.value = 'all'
+    return
+  }
+
+  statusFilter.value = nextFilter
+  typeFilter.value = 'all'
+}
+
+function handleTypeFilterClick(type: Exclude<DetailTypeFilter, 'all'>) {
+  typeFilter.value = typeFilter.value === type ? 'all' : type
+}
+
+function getStatusPoolEvents(filter: DetailStatusFilter) {
+  return selectedDateEvents.value.filter((event) => matchesDetailStatusFilter(event, filter))
+}
+
+function getTypeCountForStatus(status: DetailStatusFilter, type: Exclude<DetailTypeFilter, 'all'>) {
+  const pool = getStatusPoolEvents(status)
+  if (type === 'meeting') return pool.filter((event) => event.type === 'meeting').length
+  return pool.filter((event) => event.type !== 'meeting').length
+}
+
+async function openTaskDetail(task: CalendarEvent) {
+  if (leftPanelMode.value === 'create') {
+    if (isCreateFormDirty.value) {
+      requestCloseCreateModal(() => {
+        void openTaskDetail(task)
+      })
+      return
+    }
+    closeCreateModal()
+  }
+
+  pendingInboxDetailActive.value = false
+  leftPanelMode.value = 'detail'
+  activeTaskId.value = task.id
+  pendingDeleteTaskId.value = ''
+  await loadTaskDetail(task)
+}
+
+function closeTaskDetail() {
+  activeTaskId.value = ''
+  pendingInboxDetailActive.value = false
+  pendingDeleteTaskId.value = ''
+  if (leftPanelMode.value === 'detail') {
+    leftPanelMode.value = 'tools'
   }
 }
 
-async function loadTaskDetail(task: CalendarEvent, force = false) {
+async function loadTaskDetail(
+  task: CalendarEvent,
+  force = false,
+  options?: { silent?: boolean },
+) {
   if (!currentUser.value.id || (!force && taskDetails.value[task.id])) return
 
-  detailLoadingId.value = task.id
+  const silent = options?.silent ?? false
+  if (!silent) {
+    detailLoadingId.value = task.id
+  }
+
   try {
     const detail = await loadTodoDetail(task.id, currentUser.value, assignableUsers.value)
     taskDetails.value = {
@@ -207,9 +682,13 @@ async function loadTaskDetail(task: CalendarEvent, force = false) {
       [task.id]: detail,
     }
   } catch {
-    feedbackStore.error('查询待办详情失败')
+    if (!silent) {
+      feedbackStore.error('查询待办详情失败')
+    }
   } finally {
-    detailLoadingId.value = ''
+    if (!silent) {
+      detailLoadingId.value = ''
+    }
   }
 }
 
@@ -223,54 +702,234 @@ async function toggleTaskStatus(task: CalendarEvent) {
     const nextStatus = task.status === 'done' ? 'todo' : 'done'
     await serviceUpdateTodoStatus(task.id, currentUser.value, nextStatus, assignableUsers.value)
     await refreshTodos()
+    if (activeTaskId.value === task.id) {
+      const updatedTask = selectedDateEvents.value.find((event) => event.id === task.id)
+      if (updatedTask) {
+        await loadTaskDetail(updatedTask, true)
+      }
+    }
     feedbackStore.success(nextStatus === 'done' ? '已标记完成' : '已撤销完成')
   } catch {
     // 全局拦截器已统一提示错误。
   }
 }
 
-async function submitQuickCreate() {
-  const title = quickCreateText.value.trim()
-  if (!title || isCreating.value || !currentUser.value.id) return
+function openCreateModal(prefill = quickCreateText.value.trim()) {
+  if (!currentUser.value.id) return
 
-  isCreating.value = true
+  closeTaskDetail()
+  quickCreatePrompt.value = prefill
+  quickCreateKey.value += 1
+  isCreateFormDirty.value = false
+  leftPanelMode.value = 'create'
+}
 
+function closeCreateModal() {
+  leftPanelMode.value = 'tools'
+  isCreateFormDirty.value = false
+  quickCreatePrompt.value = ''
+}
+
+function requestCloseCreateModal(onConfirm?: () => void) {
+  const close = () => {
+    closeCreateModal()
+    onConfirm?.()
+  }
+
+  if (!isCreateFormDirty.value) {
+    close()
+    return
+  }
+
+  dayPreviewPanelRef.value?.showDiscardWarning(close)
+}
+
+function submitQuickCreate() {
+  const prompt = quickCreateText.value.trim()
+  if (!prompt) return
+
+  openCreateModal(prompt)
+}
+
+async function handleCreateTodo(payload: CalendarTodoDraft) {
   try {
-    const fallback: CalendarTodoDraft = {
-      date: selectedDate.value,
-      title,
-      owner: currentUser.value.name,
-      assigneeId: currentUser.value.id,
-      assigneeName: currentUser.value.name,
-      source: '',
-      type: 1,
-    }
-    const parsed = await parseTodoText(title, currentUser.value, assignableUsers.value, fallback)
-    await serviceCreateTodo({
-      date: parsed.date,
-      endDate: parsed.endDate,
-      time: parsed.time,
-      endTime: parsed.endTime,
-      title: parsed.title || title,
-      owner: parsed.owner,
-      assigneeId: parsed.assigneeId,
-      assigneeName: parsed.assigneeName,
-      source: parsed.source,
-      type: parsed.type,
-    })
-    quickCreateText.value = ''
-    if (parsed.date) {
-      const parsedDate = new Date(`${parsed.date}T12:00:00`)
+    await serviceCreateTodo(payload)
+    if (payload.date) {
+      const parsedDate = new Date(`${payload.date}T12:00:00`)
       currentMonth.value = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), 1)
-      selectedDate.value = parsed.date
+      updateSelectedDate(payload.date)
     }
+    quickCreateText.value = ''
+    closeCreateModal()
     await refreshTodos()
     feedbackStore.success('待办已创建')
   } catch {
     // 全局拦截器已统一提示错误。
-  } finally {
-    isCreating.value = false
   }
+}
+
+function notifyFromPreview(message: string, type: 'success' | 'error' | 'info' = 'info') {
+  if (type === 'success') {
+    feedbackStore.success(message)
+    return
+  }
+  if (type === 'error') {
+    feedbackStore.error(message)
+    return
+  }
+  feedbackStore.info(message)
+}
+
+async function toggleDetailTaskStatus() {
+  const task = activeTask.value
+  if (!task) return
+  await toggleTaskStatus(task)
+  if (activeTaskId.value) {
+    await loadTaskDetail(task, true)
+  }
+}
+
+function formatTaskDetailTime(task: CalendarEvent) {
+  const detail = getTaskDetail(task)
+  const dateLabel = formatDateTitle(detail.date).split(' ').slice(0, 3).join(' ')
+  const timeLabel = formatEventTime(detail)
+  return timeLabel === '全天' ? `${dateLabel} 全天` : `${dateLabel} ${timeLabel}`
+}
+
+function getTaskStatusLabel(task: CalendarEvent) {
+  if (task.backendStatus === 6 || task.status === 'done') return '已完成'
+  if (task.backendStatus === 9) return '已拒绝'
+  if (task.backendStatus === 3) return '已接受'
+  if (isPendingAcceptanceTask(task)) return '待接受'
+  return '待处理'
+}
+
+function getDetailStatusTone(event: CalendarEvent): DetailStatusTone {
+  const label = getBackendTodoStatusLabel(event)
+  if (label === '已完成') return 'done'
+  if (label === '已拒绝') return 'rejected'
+  if (label === '待接受') return 'pending'
+  if (label === '已接受') return 'accepted'
+  return 'waiting'
+}
+
+function isPendingAcceptanceTask(task: CalendarEvent) {
+  if (task.backendStatus === 3 || task.backendStatus === 6 || task.backendStatus === 9) {
+    return false
+  }
+
+  if (task.scope === 'assigned_to_me') return true
+
+  const assigneeIds =
+    task.assigneeId
+      ?.split(',')
+      .map((item) => item.trim())
+      .filter(Boolean) ?? []
+
+  return Boolean(
+    currentUser.value.id &&
+      assigneeIds.includes(currentUser.value.id) &&
+      task.creatorId &&
+      task.creatorId !== currentUser.value.id,
+  )
+}
+
+async function handleAcceptPendingTodo() {
+  const task = activeTask.value
+  if (!task || pendingActionProcessing.value) return
+
+  pendingActionProcessing.value = true
+  try {
+    await acceptTodos(task.id)
+    pendingInboxDetailActive.value = false
+    closeTaskDetail()
+    await refreshTodos()
+    await notificationCenterRef.value?.refreshPendingTodos()
+    feedbackStore.success('已接受待办')
+  } catch {
+    // 全局拦截器已统一提示错误。
+  } finally {
+    pendingActionProcessing.value = false
+  }
+}
+
+async function handleRejectPendingTodo() {
+  const task = activeTask.value
+  if (!task || pendingActionProcessing.value) return
+
+  pendingActionProcessing.value = true
+  try {
+    await rejectTodo(task.id, '暂不处理')
+    pendingInboxDetailActive.value = false
+    closeTaskDetail()
+    await refreshTodos()
+    await notificationCenterRef.value?.refreshPendingTodos()
+    feedbackStore.success('已拒绝待办')
+  } catch {
+    // 全局拦截器已统一提示错误。
+  } finally {
+    pendingActionProcessing.value = false
+  }
+}
+
+function requestDeleteActiveTask() {
+  const task = activeTask.value
+  if (!task || !showDetailDeleteAction.value || isActiveDetailLoading.value) return
+  pendingDeleteTaskId.value = task.id
+}
+
+function cancelDeleteActiveTask() {
+  pendingDeleteTaskId.value = ''
+}
+
+async function confirmDeleteActiveTask() {
+  const task = activeTask.value
+  if (!task || deleteActionProcessing.value || pendingDeleteTaskId.value !== task.id) return
+
+  deleteActionProcessing.value = true
+  try {
+    await serviceDeleteTodo(task.id)
+    const nextDetails = { ...taskDetails.value }
+    delete nextDetails[task.id]
+    taskDetails.value = nextDetails
+    pendingDeleteTaskId.value = ''
+    closeTaskDetail()
+    await refreshTodos()
+    feedbackStore.success('待办已删除')
+  } catch {
+    // 全局拦截器已统一提示错误。
+  } finally {
+    deleteActionProcessing.value = false
+  }
+}
+
+function matchesTypeFilter(event: CalendarEvent, filter: DetailTypeFilter) {
+  if (filter === 'all') return true
+  if (filter === 'meeting') return event.type === 'meeting'
+  return event.type !== 'meeting'
+}
+
+function buildWeekCalendarDays(): CalendarDay[] {
+  const start = new Date(`${props.selectedDate}T12:00:00`)
+  const offset = (start.getDay() + 6) % 7
+  start.setDate(start.getDate() - offset)
+
+  return Array.from({ length: 7 }, () => {
+    const date = ymd(start)
+    const result: CalendarDay = {
+      date,
+      day: start.getDate(),
+      inMonth:
+        start.getFullYear() === currentMonth.value.getFullYear() &&
+        start.getMonth() === currentMonth.value.getMonth(),
+      inActiveWeek: true,
+      isToday: date === todayDate.value,
+      specialDays: [],
+      events: eventMap.value.get(date) ?? [],
+    }
+    start.setDate(start.getDate() + 1)
+    return result
+  })
 }
 
 function buildMonthDays(): MonthDay[] {
@@ -288,7 +947,7 @@ function buildMonthDays(): MonthDay[] {
       day: cursor.getDate(),
       inMonth: cursor.getFullYear() === year && cursor.getMonth() === month,
       isToday: key === todayDate.value,
-      isSelected: key === selectedDate.value,
+      isSelected: key === props.selectedDate,
       dots: getDayDots(dayEvents),
     }
     cursor.setDate(cursor.getDate() + 1)
@@ -314,21 +973,6 @@ function getTaskDetail(task: CalendarEvent) {
 
 function isRejectedEvent(event: CalendarEvent) {
   return event.backendStatus === 9
-}
-
-function isOverdueEvent(event: CalendarEvent) {
-  if (event.status === 'done' || isRejectedEvent(event)) return false
-
-  const endDate = event.endDate || event.date
-  if (endDate < todayDate.value) return true
-  if (endDate > todayDate.value) return false
-
-  const endTime = event.endTime || event.time
-  if (!endTime) return false
-
-  const [hour = '0', minute = '0'] = endTime.split(':')
-  const deadline = new Date(`${endDate}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:00`)
-  return deadline.getTime() < now.value.getTime()
 }
 
 function getTaskTone(event: CalendarEvent): DetailTone {
@@ -368,213 +1012,527 @@ function formatDateTitle(date: string) {
   return `${value.getFullYear()} 年 ${value.getMonth() + 1} 月 ${value.getDate()} 日 ${weekday}`
 }
 
-function formatDateShortTitle(date: string) {
-  const value = new Date(`${date}T12:00:00`)
-  const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][value.getDay()]
-  return `${value.getMonth() + 1} 月 ${value.getDate()} 日 ${weekday}`
+function formatTaskRangeStart(event: CalendarEvent) {
+  const display = getEventScheduleDisplay(event)
+  if (display.kind !== 'range') return ''
+  return `${display.start.date}${display.start.time ? ` ${display.start.time}` : ''}`
+}
+
+function formatTaskRangeEnd(event: CalendarEvent) {
+  const display = getEventScheduleDisplay(event)
+  if (display.kind !== 'range') return ''
+  return `${display.end.date}${display.end.time ? ` ${display.end.time}` : ''}`
 }
 
 function monthLabel(date: Date) {
   return `${date.getFullYear()} 年 ${date.getMonth() + 1} 月`
 }
+
+function weekRangeLabel(anchorDate: string) {
+  const range = getTodoWeekRange(anchorDate)
+  const start = new Date(`${range.startDate}T12:00:00`)
+  const end = new Date(`${range.endDate}T12:00:00`)
+  const startLabel = `${start.getMonth() + 1}月${start.getDate()}日`
+  const endLabel = `${end.getMonth() + 1}月${end.getDate()}日`
+
+  return `${start.getFullYear()} 年 ${startLabel} - ${endLabel}`
+}
 </script>
 
 <template>
   <section class="detail-workspace" aria-label="首页详细模式">
-    <!-- Left Column -->
-    <aside class="detail-left-panel" aria-label="快捷入口">
-      <nav class="detail-tool-panel" aria-label="AI工具">
-        <button
-          v-for="tool in dashboardTools"
-          :key="tool.name"
-          type="button"
-          class="detail-tool-item side-content-card"
-          :class="`tone-${tool.tone}`"
-          @click="openDetailTool(tool)"
-        >
-          <span class="detail-tool-icon" aria-hidden="true">
-            <component :is="tool.icon" />
-          </span>
-          <span class="detail-tool-name">{{ tool.name }}</span>
-          <span class="detail-tool-go" aria-hidden="true">
-            <IconArrowUpRight />
-          </span>
-        </button>
-      </nav>
-    </aside>
+    <section
+      class="detail-board"
+      :class="{ 'left-panel-active': leftPanelMode !== 'tools' }"
+      aria-label="首页详细模式工作区"
+    >
+      <aside class="detail-left-panel" :aria-label="leftPanelAriaLabel">
+        <template v-if="leftPanelMode === 'tools'">
+          <section class="side-card">
+            <div class="panel-title">
+              <h2>AI 提醒</h2>
+              <small>建议</small>
+            </div>
+            <div class="side-note">
+              <h3>{{ leftSuggestionTitle }}</h3>
+              <p>{{ leftSuggestionText }}</p>
+            </div>
+          </section>
 
-    <!-- 中右一体 -->
-    <section class="detail-board" aria-label="待办与日历">
+          <section class="side-card">
+            <div class="panel-title">
+              <h2>快捷入口</h2>
+              <button class="panel-mini-btn" type="button" @click="notifyCustomizeQuick">自定义</button>
+            </div>
+
+            <div class="tool-list">
+              <button
+                v-for="tool in dashboardTools"
+                :key="tool.id"
+                type="button"
+                class="tool-item"
+                :class="{ active: activeToolName === tool.name }"
+                @click="handleToolClick(tool)"
+              >
+                <span class="tool-icon" :class="tool.tone" aria-hidden="true">
+                  <component :is="tool.icon" />
+                </span>
+                <span class="tool-name">{{ tool.name }}</span>
+              </button>
+            </div>
+          </section>
+
+          <div class="customize">
+            <button type="button" @click="notifyCustomizeTools">⇄　自定义工具</button>
+          </div>
+        </template>
+
+        <div v-else-if="leftPanelMode === 'create'" class="left-panel-create-card">
+          <DayPreviewPanel
+            ref="dayPreviewPanelRef"
+            :key="quickCreateKey"
+            form-only
+            show-close
+            :date="props.selectedDate"
+            :date-label="selectedDateLabel"
+            :events="[]"
+            :special-days="[]"
+            :current-user="currentUser"
+            :assignable-users="assignableUsers"
+            :quick-create-prompt="quickCreatePrompt"
+            :quick-create-key="quickCreateKey"
+            @create-todo="handleCreateTodo"
+            @dirty-change="isCreateFormDirty = $event"
+            @notify="notifyFromPreview"
+            @close="requestCloseCreateModal()"
+          />
+        </div>
+
+        <section
+          v-else-if="leftPanelMode === 'detail' && activeTaskId"
+          class="left-panel-detail"
+        >
+          <template v-if="activeTask && taskDetailPanel">
+          <header class="detail-panel-head">
+            <div class="detail-panel-head-main">
+              <span class="detail-panel-kicker">任务详情</span>
+              <div class="detail-panel-badges">
+                <span class="detail-type-badge" :class="taskDetailPanel.typeTone">
+                  {{ taskDetailPanel.typeLabel }}
+                </span>
+                <span class="detail-status-badge" :class="taskDetailPanel.statusTone">
+                  {{ taskDetailPanel.statusLabel }}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="detail-panel-close"
+              aria-label="关闭详情"
+              @click="closeTaskDetail"
+            >
+              <IconX aria-hidden="true" />
+            </button>
+          </header>
+
+          <div
+            class="detail-panel-body"
+            :class="{ 'is-loading': isActiveDetailLoading }"
+            :aria-busy="isActiveDetailLoading"
+          >
+            <div
+              v-if="isActiveDetailLoading"
+              class="detail-panel-skeleton"
+              aria-hidden="true"
+            >
+              <div class="detail-skeleton-title detail-skeleton-block"></div>
+              <div class="detail-skeleton-desc detail-skeleton-block"></div>
+              <div class="detail-skeleton-desc detail-skeleton-block is-short"></div>
+
+              <div class="detail-skeleton-time-card">
+                <div class="detail-skeleton-icon detail-skeleton-block"></div>
+                <div class="detail-skeleton-time-copy">
+                  <div class="detail-skeleton-label detail-skeleton-block"></div>
+                  <div class="detail-skeleton-line detail-skeleton-block"></div>
+                </div>
+              </div>
+
+              <div class="detail-skeleton-meta-grid">
+                <div class="detail-skeleton-meta-item">
+                  <div class="detail-skeleton-icon detail-skeleton-block"></div>
+                  <div class="detail-skeleton-meta-copy">
+                    <div class="detail-skeleton-label detail-skeleton-block"></div>
+                    <div class="detail-skeleton-line detail-skeleton-block"></div>
+                  </div>
+                </div>
+                <div class="detail-skeleton-meta-item">
+                  <div class="detail-skeleton-icon detail-skeleton-block"></div>
+                  <div class="detail-skeleton-meta-copy">
+                    <div class="detail-skeleton-label detail-skeleton-block"></div>
+                    <div class="detail-skeleton-line detail-skeleton-block"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <template v-else>
+              <h2 class="detail-panel-title">{{ taskDetailPanel.title }}</h2>
+              <p class="detail-panel-desc">{{ taskDetailPanel.content }}</p>
+
+              <section class="detail-time-card" aria-label="时间安排">
+                <span class="detail-time-icon" aria-hidden="true">
+                  <IconClock3 />
+                </span>
+                <div class="detail-time-main">
+                  <span class="detail-field-label">时间安排</span>
+                  <div class="detail-time-lines">
+                    <template v-if="Array.isArray(taskDetailPanel.time)">
+                      <span class="detail-time-line">{{ taskDetailPanel.time[0] }}</span>
+                      <span class="detail-time-separator" aria-hidden="true">→</span>
+                      <span class="detail-time-line">{{ taskDetailPanel.time[1] }}</span>
+                    </template>
+                    <span v-else class="detail-time-line">{{ taskDetailPanel.time }}</span>
+                  </div>
+                </div>
+              </section>
+
+              <section class="detail-meta-grid" aria-label="任务信息">
+                <article
+                  v-for="item in taskDetailPanel.meta"
+                  :key="item.key"
+                  class="detail-meta-item"
+                >
+                  <span class="detail-meta-icon" aria-hidden="true">
+                    <IconTag v-if="item.key === 'type'" />
+                    <IconUser v-else-if="item.key === 'assigner'" />
+                    <IconUserCheck v-else />
+                  </span>
+                  <div class="detail-meta-copy">
+                    <span class="detail-field-label">{{ item.label }}</span>
+                    <strong>{{ item.value }}</strong>
+                  </div>
+                </article>
+              </section>
+            </template>
+          </div>
+
+          <footer class="detail-panel-footer">
+            <div
+              class="detail-panel-actions"
+              :class="{
+                'is-pending-inbox': showPendingInboxActions,
+                'is-completed-detail': showDetailDeleteAction && !isDetailDeleteConfirming,
+                'is-delete-confirm': isDetailDeleteConfirming,
+              }"
+            >
+              <template v-if="showPendingInboxActions">
+                <button
+                  type="button"
+                  class="detail-action accept"
+                  :disabled="pendingActionProcessing || isActiveDetailLoading"
+                  @click="handleAcceptPendingTodo"
+                >
+                  {{ pendingActionProcessing ? '处理中…' : '接受' }}
+                </button>
+                <button
+                  type="button"
+                  class="detail-action reject"
+                  :disabled="pendingActionProcessing || isActiveDetailLoading"
+                  @click="handleRejectPendingTodo"
+                >
+                  拒绝
+                </button>
+              </template>
+              <template v-else-if="isDetailDeleteConfirming">
+                <span class="detail-delete-confirm">确定删除？</span>
+                <button
+                  type="button"
+                  class="detail-action secondary"
+                  :disabled="deleteActionProcessing"
+                  @click="cancelDeleteActiveTask"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  class="detail-action delete"
+                  :disabled="deleteActionProcessing"
+                  @click="confirmDeleteActiveTask"
+                >
+                  {{ deleteActionProcessing ? '删除中…' : '确认删除' }}
+                </button>
+              </template>
+              <template v-else>
+                <button
+                  type="button"
+                  class="detail-action primary"
+                  :disabled="activeTask.completable === false || isActiveDetailLoading"
+                  @click="toggleDetailTaskStatus"
+                >
+                  {{ activeTask.status === 'done' ? '恢复待处理' : '标记完成' }}
+                </button>
+                <button
+                  v-if="showDetailDeleteAction"
+                  type="button"
+                  class="detail-action delete"
+                  :disabled="isActiveDetailLoading"
+                  @click="requestDeleteActiveTask"
+                >
+                  删除
+                </button>
+              </template>
+            </div>
+          </footer>
+          </template>
+        </section>
+      </aside>
+
       <main class="detail-main-panel" aria-label="当日待办清单">
         <div class="detail-main-body side-content-card">
           <header class="detail-main-header">
-            <h1>{{ mainTitle }}</h1>
-            <p class="subtitle">
-              {{ selectedDateLabel }}
-              <span class="divider">|</span>
-              任务总数 <span class="num">{{ filterCounts.all }}</span>
-              <span class="divider">|</span>
-              已完成 <span class="num">{{ filterCounts.done }}</span>
-              <span class="divider">|</span>
-              待处理 <span class="num">{{ filterCounts.pending }}</span>
-            </p>
+            <div class="todo-title-row">
+              <h1>{{ mainTitle }}</h1>
+              <div class="todo-date">{{ selectedDateLabel }}</div>
+            </div>
           </header>
 
-          <p v-if="loadError" class="detail-state is-error">{{ loadError }}</p>
-          <p v-else-if="isLoading" class="detail-state">正在加载真实待办数据...</p>
-
-          <div class="filter-row" role="group" aria-label="待办筛选">
-            <button
-              v-for="filter in filters"
-              :key="filter.value"
-              type="button"
-              class="filter-pill"
-              :class="{
-                active: activeFilter === filter.value,
-              }"
-              :aria-pressed="activeFilter === filter.value"
-              @click="activeFilter = filter.value"
-            >
-              <span>{{ filter.label }} ({{ filterCounts[filter.value] }})</span>
-            </button>
-          </div>
-
-          <div class="task-list" aria-label="待办列表">
-            <article v-if="!isLoading && !filteredTasks.length" class="task-empty">
-              当前日期暂无待办
-            </article>
-
-            <article
-              v-for="task in filteredTasks"
-              :key="task.id"
-              class="task-row"
-              :class="{ expanded: activeTaskId === task.id, done: task.status === 'done' }"
-            >
-              <div class="task-summary" @click="expandTask(task)">
+          <div class="filter-stack" aria-label="待办筛选">
+            <div class="filter-flow" role="tablist" aria-label="状态与类型筛选">
+              <div
+                v-for="filter in statusFilters"
+                :key="filter.value"
+                class="primary-filter-item"
+                :class="{ active: statusFilter === filter.value }"
+              >
                 <button
                   type="button"
-                  class="task-check"
-                  :class="{ checked: task.status === 'done' }"
-                  :aria-label="task.status === 'done' ? '撤销完成' : '标记完成'"
-                  :disabled="task.completable === false"
-                  @click.stop="toggleTaskStatus(task)"
+                  class="filter"
+                  role="tab"
+                  :class="{ active: statusFilter === filter.value }"
+                  :aria-selected="statusFilter === filter.value"
+                  @click="handleStatusFilterClick(filter.value)"
                 >
-                  <IconCheck v-if="task.status === 'done'" aria-hidden="true" />
+                  {{ filter.label }}
+                  <span class="filter-count">{{ statusFilterCounts[filter.value] }}</span>
                 </button>
-
-                <time class="task-time">{{ formatEventTime(task) }}</time>
-
-                <div class="task-info">
-                  <div class="task-title-row">
-                    <strong>{{ task.title }}</strong>
-                    <span class="task-tag" :class="`tone-${getTaskTone(task)}`">{{
-                      getTaskTypeLabel(task)
+                <div class="inline-type-filters" aria-label="类型筛选">
+                  <button
+                    v-for="typeItem in typeFilters"
+                    :key="typeItem.value"
+                    type="button"
+                    class="type-filter"
+                    :class="{
+                      active: statusFilter === filter.value && typeFilter === typeItem.value,
+                    }"
+                    :aria-pressed="statusFilter === filter.value && typeFilter === typeItem.value"
+                    :tabindex="statusFilter === filter.value ? 0 : -1"
+                    @click="handleTypeFilterClick(typeItem.value)"
+                  >
+                    {{ typeItem.label }}
+                    <span class="type-count">{{
+                      getTypeCountForStatus(filter.value, typeItem.value)
                     }}</span>
-                  </div>
-                  <div class="task-subtitle">
-                    {{ getProjectText(task) }}
-                  </div>
-                </div>
-
-                <div class="task-right">
-                  <span v-if="task.status === 'done'" class="task-done-text">已完成</span>
+                  </button>
                 </div>
               </div>
+            </div>
 
-              <div v-if="activeTaskId === task.id" class="task-detail">
-                <p v-if="detailLoadingId === task.id" class="detail-loading">正在加载详情...</p>
-                <dl v-else>
-                  <div>
-                    <dt>项目：</dt>
-                    <dd>{{ getProjectText(task) }}</dd>
-                  </div>
-                  <div>
-                    <dt>协作人：</dt>
-                    <dd>{{ getAssigneeText(task) }}</dd>
-                  </div>
-                  <div>
-                    <dt>截止时间：</dt>
-                    <dd>{{ formatEventTime(getTaskDetail(task)) }}</dd>
-                  </div>
-                  <div>
-                    <dt>描述：</dt>
-                    <dd>{{ getDescriptionText(task) }}</dd>
-                  </div>
-                </dl>
-              </div>
-            </article>
+            <div class="filter-result">
+              <span class="filter-result-text">
+                当前显示 <strong>{{ filteredTasks.length }}</strong> 项
+              </span>
+            </div>
+          </div>
+
+          <AppStateBlock
+            v-if="loadError"
+            class="detail-main-state"
+            type="error"
+            title="待办数据加载失败"
+            :description="loadError"
+            action-label="重新加载"
+            @action="refreshTodos"
+          />
+          <AppStateBlock
+            v-else-if="isLoading"
+            class="detail-main-state"
+            type="loading"
+            title="正在加载真实待办数据"
+            description="待办、日程和协作人信息同步后会自动展示。"
+          />
+
+          <div class="task-list" aria-label="待办列表">
+            <AppStateBlock
+              v-if="!isLoading && !loadError && !filteredTasks.length"
+              class="task-empty-state"
+              type="empty"
+              :title="emptyStateCopy.title"
+              :description="emptyStateCopy.desc"
+              :action-label="taskEmptyActionLabel"
+              size="sm"
+              variant="inline"
+              @action="showAllTasks()"
+            />
+
+            <template v-else-if="!isLoading && !loadError">
+              <section
+                v-for="section in taskListSections"
+                :key="section.key"
+                class="agenda-section"
+              >
+                <div class="section-kicker">{{ section.label }}</div>
+                <div :class="section.timeline ? 'timeline-list' : 'all-day-wrap'">
+                  <article
+                    v-for="task in section.tasks"
+                    :key="task.id"
+                    class="task-card"
+                    :class="{
+                      selected: activeTaskId === task.id,
+                      completed: task.status === 'done',
+                      allday: !section.timeline,
+                    }"
+                    @click="openTaskDetail(task)"
+                  >
+                    <div class="check-wrap" @click.stop>
+                      <button
+                        type="button"
+                        class="task-check"
+                        :class="{ checked: task.status === 'done' }"
+                        :aria-label="task.status === 'done' ? '撤销完成' : '标记完成'"
+                        :disabled="task.completable === false"
+                        @click="toggleTaskStatus(task)"
+                      >
+                        <IconCheck v-if="task.status === 'done'" aria-hidden="true" />
+                      </button>
+                    </div>
+
+                    <div class="task-time-wrap">
+                      <div v-if="isRangeEvent(task)" class="task-time is-range">
+                        <span class="task-time-range-line">{{ formatTaskRangeStart(task) }}</span>
+                        <span class="task-time-range-line task-time-range-end">{{
+                          formatTaskRangeEnd(task)
+                        }}</span>
+                      </div>
+                      <div v-else class="task-time">{{ formatEventTime(task) }}</div>
+                      <div class="task-time-sub">
+                        {{ section.timeline ? '时间节点' : '全天事项' }}
+                      </div>
+                    </div>
+
+                    <div class="task-main">
+                      <div class="task-line">
+                        <div class="task-name">{{ task.title }}</div>
+                        <span
+                          class="task-tag"
+                          :class="task.type === 'meeting' ? 'meeting' : 'todo'"
+                        >
+                          {{ getTaskTypeLabel(task) }}
+                        </span>
+                      </div>
+                      <div class="task-sub">来源：{{ getProjectText(task) }}</div>
+                    </div>
+
+                    <div class="task-aside">
+                      <div class="task-status" :class="{ done: task.status === 'done' }">
+                        {{ getTaskStatusLabel(task) }}
+                      </div>
+                      <div class="task-arrow" aria-hidden="true">›</div>
+                    </div>
+                  </article>
+                </div>
+              </section>
+            </template>
           </div>
         </div>
 
-        <form class="quick-create side-content-card" @submit.prevent="submitQuickCreate">
-          <input
-            v-model="quickCreateText"
-            type="text"
-            autocomplete="off"
-            aria-label="一句话新增待办"
-            placeholder="+ 一句话新增待办，AI 自动识别时间与任务类型..."
-          />
-          <button
-            type="submit"
-            :disabled="!quickCreateText.trim() || isCreating"
-            aria-label="解析并新增待办"
-          >
-            <IconSendHorizontal aria-hidden="true" />
-          </button>
-        </form>
+        <TodoQuickCreateBar
+          v-model="quickCreateText"
+          variant="detail"
+          @full-create="openCreateModal()"
+          @submit="submitQuickCreate"
+        />
       </main>
 
-      <aside class="detail-side-panel" aria-label="日历和日程">
-        <div class="detail-side-toolbar">
-          <div class="mode-segment-wrapper">
-            <div class="mode-segment" role="group" aria-label="首页模式">
-              <button type="button" @click="emit('switch-mode', 'simple')">总览模式</button>
-              <button type="button" class="active">工作模式</button>
-            </div>
-          </div>
+      <aside class="detail-side-panel" aria-label="消息通知和日历">
+        <section class="notification-card side-content-card" aria-label="消息通知">
+          <DashboardNotificationCenter
+            ref="notificationCenterRef"
+            layout="embedded"
+            @calendar-refresh="refreshTodos()"
+            @open-todo="openTodoFromNotification"
+          />
+        </section>
 
-          <div class="view-control-cluster" aria-label="日历视图">
-            <button type="button" class="calendar-menu-btn" aria-label="展开日历视图选项">
-              <IconChevronDown aria-hidden="true" />
-            </button>
-            <div class="calendar-range-segment" role="group" aria-label="日历范围">
-              <button type="button" class="active" aria-pressed="true">月</button>
-              <button type="button" aria-pressed="false" disabled>周</button>
-            </div>
-          </div>
-        </div>
-
-        <section class="calendar-card side-content-card" aria-label="月历">
+        <section
+          class="calendar-card side-content-card"
+          :class="{ 'is-week-mode': calendarViewMode === 'week' }"
+          :aria-label="calendarViewMode === 'week' ? '周历' : '月历'"
+        >
           <header class="calendar-header-mock">
             <div class="calendar-month-group">
-              <h2 @click="goToday" title="回到今天">{{ monthLabel(currentMonth) }}</h2>
               <button
                 type="button"
-                aria-label="上个月"
-                @click="changeMonth(-1)"
+                :aria-label="calendarViewMode === 'week' ? '上一周' : '上个月'"
+                @click="changeCalendarPeriod(-1)"
                 class="month-nav-btn"
               >
                 <IconChevronLeft aria-hidden="true" />
               </button>
               <button
                 type="button"
-                aria-label="下个月"
-                @click="changeMonth(1)"
+                :aria-label="calendarViewMode === 'week' ? '下一周' : '下个月'"
+                @click="changeCalendarPeriod(1)"
                 class="month-nav-btn"
               >
                 <IconChevronRight aria-hidden="true" />
               </button>
             </div>
-            <div class="calendar-action-group">
-              <button type="button" class="today-chip" @click="goToday">今天</button>
-              <button type="button" class="today-ring-btn" aria-label="回到今天" @click="goToday">
-                <IconCircle aria-hidden="true" />
+            <div class="calendar-header-actions">
+              <div
+                v-if="showCalendarRangeSwitch"
+                class="calendar-range-segment"
+                role="group"
+                aria-label="日历范围"
+              >
+                <button
+                  type="button"
+                  :class="{ active: calendarViewMode === 'month' }"
+                  :aria-pressed="calendarViewMode === 'month'"
+                  @click="setCalendarViewMode('month')"
+                >
+                  月
+                </button>
+                <button
+                  type="button"
+                  :class="{ active: calendarViewMode === 'week' }"
+                  :aria-pressed="calendarViewMode === 'week'"
+                  @click="setCalendarViewMode('week')"
+                >
+                  周
+                </button>
+              </div>
+              <button
+                type="button"
+                class="compact-mode-btn"
+                aria-label="切换到简约模式"
+                @click="emit('switch-mode', 'simple')"
+              >
+                简约模式
               </button>
+              <div class="calendar-action-group">
+                <button type="button" class="today-chip" @click="goToday">今天</button>
+              </div>
             </div>
           </header>
 
           <div class="calendar-placeholder-wrapper">
-            <div class="calendar-grid" :aria-label="`${monthLabel(currentMonth)}日历`">
+            <CalendarWeekTimeline
+              v-if="calendarViewMode === 'week'"
+              :days="weekCalendarDays"
+              :selected-date="props.selectedDate"
+              @select="selectCalendarDate"
+            />
+            <div v-else class="calendar-grid" :aria-label="`${calendarHeaderLabel}日历`">
               <span
                 v-for="week in ['一', '二', '三', '四', '五', '六', '日']"
                 :key="week"
@@ -597,42 +1555,6 @@ function monthLabel(date: Date) {
               </button>
             </div>
           </div>
-        </section>
-
-        <section class="schedule-card side-content-card" aria-label="当日日程">
-          <header class="side-card-header">
-            <div class="schedule-title-area">
-              <h2>当日日程</h2>
-              <p>{{ selectedDateShortLabel }}</p>
-            </div>
-            <button type="button" class="all-schedule-btn" @click="activeFilter = 'all'">
-              全部日程 <IconChevronRight aria-hidden="true" />
-            </button>
-          </header>
-
-          <div class="schedule-list">
-            <article v-if="!scheduleEvents.length" class="schedule-empty">当前日期暂无日程</article>
-            <article
-              v-for="task in scheduleEvents"
-              :key="`schedule-${task.id}`"
-              class="schedule-item"
-              @click="expandTask(task)"
-            >
-              <div class="schedule-dot"></div>
-              <time>{{ formatEventTime(task) }}</time>
-              <div class="schedule-info">
-                <strong>{{ task.title }}</strong>
-                <p>{{ getProjectText(task) }} · {{ getAssigneeText(task) }}</p>
-              </div>
-              <span :class="`tone-${getTaskTone(task)}`">{{ getTaskTypeLabel(task) }}</span>
-            </article>
-          </div>
-
-          <footer v-if="scheduleEvents.length" class="schedule-footer">
-            <button type="button" @click="activeFilter = 'all'">
-              查看全部日程（{{ scheduleEvents.length }}）<IconChevronRight aria-hidden="true" />
-            </button>
-          </footer>
         </section>
       </aside>
     </section>
@@ -662,10 +1584,9 @@ function monthLabel(date: Date) {
   min-height: 0;
   box-sizing: border-box;
   margin: 0 auto;
-  padding: clamp(12px, 1.2vw, 20px) 0;
+  padding: clamp(8px, 1vw, 16px) 0;
   display: grid;
-  grid-template-columns: minmax(264px, 336px) minmax(0, 1fr);
-  gap: clamp(16px, 1.4vw, 24px);
+  grid-template-columns: minmax(0, 1fr);
   color: var(--detail-ink);
   overflow: hidden;
 }
@@ -680,10 +1601,11 @@ function monthLabel(date: Date) {
 }
 
 .detail-board {
+  --detail-side-col: minmax(444px, 472px);
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(456px, 43%);
+  grid-template-columns: var(--detail-side-col) minmax(0, 1fr) var(--detail-side-col);
   gap: 0;
   overflow: hidden;
   border: 1px solid var(--home-glass-border);
@@ -698,8 +1620,7 @@ function monthLabel(date: Date) {
 .detail-main-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 14px;
+  padding: 9px;
   min-height: 0;
   min-width: 0;
   box-sizing: border-box;
@@ -707,553 +1628,1208 @@ function monthLabel(date: Date) {
 }
 
 .detail-main-body {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   padding: 20px 22px 18px;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 .detail-left-panel {
   display: flex;
   flex-direction: column;
-  gap: 16px;
   min-height: 0;
+  height: 100%;
+  padding: 8px 4px 8px 8px;
+  overflow-y: auto;
+  gap: 14px;
+  box-sizing: border-box;
+  background: transparent;
+  scrollbar-width: thin;
 }
 
-.detail-tool-panel {
+.detail-left-panel::-webkit-scrollbar {
+  width: 6px;
+}
+
+.detail-left-panel::-webkit-scrollbar-thumb {
+  background: rgba(81, 120, 173, 0.16);
+  border-radius: 10px;
+}
+
+.left-panel-create-card {
   flex: 1;
   min-height: 0;
-  box-sizing: border-box;
-  padding: 0 2px 6px;
-  border: none;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-auto-rows: auto;
-  align-content: start;
-  gap: 16px;
-  overflow: auto;
-  scrollbar-width: none;
-}
-
-.detail-tool-panel::-webkit-scrollbar {
-  display: none;
-}
-
-.detail-tool-item {
-  position: relative;
-  overflow: hidden;
-  min-width: 0;
-  aspect-ratio: 1;
-  border: 1px solid rgba(255, 255, 255, 0.78);
-  border-radius: 24px;
-  background: radial-gradient(
-      circle at 22% 20%,
-      rgba(255, 255, 255, 0.96),
-      rgba(255, 255, 255, 0) 34%
-    ),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.66), rgba(238, 246, 255, 0.46)),
-    rgba(248, 252, 255, 0.42);
-  color: #243656;
-  padding: 18px 12px 16px;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.44);
+  border: 1px solid rgba(255, 255, 255, 0.64);
+  padding: 16px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.left-panel-create-card :deep(.preview-panel) {
+  flex: 1;
+  min-height: 0;
+}
+
+.left-panel-detail {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 22px;
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.78), rgba(246, 250, 255, 0.56));
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 18px 36px -28px rgba(38, 67, 109, 0.22);
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.detail-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 12px;
-  font: inherit;
-  font-size: 15px;
-  font-weight: 900;
-  line-height: 1.2;
-  text-align: center;
-  white-space: normal;
-  cursor: pointer;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.82),
-    0 20px 36px -30px rgba(18, 38, 72, 0.46);
-  backdrop-filter: blur(18px) saturate(1.12);
-  -webkit-backdrop-filter: blur(18px) saturate(1.12);
-  transition:
-    background 0.18s ease,
-    transform 0.18s ease,
-    border-color 0.18s ease,
-    box-shadow 0.18s ease;
+  padding: 18px 20px 16px;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.72);
+  background: rgba(255, 255, 255, 0.42);
 }
 
-.detail-tool-item::before {
-  position: absolute;
-  right: -22px;
-  top: -22px;
-  width: 74px;
-  height: 74px;
-  border-radius: 999px;
-  background: var(--tool-glow, rgba(47, 124, 255, 0.16));
-  opacity: 0.84;
-  content: '';
-  transition:
-    opacity 0.18s ease,
-    transform 0.18s ease;
+.detail-panel-head-main {
+  min-width: 0;
 }
 
-.detail-tool-item::after {
-  position: absolute;
-  left: 18px;
-  right: 18px;
-  bottom: 13px;
-  height: 3px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, transparent, var(--tool-accent, #2f7cff), transparent);
-  opacity: 0.16;
-  content: '';
+.detail-panel-kicker {
+  display: block;
+  color: var(--detail-blue);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.1px;
 }
 
-.detail-tool-item:hover,
-.detail-tool-item:focus-visible {
-  border-color: rgba(255, 255, 255, 0.96);
-  background: radial-gradient(circle at 22% 20%, rgba(255, 255, 255, 1), rgba(255, 255, 255, 0) 36%),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.82), rgba(238, 246, 255, 0.58)),
-    rgba(248, 252, 255, 0.5);
-  transform: translateY(-4px) rotate(var(--hover-tilt, -0.8deg));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    0 22px 38px -26px rgba(18, 38, 72, 0.58);
-  outline: none;
+.detail-panel-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
 }
 
-.detail-tool-item:hover::before,
-.detail-tool-item:focus-visible::before {
-  opacity: 1;
-  transform: scale(1.18);
-}
-
-.detail-tool-icon {
-  position: relative;
-  z-index: 1;
-  width: 46px;
-  height: 46px;
-  border-radius: 18px;
+.detail-type-badge,
+.detail-status-badge {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.68),
-    0 14px 26px -22px currentColor;
-}
-
-.detail-tool-icon svg {
-  width: 22px;
-  height: 22px;
-  stroke-width: 2.3;
-}
-
-.detail-tool-name {
-  position: relative;
-  z-index: 1;
-  max-width: 100%;
-  color: #1b2b4c;
-  font-size: 16px;
-  font-weight: 900;
-  line-height: 1.2;
-}
-
-.detail-tool-go {
-  position: absolute;
-  z-index: 1;
-  right: 12px;
-  top: 12px;
-  width: 24px;
-  height: 24px;
+  height: 26px;
+  padding: 0 11px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.54);
-  color: rgba(80, 96, 125, 0.74);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.detail-type-badge.meeting {
+  color: #1d4fbf;
+  background: rgba(47, 124, 255, 0.12);
+  border: 1px solid rgba(47, 124, 255, 0.16);
+}
+
+.detail-type-badge.todo {
+  color: #5b49d6;
+  background: rgba(109, 92, 255, 0.12);
+  border: 1px solid rgba(109, 92, 255, 0.16);
+}
+
+.detail-status-badge.accepted {
+  color: #1d4fbf;
+  background: rgba(219, 234, 254, 0.92);
+}
+
+.detail-status-badge.done {
+  color: #047857;
+  background: rgba(220, 252, 231, 0.92);
+}
+
+.detail-status-badge.rejected {
+  color: #b91c1c;
+  background: rgba(254, 226, 226, 0.92);
+}
+
+.detail-status-badge.pending {
+  color: #b45309;
+  background: rgba(254, 243, 199, 0.96);
+}
+
+.detail-status-badge.waiting {
+  color: #475569;
+  background: rgba(241, 245, 249, 0.96);
+}
+
+.detail-panel-close {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 12px;
+  color: #60708d;
+  background: rgba(255, 255, 255, 0.82);
   display: grid;
   place-items: center;
-  opacity: 0;
-  transform: translate(-4px, 4px);
+  cursor: pointer;
   transition:
-    opacity 0.18s ease,
+    background 0.18s ease,
+    border-color 0.18s ease,
     transform 0.18s ease;
 }
 
-.detail-tool-go svg {
-  width: 14px;
+.detail-panel-close:hover {
+  background: #fff;
+  border-color: rgba(47, 124, 255, 0.18);
+  transform: translateY(-1px);
+}
+
+.detail-panel-close svg {
+  width: 18px;
+  height: 18px;
+}
+
+.detail-panel-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px 12px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.detail-panel-title {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.42;
+  letter-spacing: -0.35px;
+  color: #101936;
+  font-weight: 800;
+}
+
+.detail-panel-desc {
+  margin: -6px 0 0;
+  color: #5c6b82;
+  font-size: 14px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.detail-field-label {
+  display: block;
+  margin-bottom: 6px;
+  color: #8795aa;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+
+.detail-time-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 15px 16px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(47, 124, 255, 0.1), rgba(47, 124, 255, 0.03));
+  border: 1px solid rgba(47, 124, 255, 0.12);
+}
+
+.detail-time-icon {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  color: var(--detail-blue);
+  background: rgba(255, 255, 255, 0.78);
+  display: grid;
+  place-items: center;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+
+.detail-time-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.detail-time-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.detail-time-lines {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail-time-line {
+  color: #101936;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.detail-time-separator {
+  color: #94a3b8;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.detail-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.detail-meta-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.detail-meta-icon {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  color: #60708d;
+  background: rgba(241, 245, 249, 0.92);
+  display: grid;
+  place-items: center;
+}
+
+.detail-meta-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.detail-meta-copy {
+  min-width: 0;
+}
+
+.detail-meta-copy strong {
+  display: block;
+  color: #101936;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.detail-panel-footer {
+  flex: 0 0 auto;
+  padding: 14px 20px 18px;
+  border-top: 1px solid rgba(226, 232, 240, 0.72);
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.detail-panel-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.detail-panel-actions.is-pending-inbox {
+  grid-template-columns: 1fr 1fr;
+}
+
+.detail-panel-actions.is-completed-detail {
+  grid-template-columns: 1fr 1fr;
+}
+
+.detail-panel-actions.is-delete-confirm {
+  grid-template-columns: minmax(0, 1.1fr) 1fr 1fr;
+  align-items: center;
+}
+
+.detail-delete-confirm {
+  color: #64748b;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.detail-action {
+  height: 46px;
+  border: 0;
+  border-radius: 14px;
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    opacity 0.18s ease;
+}
+
+.detail-action:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.detail-action.accept {
+  color: #047857;
+  background: rgba(220, 252, 231, 0.96);
+  border: 1px solid rgba(16, 185, 129, 0.14);
+}
+
+.detail-action.reject {
+  color: #b91c1c;
+  background: rgba(254, 226, 226, 0.96);
+  border: 1px solid rgba(239, 68, 68, 0.12);
+}
+
+.detail-action.secondary {
+  color: #475569;
+  background: rgba(241, 245, 249, 0.96);
+  border: 1px solid rgba(226, 232, 240, 0.92);
+}
+
+.detail-action.delete {
+  color: #b91c1c;
+  background: rgba(254, 226, 226, 0.96);
+  border: 1px solid rgba(239, 68, 68, 0.12);
+}
+
+.detail-action.primary {
+  color: #fff;
+  background: linear-gradient(135deg, #2f72ed, #4d91ff);
+  box-shadow: 0 10px 20px rgba(52, 120, 246, 0.24);
+}
+
+.detail-action:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.detail-panel-body.is-loading {
+  pointer-events: none;
+}
+
+.detail-panel-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.detail-skeleton-block {
+  border-radius: 10px;
+  background: linear-gradient(
+    90deg,
+    rgba(226, 232, 240, 0.52) 0%,
+    rgba(248, 250, 252, 0.96) 50%,
+    rgba(226, 232, 240, 0.52) 100%
+  );
+  background-size: 240px 100%;
+  animation: detail-skeleton-shimmer 1.15s ease-in-out infinite;
+}
+
+.detail-skeleton-title {
+  width: 58%;
+  height: 28px;
+  border-radius: 12px;
+}
+
+.detail-skeleton-desc {
+  width: 100%;
   height: 14px;
-  stroke-width: 2.6;
 }
 
-.detail-tool-item:hover .detail-tool-go,
-.detail-tool-item:focus-visible .detail-tool-go {
-  opacity: 1;
-  transform: translate(0, 0);
+.detail-skeleton-desc.is-short {
+  width: 72%;
 }
 
-.detail-tool-item:nth-child(2n) {
-  --hover-tilt: 0.8deg;
+.detail-skeleton-time-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 15px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.42);
+  border: 1px solid rgba(226, 232, 240, 0.72);
 }
 
-.detail-tool-item:nth-child(3n) {
-  --hover-tilt: -1.1deg;
+.detail-skeleton-icon {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
 }
 
-.tone-orange .detail-tool-icon {
-  background: #ffe5d7;
-  color: #ff7a3d;
+.detail-skeleton-time-copy,
+.detail-skeleton-meta-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 2px;
 }
 
-.tone-orange.detail-tool-item {
-  --tool-accent: #ff7a3d;
-  --tool-glow: rgba(255, 122, 61, 0.2);
+.detail-skeleton-label {
+  width: 56px;
+  height: 10px;
+  border-radius: 6px;
 }
 
-.tone-blue .detail-tool-icon {
-  background: #dbeafe;
-  color: #2f7cff;
+.detail-skeleton-line {
+  width: 78%;
+  height: 16px;
+  border-radius: 8px;
 }
 
-.tone-blue.detail-tool-item {
-  --tool-accent: #2f7cff;
-  --tool-glow: rgba(47, 124, 255, 0.2);
+.detail-skeleton-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
-.tone-green .detail-tool-icon {
-  background: #d9f8e7;
-  color: #20bb77;
+.detail-skeleton-meta-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.72);
 }
 
-.tone-green.detail-tool-item {
-  --tool-accent: #20bb77;
-  --tool-glow: rgba(32, 187, 119, 0.2);
+.detail-skeleton-meta-item .detail-skeleton-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
 }
 
-.tone-violet .detail-tool-icon,
-.tone-purple .detail-tool-icon {
-  background: #eadfff;
-  color: #8b5cf6;
+.detail-skeleton-meta-item .detail-skeleton-line {
+  width: 64%;
+  height: 14px;
 }
 
-.tone-violet.detail-tool-item,
-.tone-purple.detail-tool-item {
-  --tool-accent: #8b5cf6;
-  --tool-glow: rgba(139, 92, 246, 0.18);
+@keyframes detail-skeleton-shimmer {
+  0% {
+    background-position: -240px 0;
+  }
+
+  100% {
+    background-position: calc(240px + 100%) 0;
+  }
 }
 
-.tone-cyan .detail-tool-icon {
-  background: #d7f7ff;
-  color: #09b6d7;
+.side-card {
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.44);
+  border: 1px solid rgba(255, 255, 255, 0.64);
+  padding: 16px;
 }
 
-.tone-cyan.detail-tool-item {
-  --tool-accent: #09b6d7;
-  --tool-glow: rgba(9, 182, 215, 0.2);
+.panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
 }
 
-.tone-sky .detail-tool-icon {
-  background: #dff3ff;
-  color: #26a4e8;
+.panel-title h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: #14213d;
 }
 
-.tone-sky.detail-tool-item {
-  --tool-accent: #26a4e8;
-  --tool-glow: rgba(38, 164, 232, 0.2);
+.panel-title small {
+  color: #8795aa;
+  font-size: 12px;
+  font-weight: 600;
 }
 
-.tone-slate .detail-tool-icon {
-  background: #e7edf5;
-  color: #70819a;
+.panel-mini-btn {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 0;
+  color: #52627b;
+  background: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
 }
 
-.tone-slate.detail-tool-item {
-  --tool-accent: #70819a;
-  --tool-glow: rgba(112, 129, 154, 0.16);
+.panel-mini-btn:hover {
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.tool-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.tool-item {
+  width: 100%;
+  min-height: 88px;
+  padding: 12px 10px;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 10px;
+  border-radius: 18px;
+  color: #14213d;
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  text-align: center;
+  font: inherit;
+  transition: 0.2s ease;
+}
+
+.tool-item:hover,
+.tool-item.active {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(76, 133, 235, 0.18);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 24px rgba(43, 82, 132, 0.08);
+}
+
+.tool-icon {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: rgba(52, 120, 246, 0.08);
+  color: #3478f6;
+}
+
+.tool-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.tool-name {
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.side-note {
+  margin-top: 10px;
+  padding: 14px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(52, 120, 246, 0.06), rgba(52, 120, 246, 0.03));
+  border: 1px solid rgba(52, 120, 246, 0.08);
+}
+
+.side-note h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #14213d;
+}
+
+.side-note p {
+  margin: 0;
+  color: #52627b;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.customize {
+  margin-top: auto;
+  padding: 0 2px 2px;
+}
+
+.customize button {
+  width: 100%;
+  height: 42px;
+  border-radius: 13px;
+  color: #52627b;
+  background: rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+  border: 1px dashed rgba(108, 137, 174, 0.25);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.customize button:hover {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(108, 137, 174, 0.36);
 }
 
 .detail-main-header {
-  margin-bottom: 20px;
+  flex: 0 0 auto;
+  margin-bottom: 0;
+}
+
+.detail-main-state {
+  margin: -2px 0 20px;
+}
+
+.todo-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
 }
 
 .detail-main-header h1 {
-  margin: 0 0 8px;
+  margin: 0;
   color: #101936;
-  font-size: 24px;
+  font-size: 26px;
   font-weight: 900;
+  line-height: 1.2;
+  letter-spacing: -0.4px;
 }
 
-.subtitle {
-  margin: 0;
-  color: #60708d;
-  font-size: 13px;
-  font-weight: 600;
+.todo-date {
+  color: #60718b;
+  font-size: 16px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.filter-stack {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+  min-width: 0;
+  min-height: 54px;
+  padding: 7px 10px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.36);
+  border: 1px solid rgba(255, 255, 255, 0.54);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+.filter-flow {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.subtitle .divider {
-  color: #c0cbe0;
-}
-
-.subtitle .num {
-  color: #101936;
-  font-weight: 800;
-}
-
-.filter-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 20px;
-}
-
-.filter-pill {
-  height: 32px;
-  border: 1px solid rgba(255, 255, 255, 0.48);
-  border-radius: 999px;
-  background: rgba(241, 245, 249, 0.38);
-  backdrop-filter: blur(12px) saturate(1.08);
-  -webkit-backdrop-filter: blur(12px) saturate(1.08);
-  color: #60708d;
-  padding: 0 16px;
-  font-size: 13px;
-  font-weight: 800;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.filter-pill:hover {
-  background: rgba(248, 250, 252, 0.52);
-}
-
-.filter-pill.active {
-  background: var(--detail-blue);
-  color: white;
-  box-shadow: 0 4px 12px rgba(47, 124, 255, 0.3);
-}
-
-.task-list {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding-right: 4px;
+  overflow-x: auto;
   scrollbar-width: none;
 }
-.task-list::-webkit-scrollbar {
+
+.filter-flow::-webkit-scrollbar {
   display: none;
 }
 
-.task-row {
-  border: 1px solid rgba(255, 255, 255, 0.52);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.28);
-  backdrop-filter: blur(14px) saturate(1.08);
-  -webkit-backdrop-filter: blur(14px) saturate(1.08);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42);
-  transition: all 0.2s;
-}
-.task-row:hover {
-  border-color: rgba(191, 219, 254, 0.72);
-  background: rgba(255, 255, 255, 0.42);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.52),
-    0 4px 14px -10px rgba(59, 130, 246, 0.14);
-}
-.task-row.expanded {
-  border-color: rgba(147, 197, 253, 0.78);
-  background: rgba(255, 255, 255, 0.38);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.56),
-    0 8px 24px -16px rgba(31, 111, 255, 0.16);
-}
-.task-row.done {
-  border-color: rgba(187, 247, 208, 0.58);
-  background: rgba(255, 255, 255, 0.24);
-  opacity: 0.92;
+.primary-filter-item {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px;
+  border-radius: 14px;
+  transition:
+    background 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
-.task-summary {
+.primary-filter-item.active {
+  background: rgba(229, 236, 246, 0.82);
+  box-shadow: inset 0 0 0 1px rgba(201, 214, 231, 0.72);
+}
+
+.filter {
+  position: relative;
+  height: 36px;
+  padding: 0 15px;
+  border-radius: 11px;
+  border: 0;
+  color: #607089;
+  background: transparent;
+  cursor: pointer;
+  transition: 0.2s ease;
+  white-space: nowrap;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.filter:hover {
+  color: #14213d;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.filter.active {
+  color: #204f91;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 6px 14px rgba(49, 76, 115, 0.11);
+}
+
+.filter-count,
+.type-count {
+  margin-left: 4px;
+  color: inherit;
+  opacity: 0.68;
+  font-size: 11px;
+  font-weight: 750;
+  font-style: normal;
+}
+
+.inline-type-filters {
   display: flex;
   align-items: center;
-  padding: 16px;
-  gap: 16px;
+  gap: 4px;
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  transform: translateX(-5px);
+  pointer-events: none;
+  transition:
+    max-width 0.26s cubic-bezier(0.22, 0.88, 0.24, 1),
+    opacity 0.18s ease,
+    transform 0.22s ease;
+}
+
+.primary-filter-item.active .inline-type-filters {
+  max-width: 180px;
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.primary-filter-item.active .inline-type-filters::before {
+  content: '';
+  width: 1px;
+  height: 20px;
+  margin: 0 2px;
+  background: rgba(118, 143, 178, 0.22);
+}
+
+.type-filter {
+  height: 32px;
+  min-width: 58px;
+  padding: 0 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  color: #718097;
+  background: transparent;
   cursor: pointer;
+  transition: 0.2s ease;
+  white-space: nowrap;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.type-filter:hover {
+  color: #314f79;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.type-filter.active {
+  color: #245797;
+  background: rgba(255, 255, 255, 0.86);
+  border-color: rgba(70, 124, 204, 0.18);
+  box-shadow: 0 4px 10px rgba(49, 76, 115, 0.07);
+}
+
+.type-filter.active::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #3478f6;
+  box-shadow: 0 0 0 3px rgba(52, 120, 246, 0.08);
+}
+
+.filter-result {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 0 5px 0 10px;
+  border-left: 1px solid rgba(125, 151, 188, 0.14);
+}
+
+.filter-result-text {
+  color: #8795aa;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.filter-result-text strong {
+  margin: 0 2px;
+  color: #14213d;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.filter:focus-visible,
+.type-filter:focus-visible {
+  outline: 2px solid rgba(47, 124, 255, 0.55);
+  outline-offset: 1px;
+}
+
+.task-list {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  margin-top: 18px;
+  padding: 0 8px 8px 0;
+  overflow-y: auto;
+  scrollbar-color: rgba(81, 120, 173, 0.18) transparent;
+  scrollbar-width: thin;
+}
+
+.task-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.task-list::-webkit-scrollbar-thumb {
+  background: rgba(81, 120, 173, 0.16);
+  border-radius: 10px;
+}
+
+.task-empty-state {
+  flex: 1;
+  min-height: 168px;
+}
+
+.agenda-section {
+  position: relative;
+}
+
+.agenda-section + .agenda-section {
+  margin-top: 18px;
+}
+
+.section-kicker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px 10px;
+  color: #6b7c94;
+  font-size: 14px;
+  font-weight: 750;
+  letter-spacing: 0.4px;
+}
+
+.section-kicker::before {
+  content: '';
+  width: 16px;
+  height: 1px;
+  background: rgba(103, 127, 161, 0.36);
+}
+
+.all-day-wrap {
+  padding: 0 4px;
+}
+
+.timeline-list {
+  position: relative;
+  padding-left: 2px;
+}
+
+.task-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 32px 112px minmax(0, 1fr) 96px;
+  gap: 14px;
+  align-items: center;
+  min-height: 94px;
+  margin: 0;
+  padding: 13px 16px 13px 12px;
+  border-radius: 18px;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.task-card + .task-card {
+  margin-top: 2px;
+}
+
+.task-card:hover {
+  transform: translateX(3px);
+  background: linear-gradient(
+    90deg,
+    rgba(52, 120, 246, 0.12),
+    rgba(52, 120, 246, 0.065) 36%,
+    rgba(255, 255, 255, 0.4) 72%,
+    rgba(255, 255, 255, 0.14) 100%
+  );
+}
+
+.task-card.selected {
+  transform: translateX(3px);
+  background: linear-gradient(
+    90deg,
+    rgba(52, 120, 246, 0.16),
+    rgba(52, 120, 246, 0.085) 38%,
+    rgba(255, 255, 255, 0.44) 74%,
+    rgba(255, 255, 255, 0.16) 100%
+  );
+}
+
+.task-card.allday {
+  min-height: 100px;
+}
+
+.task-card.allday:hover {
+  transform: translateY(-1px);
+  background:
+    radial-gradient(circle at 87% 50%, rgba(52, 120, 246, 0.13), transparent 36%),
+    linear-gradient(
+      90deg,
+      rgba(52, 120, 246, 0.1),
+      rgba(52, 120, 246, 0.05) 34%,
+      rgba(247, 250, 255, 0.98) 66%,
+      rgba(255, 255, 255, 0.84) 100%
+    );
+  box-shadow: 0 14px 30px rgba(54, 86, 128, 0.09);
+}
+
+.task-card.allday.selected {
+  transform: translateY(-1px);
+  background:
+    radial-gradient(circle at 87% 50%, rgba(52, 120, 246, 0.15), transparent 38%),
+    linear-gradient(
+      90deg,
+      rgba(52, 120, 246, 0.13),
+      rgba(52, 120, 246, 0.06) 36%,
+      rgba(248, 251, 255, 0.99) 68%,
+      rgba(255, 255, 255, 0.88) 100%
+    );
+  box-shadow: 0 14px 30px rgba(54, 86, 128, 0.09);
+}
+
+.check-wrap {
+  display: grid;
+  place-items: center;
+  position: relative;
+  z-index: 2;
 }
 
 .task-check {
-  width: 20px;
-  height: 20px;
-  border: 2px solid #c0cbe0;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.42);
-  color: white;
+  width: 21px;
+  height: 21px;
+  border: 2px solid #c6d2e2;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #fff;
   display: grid;
   place-items: center;
   cursor: pointer;
+  position: relative;
+  box-shadow: 0 2px 7px rgba(62, 91, 128, 0.06);
   flex-shrink: 0;
 }
+
 .task-check.checked {
-  background: var(--detail-blue);
-  border-color: var(--detail-blue);
+  border-color: #3478f6;
+  background: #3478f6;
 }
+
+.task-check:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
 .task-check svg {
   width: 14px;
   height: 14px;
 }
 
+.task-time-wrap {
+  position: relative;
+  display: grid;
+  gap: 7px;
+  align-content: center;
+  min-width: 0;
+  min-height: 56px;
+  padding-left: 18px;
+  overflow: hidden;
+}
+
+.task-time-wrap::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid #aac4ef;
+  box-shadow: 0 0 0 4px rgba(52, 120, 246, 0.05);
+  transform: translateY(-50%);
+  z-index: 2;
+}
+
+.task-card.allday .task-time-wrap::before {
+  background: #3478f6;
+  box-shadow: 0 0 0 5px rgba(52, 120, 246, 0.08);
+}
+
 .task-time {
   font-size: 18px;
-  font-weight: 900;
+  font-weight: 780;
+  letter-spacing: -0.25px;
+  white-space: nowrap;
+  line-height: 1;
   color: #101936;
-  min-width: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.task-info {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
+.task-time.is-range {
+  display: grid;
   gap: 4px;
+  font-size: 15px;
+  letter-spacing: -0.18px;
+  line-height: 1.15;
+  white-space: normal;
 }
 
-.task-title-row {
+.task-time-range-line {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-time-range-end {
+  color: #5a6b84;
+  font-weight: 720;
+}
+
+.task-time-sub {
+  color: #8795aa;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.task-main {
+  min-width: 0;
+  padding: 4px 0;
+}
+
+.task-line {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
-.task-title-row strong {
-  font-size: 15px;
-  font-weight: 900;
+
+.task-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 17px;
+  font-weight: 760;
+  letter-spacing: -0.22px;
   color: #101936;
+}
+
+.task-sub {
+  margin-top: 7px;
+  color: #8795aa;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .task-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: #5c6d84;
+  background: rgba(231, 237, 245, 0.84);
+}
+
+.task-aside {
+  display: grid;
+  justify-items: end;
+  gap: 11px;
+}
+
+.task-status {
+  min-width: 72px;
+  height: 29px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 11px;
+  border-radius: 999px;
+  color: #386fd0;
+  background: rgba(52, 120, 246, 0.08);
   font-size: 12px;
-  padding: 2px 8px;
-  border-radius: 6px;
-  font-weight: 800;
+  font-weight: 750;
 }
 
-.task-tag.tone-blue,
-.schedule-item > span.tone-blue {
-  background: #e0f2fe;
-  color: #2563eb;
-}
-.task-tag.tone-green,
-.schedule-item > span.tone-green {
-  background: #d1fae5;
-  color: #059669;
-}
-.task-tag.tone-orange,
-.schedule-item > span.tone-orange {
-  background: #ffedd5;
-  color: #ea580c;
-}
-.task-tag.tone-violet,
-.schedule-item > span.tone-violet {
-  background: #ede9fe;
-  color: #7c3aed;
-}
-.task-tag.tone-cyan,
-.schedule-item > span.tone-cyan {
-  background: #cffafe;
-  color: #0891b2;
-}
-.task-tag.tone-slate,
-.schedule-item > span.tone-slate {
-  background: #f1f5f9;
-  color: #475569;
+.task-status.done {
+  color: #526f7f;
+  background: rgba(217, 226, 235, 0.74);
 }
 
-.task-subtitle {
-  font-size: 13px;
-  color: #60708d;
+.task-arrow {
+  color: #a4b2c4;
+  font-size: 18px;
+  line-height: 1;
+  transition: transform 0.2s ease;
 }
 
-.task-right {
-  display: flex;
-  align-items: center;
+.task-card:hover .task-arrow,
+.task-card.selected .task-arrow {
+  transform: translateX(3px);
+  color: #3478f6;
 }
 
-.task-done-text {
-  color: #10b981;
-  font-size: 13px;
-  font-weight: 900;
+.task-card.completed .task-name {
+  color: #75839a;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
 }
 
-.task-detail {
-  margin: 0 12px 12px;
-  padding: 14px 16px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.42);
-  background: rgba(236, 241, 247, 0.42);
-  backdrop-filter: blur(12px) saturate(1.06);
-  -webkit-backdrop-filter: blur(12px) saturate(1.06);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38);
-}
-.task-detail dl {
-  margin: 0;
-  display: grid;
-  gap: 8px;
-}
-.task-detail div {
-  display: flex;
-  gap: 12px;
-  font-size: 13px;
-}
-.task-detail dt {
-  color: #60708d;
-  min-width: 70px;
-}
-.task-detail dd {
-  margin: 0;
-  color: #101936;
-  font-weight: 600;
-}
-
-.quick-create {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 0;
-  border-radius: 16px;
-  padding: 10px 12px 10px 18px;
-  box-sizing: border-box;
-}
-.quick-create input {
-  flex: 1;
-  border: none;
-  outline: none;
-  background: transparent;
-  font-size: 14px;
-  color: #101936;
-}
-.quick-create input::placeholder {
-  color: #9aa8bb;
-}
-.quick-create button {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  border: none;
-  background: var(--detail-blue);
-  color: white;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-}
-.quick-create button:disabled {
-  opacity: 0.5;
-}
-.quick-create button svg {
-  width: 18px;
-  height: 18px;
+.task-card.completed .task-time-wrap::before {
+  border-color: #9fb1c5;
+  background: #fff;
+  box-shadow: none;
 }
 
 .detail-side-panel {
@@ -1262,7 +2838,7 @@ function monthLabel(date: Date) {
   gap: 16px;
   min-height: 0;
   min-width: 0;
-  padding: 18px 18px 18px 8px;
+  padding: 8px 8px 8px 4px;
   box-sizing: border-box;
   background: transparent;
 }
@@ -1277,72 +2853,55 @@ function monthLabel(date: Date) {
 }
 
 .calendar-card {
-  flex: 0 0 clamp(390px, 40vh, 520px);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding: 24px 26px 26px;
-  border-radius: 24px;
-  background: linear-gradient(142deg, rgba(255, 255, 255, 0.64), rgba(239, 247, 255, 0.42)),
-    rgba(249, 252, 255, 0.56);
-  border-color: rgba(255, 255, 255, 0.72);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.86),
-    0 18px 38px -30px rgba(20, 48, 92, 0.36);
-}
-
-.schedule-card {
-  flex: 1;
-  min-height: 0;
-  padding: 24px 26px 22px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border-radius: 24px;
-  background: linear-gradient(142deg, rgba(255, 255, 255, 0.62), rgba(239, 247, 255, 0.42)),
-    rgba(249, 252, 255, 0.54);
-  border-color: rgba(255, 255, 255, 0.7);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.84),
-    0 18px 38px -30px rgba(20, 48, 92, 0.32);
-}
-
-.detail-side-toolbar {
   flex: 0 0 auto;
-  min-height: 50px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 20px 24px 22px;
+}
+
+.calendar-card.is-week-mode {
+  flex: 1 1 auto;
+  min-height: clamp(420px, 46vh, 580px);
+}
+
+.notification-card {
+  flex: 1;
+  min-height: clamp(320px, 38vh, 520px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.calendar-range-segment {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-}
-
-.mode-segment-wrapper {
-  width: min(288px, 50%);
-  flex: 0 1 288px;
-}
-.mode-segment {
-  display: flex;
-  width: 100%;
+  box-sizing: border-box;
   min-width: 0;
-  background: rgba(238, 246, 255, 0.58);
-  border: 1px solid rgba(255, 255, 255, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.74);
   border-radius: 999px;
-  padding: 5px;
+  padding: 4px;
+  background: linear-gradient(180deg, rgba(246, 250, 255, 0.72), rgba(226, 237, 250, 0.56)),
+    rgba(238, 246, 255, 0.5);
   backdrop-filter: blur(18px) saturate(1.12);
   -webkit-backdrop-filter: blur(18px) saturate(1.12);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.76),
-    0 14px 28px -24px rgba(20, 48, 92, 0.38);
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    inset 0 -1px 0 rgba(142, 165, 197, 0.1),
+    0 14px 30px -24px rgba(20, 48, 92, 0.42);
 }
-.mode-segment button {
+
+.calendar-range-segment button {
   flex: 1;
   min-width: 0;
-  height: 38px;
+  height: 32px;
   border: none;
   border-radius: 999px;
   background: transparent;
   color: #5f7192;
-  font-size: 14px;
+  font: inherit;
+  font-size: 13px;
   font-weight: 900;
   cursor: pointer;
   transition:
@@ -1350,88 +2909,30 @@ function monthLabel(date: Date) {
     color 160ms ease,
     box-shadow 160ms ease;
 }
-.mode-segment button.active {
-  background: linear-gradient(180deg, #3e8aff, #2575f5);
+
+.calendar-range-segment button.active {
+  background: linear-gradient(180deg, #428dff, #2878f6);
   color: white;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.32),
-    0 9px 18px -10px rgba(37, 117, 245, 0.7);
+    inset 0 1px 0 rgba(255, 255, 255, 0.36),
+    0 10px 18px -11px rgba(37, 117, 245, 0.76);
 }
 
-.mode-segment button:focus-visible,
-.calendar-menu-btn:focus-visible,
+.calendar-range-segment button:not(.active):hover {
+  background: rgba(255, 255, 255, 0.34);
+  color: #30446c;
+}
+
 .calendar-range-segment button:focus-visible,
+.compact-mode-btn:focus-visible,
 .month-nav-btn:focus-visible,
-.today-chip:focus-visible,
-.today-ring-btn:focus-visible,
-.all-schedule-btn:focus-visible,
-.schedule-footer button:focus-visible {
+.today-chip:focus-visible {
   outline: 2px solid rgba(47, 124, 255, 0.65);
   outline-offset: 2px;
 }
 
-.view-control-cluster {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.calendar-menu-btn {
-  width: 46px;
-  height: 40px;
-  border: 1px solid rgba(255, 255, 255, 0.66);
-  border-radius: 16px;
-  background: rgba(238, 246, 255, 0.56);
-  color: #5f7192;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
-  backdrop-filter: blur(16px) saturate(1.1);
-  -webkit-backdrop-filter: blur(16px) saturate(1.1);
-}
-
-.calendar-menu-btn svg {
-  width: 17px;
-  height: 17px;
-}
-
 .calendar-range-segment {
-  width: 140px;
-  height: 40px;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  padding: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.66);
-  border-radius: 17px;
-  background: rgba(238, 246, 255, 0.56);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
-  backdrop-filter: blur(16px) saturate(1.1);
-  -webkit-backdrop-filter: blur(16px) saturate(1.1);
-}
-
-.calendar-range-segment button {
-  flex: 1;
-  height: 30px;
-  border: none;
-  border-radius: 11px;
-  background: transparent;
-  color: #6a7b98;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 900;
-  cursor: pointer;
-}
-
-.calendar-range-segment button.active {
-  background: linear-gradient(180deg, #3e8aff, #2575f5);
-  color: #fff;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.32),
-    0 8px 16px -10px rgba(37, 117, 245, 0.72);
+  flex: 0 0 112px;
 }
 
 .calendar-range-segment button:disabled {
@@ -1443,24 +2944,71 @@ function monthLabel(date: Date) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
-  margin-bottom: 20px;
+  gap: 10px;
+  margin-bottom: 14px;
+  flex-wrap: nowrap;
 }
 
 .calendar-month-group {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 8px;
+  flex: 0 1 auto;
   min-width: 0;
 }
 
 .calendar-header-mock h2 {
+  min-width: 0;
   margin: 0;
+  overflow: hidden;
   color: #142142;
-  font-size: 19px;
+  font-size: 18px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.calendar-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-width: 0;
+  margin-left: auto;
+}
+
+.compact-mode-btn {
+  flex: 0 0 auto;
+  height: 34px;
+  border: 1px solid rgba(199, 216, 241, 0.78);
+  border-radius: 999px;
+  padding: 0 12px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(232, 241, 253, 0.54)),
+    rgba(248, 251, 255, 0.6);
+  color: #31517f;
+  font: inherit;
+  font-size: 13px;
   font-weight: 900;
   white-space: nowrap;
   cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.78),
+    0 12px 22px -20px rgba(20, 48, 92, 0.36);
+  transition:
+    background 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.compact-mode-btn:hover {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(224, 238, 255, 0.62)),
+    rgba(255, 255, 255, 0.66);
+  color: var(--detail-blue);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.88),
+    0 12px 24px -18px rgba(47, 124, 255, 0.32);
 }
 .month-nav-btn {
   border: none;
@@ -1469,8 +3017,8 @@ function monthLabel(date: Date) {
   cursor: pointer;
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   border-radius: 10px;
   transition:
@@ -1482,125 +3030,153 @@ function monthLabel(date: Date) {
   color: var(--detail-blue);
 }
 .month-nav-btn svg {
-  width: 19px;
-  height: 19px;
+  width: 18px;
+  height: 18px;
   stroke-width: 2.4;
 }
 
 .calendar-action-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
   flex: 0 0 auto;
 }
 
-.today-chip,
-.today-ring-btn {
-  height: 36px;
+.today-chip {
+  height: 32px;
+  min-width: 46px;
   border: 1px solid rgba(199, 216, 241, 0.78);
+  border-radius: 12px;
+  padding: 0 10px;
   background: rgba(248, 251, 255, 0.62);
   color: #2f7cff;
   font: inherit;
+  font-size: 13px;
   font-weight: 900;
   cursor: pointer;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.74);
+  transition:
+    background 160ms ease,
+    color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
 }
 
-.today-chip {
-  min-width: 58px;
-  border-radius: 12px;
-  padding: 0 12px;
-  font-size: 14px;
-}
-
-.today-ring-btn {
-  width: 42px;
-  border-radius: 14px;
-  display: grid;
-  place-items: center;
-  color: #6980a1;
-}
-
-.today-ring-btn svg {
-  width: 17px;
-  height: 17px;
-  stroke-width: 2.6;
+.today-chip:hover {
+  background: rgba(239, 246, 255, 0.92);
+  border-color: rgba(147, 197, 253, 0.72);
+  color: #2563eb;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.88),
+    0 8px 18px -14px rgba(47, 124, 255, 0.28);
 }
 
 .calendar-placeholder-wrapper {
   flex: 1;
   min-height: 0;
   border-radius: 14px;
-  padding: 0;
+  padding: 2px 0 0;
   background: transparent;
+  display: flex;
+  flex-direction: column;
 }
 
 .calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  grid-template-rows: 44px repeat(6, minmax(0, 1fr));
-  height: 100%;
-  column-gap: 0;
-  row-gap: 0;
+  grid-template-rows: 30px repeat(6, minmax(42px, 1fr));
+  height: auto;
+  column-gap: 2px;
+  row-gap: 1px;
   text-align: center;
 }
+
 .week-label {
   min-width: 0;
-  height: 44px;
-  border-bottom: 1px solid rgba(166, 186, 214, 0.24);
-  color: #687999;
+  height: 30px;
+  border-bottom: 1px solid rgba(166, 186, 214, 0.18);
+  color: #7b8fa8;
   display: grid;
   place-items: center;
-  font-size: 15px;
-  font-weight: 900;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
 }
+
 .month-day {
   position: relative;
   min-width: 0;
   min-height: 0;
   border: none;
   background: transparent;
-  border-radius: 14px;
+  border-radius: 0;
   color: #162442;
   cursor: pointer;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 0;
+  padding: 2px 0;
   font: inherit;
-  transition:
-    color 160ms ease,
-    background 160ms ease,
-    transform 160ms ease;
+  transition: color 160ms ease;
 }
 
-.month-day:hover {
-  background: rgba(47, 124, 255, 0.08);
+.month-day:focus-visible {
+  outline: none;
+}
+
+.month-day:focus-visible:not(.selected) strong {
+  outline: 2px solid rgba(47, 124, 255, 0.52);
+  outline-offset: 2px;
+}
+
+.month-day:not(.selected):hover strong {
+  background: rgba(214, 228, 252, 0.78);
+  color: #18345f;
+}
+
+.month-day:not(.selected):active strong {
+  background: rgba(199, 219, 252, 0.92);
+  transform: scale(0.94);
 }
 
 .month-day strong {
   position: relative;
   z-index: 1;
-  width: 38px;
-  height: 38px;
-  border-radius: 999px;
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
   display: grid;
   place-items: center;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 900;
   line-height: 1;
   transition:
-    background 160ms ease,
-    color 160ms ease,
-    box-shadow 160ms ease;
+    background 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    color 180ms ease,
+    box-shadow 180ms ease,
+    transform 120ms ease;
 }
+
 .month-day.muted {
-  color: #a9b6c9;
+  color: #b0bdd0;
 }
+
+.month-day.muted:not(.selected):hover strong {
+  background: rgba(226, 232, 240, 0.72);
+  color: #8a9bb0;
+}
+
 .month-day.today:not(.selected) strong {
   color: var(--detail-blue);
-  box-shadow: inset 0 0 0 1px rgba(47, 124, 255, 0.24);
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1.5px rgba(47, 124, 255, 0.44);
+}
+
+.month-day.today:not(.selected):hover strong {
+  background: rgba(214, 228, 252, 0.62);
+  box-shadow: inset 0 0 0 1.5px rgba(47, 124, 255, 0.52);
 }
 
 .month-day.selected {
@@ -1608,14 +3184,26 @@ function monthLabel(date: Date) {
 }
 
 .month-day.selected strong {
-  width: 50px;
-  height: 50px;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
   color: #fff;
-  background: linear-gradient(180deg, #4c8dff, #2879ff);
+  background: linear-gradient(180deg, #4a90ff 0%, #2878f6 100%);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.35),
-    0 10px 22px -12px rgba(40, 121, 255, 0.82);
+    inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    0 0 0 3px rgba(47, 124, 255, 0.16),
+    0 10px 22px -10px rgba(40, 120, 246, 0.72);
 }
+
+.month-day.selected:hover strong,
+.month-day.selected:focus-visible strong {
+  background: linear-gradient(180deg, #5598ff 0%, #2f80f8 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.38),
+    0 0 0 4px rgba(47, 124, 255, 0.22),
+    0 12px 24px -8px rgba(40, 120, 246, 0.78);
+}
+
 .day-dots {
   position: relative;
   z-index: 2;
@@ -1624,8 +3212,9 @@ function monthLabel(date: Date) {
   align-items: center;
   justify-content: center;
   gap: 4px;
-  margin-top: 0;
+  margin-top: 1px;
 }
+
 .day-dots i {
   width: 5px;
   height: 5px;
@@ -1637,10 +3226,24 @@ function monthLabel(date: Date) {
   left: 50%;
   bottom: 6px;
   transform: translateX(-50%);
+  margin-top: 0;
 }
 
 .month-day.selected .day-dots i {
-  background: rgba(255, 255, 255, 0.86);
+  width: 4px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.45);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .month-day strong {
+    transition: none;
+  }
+
+  .month-day:not(.selected):active strong {
+    transform: none;
+  }
 }
 
 .dot-blue {
@@ -1667,212 +3270,52 @@ function monthLabel(date: Date) {
   background: #94a3b8;
 }
 
-.side-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 18px;
-  margin-bottom: 0;
-  padding-bottom: 16px;
-  border-bottom: 1px solid rgba(166, 186, 214, 0.2);
-}
+@media (max-width: 1460px) {
+  .filter-stack {
+    gap: 8px;
+  }
 
-.schedule-title-area {
-  display: flex;
-  align-items: baseline;
-  gap: 18px;
-  min-width: 0;
-}
-.schedule-title-area h2 {
-  margin: 0;
-  color: #142142;
-  font-size: 18px;
-  font-weight: 900;
-  white-space: nowrap;
-}
-.schedule-title-area p {
-  margin: 0;
-  color: #6d7e9b;
-  font-size: 14px;
-  font-weight: 800;
-  white-space: nowrap;
-}
+  .filter {
+    padding: 0 11px;
+  }
 
-.all-schedule-btn {
-  flex: 0 0 auto;
-  border: none;
-  background: transparent;
-  border-radius: 12px;
-  padding: 6px 0 6px 10px;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 800;
-  color: var(--detail-blue);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-}
-.all-schedule-btn svg {
-  width: 17px;
-  height: 17px;
-  stroke-width: 2.5;
-}
+  .type-filter {
+    min-width: 52px;
+    padding: 0 8px;
+  }
 
-.schedule-list {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  scrollbar-width: none;
-  display: flex;
-  flex-direction: column;
-  padding-top: 6px;
-}
-.schedule-list::-webkit-scrollbar {
-  display: none;
-}
-
-.schedule-item {
-  position: relative;
-  display: grid;
-  grid-template-columns: 24px 72px minmax(0, 1fr) auto;
-  gap: 14px;
-  min-height: 78px;
-  padding: 18px 0;
-  cursor: pointer;
-  align-items: center;
-  border-bottom: 1px solid rgba(166, 186, 214, 0.18);
-  transition:
-    background 160ms ease,
-    transform 160ms ease;
-}
-
-.schedule-item:hover {
-  background: rgba(47, 124, 255, 0.05);
-}
-.schedule-item::after {
-  content: '';
-  position: absolute;
-  left: 11px;
-  top: 44px;
-  bottom: -18px;
-  width: 2px;
-  background: linear-gradient(180deg, rgba(47, 124, 255, 0.34), rgba(47, 124, 255, 0.08));
-}
-.schedule-item:last-child::after {
-  display: none;
-}
-
-.schedule-dot {
-  position: relative;
-  z-index: 1;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--detail-blue);
-  border: 3px solid rgba(235, 244, 255, 0.98);
-  box-shadow: 0 0 0 1px rgba(47, 124, 255, 0.22);
-  justify-self: center;
-}
-
-.schedule-item time {
-  color: #172440;
-  font-size: 16px;
-  font-weight: 900;
-  white-space: nowrap;
-}
-
-.schedule-info {
-  min-width: 0;
-}
-
-.schedule-info strong {
-  display: block;
-  overflow: hidden;
-  color: #172440;
-  font-size: 16px;
-  font-weight: 900;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.schedule-info p {
-  margin: 7px 0 0;
-  overflow: hidden;
-  color: #76869f;
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.schedule-item > span {
-  align-self: center;
-  border-radius: 8px;
-  padding: 5px 9px;
-  font-size: 13px;
-  font-weight: 900;
-  white-space: nowrap;
-}
-
-.schedule-empty {
-  margin-top: 18px;
-  color: #233454;
-  font-size: 15px;
-  font-weight: 800;
-}
-
-.schedule-footer {
-  flex: 0 0 auto;
-  display: flex;
-  justify-content: center;
-  padding-top: 16px;
-  border-top: 1px solid rgba(166, 186, 214, 0.18);
-}
-
-.schedule-footer button {
-  border: none;
-  border-radius: 14px;
-  background: transparent;
-  color: var(--detail-blue);
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  font: inherit;
-  font-size: 16px;
-  font-weight: 900;
-  cursor: pointer;
-}
-
-.schedule-footer svg {
-  width: 18px;
-  height: 18px;
-  stroke-width: 2.5;
+  .filter-result-text {
+    display: none;
+  }
 }
 
 @media (max-width: 1440px) {
-  .detail-workspace {
-    grid-template-columns: minmax(216px, 264px) minmax(0, 1fr);
-  }
-
   .detail-board {
-    grid-template-columns: minmax(0, 1fr) minmax(420px, 42%);
+    --detail-side-col: minmax(416px, 448px);
   }
 }
 
 @media (max-width: 1180px) {
-  .detail-workspace {
-    grid-template-columns: minmax(0, 1fr);
-  }
   .detail-left-panel {
+    display: none;
+  }
+
+  .detail-board.left-panel-active .detail-left-panel {
+    display: flex;
+  }
+
+  .detail-board.left-panel-active .detail-main-panel,
+  .detail-board.left-panel-active .detail-side-panel {
     display: none;
   }
 
   .detail-board {
     grid-template-columns: minmax(0, 1fr);
     overflow: auto;
+  }
+
+  .detail-board.left-panel-active {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .detail-main-panel {

@@ -44,6 +44,10 @@ export default defineConfig({
         target: smartTodoApiTarget,
         changeOrigin: true,
       },
+      '/token-usage': {
+        target: smartTodoApiTarget,
+        changeOrigin: true,
+      },
       '/sys-message': {
         target: smartTodoApiTarget,
         changeOrigin: true,

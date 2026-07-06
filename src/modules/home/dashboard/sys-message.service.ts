@@ -112,7 +112,6 @@ async function requestSysMessageData<T>(config: {
 }) {
   const response = await httpClient.request<SysMessageResponse<T>>({
     timeout: SYS_MESSAGE_REQUEST_TIMEOUT,
-    showLoading: false,
     ...config,
   })
 

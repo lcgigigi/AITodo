@@ -29,19 +29,9 @@ function getToastDuration(type: FeedbackType) {
 
 export const useFeedbackStore = defineStore('feedback', {
   state: () => ({
-    loadingCount: 0,
     currentToast: null as FeedbackToast | null,
   }),
-  getters: {
-    isLoading: (state) => state.loadingCount > 0,
-  },
   actions: {
-    startLoading() {
-      this.loadingCount += 1
-    },
-    endLoading() {
-      this.loadingCount = Math.max(0, this.loadingCount - 1)
-    },
     showToast(message: string, type: FeedbackType = 'info') {
       const text = formatToastMessage(message)
       if (!text) return

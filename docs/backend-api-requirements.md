@@ -10,7 +10,6 @@
 | 首页工具入口与个人积分 | `src/modules/home/dashboard/CalendarWorkspace.vue` |                                  工具入口 8 个，个人统计 3 项 | 建议接口化，工具入口可配置化           |
 | 节假日/节气            | `src/modules/home/dashboard/CalendarWorkspace.vue` |                      日期 63 条，其中假期 33、调休 6、节气 24 | 建议接口化或由后端定期生成             |
 | 智能体统计大屏         | `src/modules/agent-center/mock.ts`                 | 分类 7 个，智能体 6 个，概览指标 5 项，趋势 7 点，榜单各 6 条 | 必须接口化                             |
-| 旧版智能体目录         | `src/modules/agent-center-old/mock.ts`             |                             视角 2 个，Agent 7 个，Skill 6 个 | 当前路由未启用，可作为能力目录接口参考 |
 | 用户登录态             | `src/stores/user.store.ts`                         |                                     `mock-token`、`mock-user` | 必须接入真实登录态                     |
 
 日历待办 mock 明细：
@@ -35,9 +34,9 @@
 | Token 分类占比        |                                                                                      6 |
 | Token 排名 / 积分排名 |                                                                                   各 6 |
 | Token 趋势点          |                                                                                      7 |
-| 旧版目录 Agent        |                                       7，状态 online 3、beta 2、maintenance 1、draft 1 |
-| 旧版目录 Skill        |                                                 6，状态 ready 3、beta 2、maintenance 1 |
-| 权限状态              | Agent：available 3、locked 2、admin-only 2；Skill：available 3、locked 2、admin-only 1 |
+| 新版目录 Agent        |                                                                                      7 |
+| 新版目录 Skill        |                                                                                      4 |
+| 权限状态              |                                                       Agent：available 4、locked 3；Skill：available 3、locked 1 |
 
 ## 2. 通用约定
 
@@ -66,7 +65,7 @@
 
 `GET /api/users/me`
 
-用于替换 `mockUsers`、`mockViewerProfiles`、`setGuestSession`。
+用于替换 `mockUsers`、`setGuestSession`。
 
 响应：
 
@@ -427,13 +426,13 @@
 ]
 ```
 
-## 7. 智能体能力目录
+## 7. 智能体目录与技能能力
 
-旧版目录当前未被 `module-routes.ts` 引入，但它的数据结构比新版统计页更接近“能力管理后台”。如果后续需要恢复目录页或做管理端，建议开发以下接口。
+当前 `/agents` 页面仍依赖 `src/modules/agent-center/mock.ts` 中的智能体、技能、分类和权限状态。建议按当前页面展示需要提供以下接口。
 
 ### 7.1 查询 Agent 目录
 
-`GET /api/agents?keyword=&category=&level=&permissionState=&page=1&pageSize=20`
+`GET /api/agent-center/agents?keyword=&category=&permissionState=&page=1&pageSize=20`
 
 响应：
 
@@ -474,7 +473,7 @@
 
 ### 7.2 查询 Skill 目录
 
-`GET /api/skills?keyword=&capabilityType=&status=&permissionState=&page=1&pageSize=20`
+`GET /api/agent-center/skills?keyword=&category=&capabilityType=&status=&permissionState=&page=1&pageSize=20`
 
 响应：
 
@@ -504,9 +503,9 @@
 
 ### 7.3 获取目录筛选聚合
 
-`GET /api/agent-catalog/facets`
+`GET /api/agent-center/facets`
 
-用于替换旧版页面中本地计算的分类、等级、权限统计。
+用于替换当前智能体中心中本地维护的分类、能力类型和权限统计。
 
 响应：
 
@@ -533,7 +532,6 @@
 | P1     | `GET /api/calendar/special-days`                                                           | 当前硬编码 2026 年数据，跨年后会失效       |
 | P1     | `GET /api/workbench/tools`、`GET /api/workbench/profile-stats`                             | 首页个人区和工具区动态化                   |
 | P1     | `/api/agent-center/*` 统计接口                                                             | 当前 `/agents` 页面完全依赖 mock 数据      |
-| P2     | `/api/agents`、`/api/skills`、`/api/agent-catalog/facets`                                  | 旧版目录未启用，但适合作为后续管理后台基础 |
 
 ## 9. 前端替换点
 
@@ -553,4 +551,4 @@
 | `tokenOverview`                 | `GET /api/agent-center/token-overview`           |
 | `tokenRanking`、`pointsRanking` | `GET /api/agent-center/rankings`                 |
 | `trendData`                     | `GET /api/agent-center/token-trend`              |
-| `mockAgents`、`mockSkills`      | `GET /api/agents`、`GET /api/skills`             |
+| `src/modules/agent-center/mock.ts` 中的 `agents`、`skills` | `GET /api/agent-center/agents`、`GET /api/agent-center/skills` |

@@ -4,6 +4,7 @@ import IconCheck from '~icons/lucide/check'
 import IconChevronDown from '~icons/lucide/chevron-down'
 import IconSearch from '~icons/lucide/search'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
 import type { CalendarUser } from '../types'
 
 const props = withDefaults(
@@ -173,7 +174,15 @@ watch(open, (isOpen) => {
           </button>
         </div>
 
-        <p v-if="filteredUsers.length === 0" class="assignee-empty">未找到匹配人员</p>
+        <AppStateBlock
+          v-if="filteredUsers.length === 0"
+          class="assignee-empty"
+          type="empty"
+          title="未找到匹配人员"
+          description="换个姓名或工号继续搜索。"
+          size="sm"
+          variant="inline"
+        />
 
         <div v-if="selectedIds.length > 0" class="assignee-footer">
           已选 {{ selectedIds.length }} 人
@@ -421,11 +430,7 @@ watch(open, (isOpen) => {
 }
 
 .todo-assignee-popover .assignee-empty {
-  margin: 0;
-  padding: 20px 12px 16px;
-  color: #94a3b8;
-  font-size: 13px;
-  text-align: center;
+  margin: 8px 0 0;
 }
 
 .todo-assignee-popover .assignee-footer {

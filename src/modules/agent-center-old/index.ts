@@ -1,1 +1,0 @@
-export { agentCenterRoutes } from './routes'

@@ -27,6 +27,15 @@ import IconX from '~icons/lucide/x'
 import makeUrl from '@/assets/agent-center/make.png'
 import moreAbilityUrl from '@/assets/agent-center/newagnet.png'
 import DashboardTopBar from '@/modules/home/dashboard/DashboardTopBar.vue'
+import {
+  getTokenUsagePeriodName,
+  loadCurrentUserTokenUsage,
+  resolveTokenUsageDateRange,
+  type CurrentUserTokenUsage,
+  type TokenUsagePeriodCode,
+} from '@/modules/token-usage/token-usage.service'
+import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
+import { openUrlInNewTab } from './links'
 import { agentCategories, agents, getAgentByKey, permissionLabels, skills } from './mock'
 import type { AgentCatalogItem, AgentCategory } from './types'
 
@@ -39,6 +48,42 @@ type AgentVisual = {
   tone: string
 }
 
+type TokenRangeTab = {
+  label: string
+  periodCode: TokenUsagePeriodCode
+}
+
+type TokenModuleVisual = {
+  icon: Component
+  color: string
+  iconTone: string
+}
+
+type TokenModuleUsage = {
+  moduleCode: string
+  moduleName: string
+  tokenUsage: number
+}
+
+type TokenRankingEntry = TokenModuleUsage &
+  TokenModuleVisual & {
+    rank: number
+    share: string
+  }
+
+type TokenDistributionEntry = {
+  label: string
+  value: number
+  percentLabel: string
+  color: string
+}
+
+type TokenTrendPoint = {
+  date: string
+  label: string
+  value: number
+}
+
 const route = useRoute()
 const router = useRouter()
 
@@ -47,6 +92,10 @@ const activeCategory = ref<AgentCategory | '全部'>('全部')
 const selectedAgent = ref<AgentCatalogItem | null>(null)
 const actionToast = ref('')
 const sidebarCollapsed = ref(true)
+const currentUserTokenUsage = ref<CurrentUserTokenUsage | null>(null)
+const isTokenUsageLoading = ref(true)
+const tokenUsageError = ref('')
+const selectedTokenPeriodCode = ref<TokenUsagePeriodCode>('last7Days')
 
 const primaryNav = [
   { label: '智能体 Agent', icon: IconBot, active: true },
@@ -57,96 +106,24 @@ const primaryNav = [
 
 const secondaryNav = [{ label: '帮助中心', icon: IconCircleHelp }]
 
-const tokenRangeTabs = ['日', '周', '月']
-
-const tokenRanking = [
-  {
-    rank: 1,
-    name: '办公顾问',
-    tokens: '32,560',
-    share: '36.3%',
-    icon: IconMessageCircle,
-    color: '#2e7bff',
-    bar: 100,
-    rankTone: 'rank-warm',
-    iconTone: 'token-icon-blue',
-  },
-  {
-    rank: 2,
-    name: '图文分析',
-    tokens: '25,680',
-    share: '28.6%',
-    icon: IconImage,
-    color: '#2e7bff',
-    bar: 76,
-    rankTone: 'rank-orange',
-    iconTone: 'token-icon-blue',
-  },
-  {
-    rank: 3,
-    name: '会议纪要',
-    tokens: '14,320',
-    share: '16.0%',
-    icon: IconUsers,
-    color: '#27c7c8',
-    bar: 47,
-    rankTone: 'rank-cyan',
-    iconTone: 'token-icon-teal',
-  },
-  {
-    rank: 4,
-    name: 'PPT创作',
-    tokens: '9,860',
-    share: '11.0%',
-    icon: IconSparkles,
-    color: '#9a6df2',
-    bar: 33,
-    rankTone: 'rank-muted',
-    iconTone: 'token-icon-orange',
-  },
-  {
-    rank: 5,
-    name: '代码辅助',
-    tokens: '4,860',
-    share: '5.4%',
-    icon: IconCode2,
-    color: '#48c979',
-    bar: 20,
-    rankTone: 'rank-muted',
-    iconTone: 'token-icon-teal',
-  },
-  {
-    rank: 6,
-    name: '合规助手',
-    tokens: '2,780',
-    share: '3.1%',
-    icon: IconShieldCheck,
-    color: '#ff8b22',
-    bar: 13,
-    rankTone: 'rank-muted',
-    iconTone: 'token-icon-blue',
-  },
+const tokenRangeTabs: TokenRangeTab[] = [
+  { label: '日', periodCode: 'today' },
+  { label: '周', periodCode: 'last7Days' },
+  { label: '月', periodCode: 'last30Days' },
 ]
 
-const tokenDistribution = [
-  { label: '办公', value: '54.9%', color: '#2e7bff' },
-  { label: '创作', value: '21.3%', color: '#25c8c9' },
-  { label: '研发', value: '13.8%', color: '#9b6ff1' },
-  { label: '合规', value: '6.3%', color: '#ff9428' },
-  { label: '其他', value: '3.7%', color: '#d6dee9' },
-]
+const tokenModuleVisualMap: Record<string, TokenModuleVisual> = {
+  codeAssist: { icon: IconCode2, color: '#48c979', iconTone: 'token-icon-teal' },
+  libaiQa: { icon: IconMessageCircle, color: '#2e7bff', iconTone: 'token-icon-blue' },
+  fileAnalysis: { icon: IconImage, color: '#27c7c8', iconTone: 'token-icon-teal' },
+  smartTodo: { icon: IconCalendarDays, color: '#9a6df2', iconTone: 'token-icon-orange' },
+}
 
-const tokenTrendTimeline = [
-  { label: '05-13', value: 28420 },
-  { label: '05-14', value: 19180 },
-  { label: '05-15', value: 46210 },
-  { label: '05-16', value: 86420 },
-  { label: '05-17', value: 44320 },
-  { label: '05-18', value: 56180 },
-  { label: '05-19', value: 34260 },
-]
-
-const tokenTotalConsumption = 89520
+const defaultTokenModuleVisual: TokenModuleVisual = {
+  icon: IconSparkles,
+  color: '#8196bf',
+  iconTone: 'token-icon-blue',
+}
 
 const usageTrendChartRef = ref<HTMLElement | null>(null)
 const rankingChartRef = ref<HTMLElement | null>(null)
@@ -161,12 +138,8 @@ const chartTextStyle = {
   fontWeight: 500,
 }
 
-function parseTokenCount(value: string) {
-  return Number(value.replace(/,/g, ''))
-}
-
 function formatTokenNumber(value: number) {
-  return value.toLocaleString('zh-CN')
+  return Math.round(value).toLocaleString('zh-CN')
 }
 
 function formatTokenCompact(value: number) {
@@ -174,6 +147,155 @@ function formatTokenCompact(value: number) {
     notation: 'compact',
     maximumFractionDigits: 1,
   }).format(value)
+}
+
+function formatTrendDateLabel(date: string) {
+  const [, month, day] = date.split('-')
+  return month && day ? `${month}-${day}` : date
+}
+
+const selectedTokenPeriodLabel = computed(() =>
+  getTokenUsagePeriodName(selectedTokenPeriodCode.value),
+)
+
+const tokenTrendTimeline = computed<TokenTrendPoint[]>(() => {
+  const usage = currentUserTokenUsage.value
+  if (!usage) return []
+
+  const dailyTotalMap = new Map<string, number>()
+
+  for (const module of usage.trendList) {
+    for (const point of module.dailyList) {
+      dailyTotalMap.set(
+        point.usageDate,
+        (dailyTotalMap.get(point.usageDate) ?? 0) + point.tokenUsage,
+      )
+    }
+  }
+
+  return [...dailyTotalMap.entries()]
+    .sort(([leftDate], [rightDate]) => leftDate.localeCompare(rightDate))
+    .map(([date, value]) => ({
+      date,
+      label: formatTrendDateLabel(date),
+      value,
+    }))
+})
+
+const selectedTokenModuleUsages = computed<TokenModuleUsage[]>(() => {
+  const usage = currentUserTokenUsage.value
+  if (!usage) return []
+
+  return usage.trendList.map((module) => ({
+    moduleCode: module.moduleCode,
+    moduleName: module.moduleName,
+    tokenUsage: module.totalTokenUsage,
+  }))
+})
+
+const tokenTotalConsumption = computed(() =>
+  selectedTokenModuleUsages.value.reduce((sum, module) => sum + module.tokenUsage, 0),
+)
+
+const tokenRanking = computed<TokenRankingEntry[]>(() => {
+  const total = tokenTotalConsumption.value
+
+  return selectedTokenModuleUsages.value
+    .filter((module) => module.tokenUsage > 0)
+    .sort((a, b) => b.tokenUsage - a.tokenUsage)
+    .map((module, index) => {
+      const visual = tokenModuleVisualMap[module.moduleCode] ?? defaultTokenModuleVisual
+
+      return {
+        ...module,
+        ...visual,
+        rank: index + 1,
+        share: total > 0 ? `${((module.tokenUsage / total) * 100).toFixed(1)}%` : '0%',
+      }
+    })
+})
+
+const tokenDistribution = computed<TokenDistributionEntry[]>(() =>
+  tokenRanking.value.map((item) => ({
+    label: item.moduleName,
+    value: item.tokenUsage,
+    percentLabel: item.share,
+    color: item.color,
+  })),
+)
+
+const tokenDateRangeLabel = computed(() => {
+  const points = tokenTrendTimeline.value.filter((point) => point.date)
+  if (points.length > 1) return `${points[0].date} ~ ${points[points.length - 1].date}`
+  if (points.length === 1) return points[0].date
+
+  const range = resolveTokenUsageDateRange(selectedTokenPeriodCode.value)
+  return range.startDate === range.endDate
+    ? range.startDate
+    : `${range.startDate} ~ ${range.endDate}`
+})
+
+const tokenDailyAverage = computed(() => {
+  const pointCount = Math.max(1, tokenTrendTimeline.value.length)
+  return Math.round(tokenTotalConsumption.value / pointCount)
+})
+
+const hasTokenUsageContent = computed(() => {
+  const usage = currentUserTokenUsage.value
+  return Boolean(usage && usage.trendList.length > 0)
+})
+
+const tokenUsageStateType = computed<'loading' | 'empty' | 'error' | null>(() => {
+  if (isTokenUsageLoading.value && !hasTokenUsageContent.value) return 'loading'
+  if (tokenUsageError.value) return 'error'
+  if (!hasTokenUsageContent.value) return 'empty'
+  return null
+})
+
+const tokenUsageStateTitle = computed(() => {
+  if (tokenUsageStateType.value === 'loading') return '正在加载 Token 使用数据'
+  if (tokenUsageStateType.value === 'error') return 'Token 使用数据未能加载'
+  return '暂无 Token 使用数据'
+})
+
+const tokenUsageStateDescription = computed(() => {
+  if (tokenUsageStateType.value === 'loading') return '正在同步当前账号的用量统计。'
+  if (tokenUsageStateType.value === 'error') return tokenUsageError.value
+  return '当前周期还没有产生消耗，稍后刷新即可查看。'
+})
+
+const tokenUsageStateActionLabel = computed(() => {
+  if (tokenUsageStateType.value === 'error') return '重新加载'
+  if (tokenUsageStateType.value === 'empty') return '刷新数据'
+  return ''
+})
+
+function selectTokenPeriod(periodCode: TokenUsagePeriodCode) {
+  selectedTokenPeriodCode.value = periodCode
+}
+
+function openTokenDashboard() {
+  void router.push({ name: 'LeaderBoard' })
+}
+
+async function refreshTokenUsage() {
+  isTokenUsageLoading.value = true
+  tokenUsageError.value = ''
+
+  try {
+    currentUserTokenUsage.value = await loadCurrentUserTokenUsage(
+      resolveTokenUsageDateRange(selectedTokenPeriodCode.value),
+    )
+    await nextTick()
+    renderAllCharts()
+  } catch (error) {
+    currentUserTokenUsage.value = null
+    tokenUsageError.value = error instanceof Error ? error.message : '加载 Token 用量失败'
+    await nextTick()
+    renderAllCharts()
+  } finally {
+    isTokenUsageLoading.value = false
+  }
 }
 
 function getChart(el: HTMLElement | null) {
@@ -188,9 +310,10 @@ function renderUsageTrendChart() {
   const chart = getChart(usageTrendChartRef.value)
   if (!chart) return
 
-  const labels = tokenTrendTimeline.map((point) => point.label)
-  const values = tokenTrendTimeline.map((point) => point.value)
-  const peakIndex = values.indexOf(Math.max(...values))
+  const timeline = tokenTrendTimeline.value
+  const labels = timeline.map((point) => point.label)
+  const values = timeline.map((point) => point.value)
+  const peakIndex = values.length ? values.indexOf(Math.max(...values)) : -1
 
   chart.setOption(
     {
@@ -260,7 +383,7 @@ function renderUsageTrendChart() {
               color: 'rgba(69, 126, 224, 0.24)',
               width: 3,
             },
-            data: [{ xAxis: labels[peakIndex] }],
+            data: peakIndex >= 0 ? [{ xAxis: labels[peakIndex] }] : [],
           },
           markPoint: {
             symbol: 'circle',
@@ -271,7 +394,10 @@ function renderUsageTrendChart() {
               borderWidth: 5,
             },
             label: { show: false },
-            data: [{ name: '峰值', coord: [labels[peakIndex], values[peakIndex]] }],
+            data:
+              peakIndex >= 0
+                ? [{ name: '峰值', coord: [labels[peakIndex], values[peakIndex]] }]
+                : [],
           },
         },
       ],
@@ -284,7 +410,7 @@ function renderRankingChart() {
   const chart = getChart(rankingChartRef.value)
   if (!chart) return
 
-  const ordered = [...tokenRanking].reverse()
+  const ordered = [...tokenRanking.value].reverse()
 
   chart.setOption(
     {
@@ -303,7 +429,7 @@ function renderRankingChart() {
             name: string
             value: number
           }
-          const ranking = tokenRanking.find((entry) => entry.name === item.name)
+          const ranking = tokenRanking.value.find((entry) => entry.moduleName === item.name)
           const share = ranking?.share ?? ''
           return `${item.name}<br/>${formatTokenNumber(Number(item.value))} Tokens<br/>占比 ${share}`
         },
@@ -317,7 +443,7 @@ function renderRankingChart() {
       },
       yAxis: {
         type: 'category',
-        data: ordered.map((item) => item.name),
+        data: ordered.map((item) => item.moduleName),
         axisLine: { show: false },
         axisTick: { show: false },
         axisLabel: {
@@ -331,7 +457,7 @@ function renderRankingChart() {
         {
           type: 'bar',
           data: ordered.map((item) => ({
-            value: parseTokenCount(item.tokens),
+            value: item.tokenUsage,
             itemStyle: { color: item.color, borderRadius: [0, 999, 999, 0] },
           })),
           barWidth: 8,
@@ -365,9 +491,9 @@ function renderDistributionPieChart() {
     {
       animationDuration: 720,
       textStyle: chartTextStyle,
-      color: tokenDistribution.map((item) => item.color),
+      color: tokenDistribution.value.map((item) => item.color),
       title: {
-        text: formatTokenNumber(tokenTotalConsumption),
+        text: formatTokenNumber(tokenTotalConsumption.value),
         subtext: '总消耗 Tokens',
         left: 'center',
         top: '38%',
@@ -409,9 +535,9 @@ function renderDistributionPieChart() {
           },
           label: { show: false },
           labelLine: { show: false },
-          data: tokenDistribution.map((item) => ({
+          data: tokenDistribution.value.map((item) => ({
             name: item.label,
-            value: Number(item.value.replace('%', '')),
+            value: item.value,
           })),
         },
       ],
@@ -437,6 +563,7 @@ const agentVisualMap: Record<string, AgentVisual> = {
   'ppt-creator': { icon: IconSparkles, tone: 'icon-orange' },
   'agent-workshop': { icon: IconBox, tone: 'icon-blue' },
   'code-assistant': { icon: IconCode2, tone: 'icon-cyan' },
+  'interview-center': { icon: IconUsers, tone: 'icon-teal' },
   'compliance-assistant': { icon: IconShieldCheck, tone: 'icon-blue' },
 }
 
@@ -510,6 +637,12 @@ function createAgent() {
 }
 
 function openAgent(agent: AgentCatalogItem) {
+  if (agent.launchUrl) {
+    openUrlInNewTab(agent.launchUrl)
+    showToast(`已在新标签页打开 ${agent.name}`)
+    return
+  }
+
   selectedAgent.value = agent
   void router.replace({ query: { ...route.query, agent: agent.key } })
 }
@@ -522,6 +655,12 @@ function closeAgentPanel() {
 }
 
 function launchAgent(agent: AgentCatalogItem) {
+  if (agent.launchUrl) {
+    openUrlInNewTab(agent.launchUrl)
+    showToast(`已在新标签页打开 ${agent.name}`)
+    return
+  }
+
   if (agent.permissionState !== 'available') {
     showToast(`${agent.name} 当前${permissionLabels[agent.permissionState]}，暂不可直接使用`)
     return
@@ -579,6 +718,7 @@ onMounted(async () => {
 
   await nextTick()
   renderAllCharts()
+  void refreshTokenUsage()
 
   chartResizeObserver = new ResizeObserver(resizeCharts)
   ;[usageTrendChartRef.value, rankingChartRef.value, distributionPieChartRef.value].forEach(
@@ -600,6 +740,10 @@ onBeforeUnmount(() => {
 watch(sidebarCollapsed, async () => {
   await nextTick()
   resizeCharts()
+})
+
+watch(selectedTokenPeriodCode, () => {
+  void refreshTokenUsage()
 })
 </script>
 
@@ -717,44 +861,47 @@ watch(sidebarCollapsed, async () => {
                 <div class="token-range-tabs" role="tablist" aria-label="Token 时间范围">
                   <button
                     v-for="range in tokenRangeTabs"
-                    :key="range"
+                    :key="range.periodCode"
                     type="button"
                     class="token-range-tab"
-                    :class="{ active: range === '周' }"
+                    :class="{ active: selectedTokenPeriodCode === range.periodCode }"
                     role="tab"
-                    :aria-selected="range === '周'"
+                    :aria-selected="selectedTokenPeriodCode === range.periodCode"
+                    @click="selectTokenPeriod(range.periodCode)"
                   >
-                    {{ range }}
+                    {{ range.label }}
                   </button>
                 </div>
               </div>
 
               <div class="token-record-filters">
-                <button
-                  type="button"
-                  class="token-filter-button"
-                  @click="showToast('日期筛选即将开放')"
-                >
-                  <span>2024-05-13&nbsp;&nbsp;~&nbsp;&nbsp;2024-05-19</span>
+                <button type="button" class="token-filter-button" disabled>
+                  <span>{{ tokenDateRangeLabel }}</span>
                   <IconCalendarDays aria-hidden="true" />
                 </button>
-                <button
-                  type="button"
-                  class="token-filter-button token-filter-select"
-                  @click="showToast('类别筛选即将开放')"
-                >
-                  <span>全部类别</span>
+                <button type="button" class="token-filter-button token-filter-select" disabled>
+                  <span>全部模块</span>
                   <IconChevronDown aria-hidden="true" />
                 </button>
               </div>
             </header>
 
-            <div class="token-record-body">
+            <AppStateBlock
+              v-if="tokenUsageStateType"
+              class="token-record-state"
+              :type="tokenUsageStateType"
+              :title="tokenUsageStateTitle"
+              :description="tokenUsageStateDescription"
+              :action-label="tokenUsageStateActionLabel"
+              @action="refreshTokenUsage"
+            />
+
+            <div v-else class="token-record-body">
               <div class="usage-chart-panel">
                 <div
                   ref="usageTrendChartRef"
                   class="usage-trend-chart"
-                  aria-label="05-13 到 05-19 Token 消耗折线图，05-16 最高为 86,420 Tokens"
+                  aria-label="Token 消耗折线图"
                 />
               </div>
 
@@ -766,12 +913,8 @@ watch(sidebarCollapsed, async () => {
                   aria-label="智能体 Token 消耗排行柱状图"
                 />
 
-                <button
-                  type="button"
-                  class="ranking-more-button"
-                  @click="showToast('更多排行即将开放')"
-                >
-                  查看更多
+                <button type="button" class="ranking-more-button" @click="openTokenDashboard">
+                  查看看板
                   <IconChevronDown aria-hidden="true" />
                 </button>
               </div>
@@ -781,35 +924,49 @@ watch(sidebarCollapsed, async () => {
           <aside class="token-distribution-panel" aria-label="Token 消耗分布">
             <h2>Token 消耗分布</h2>
 
-            <div class="token-distribution-body">
-              <div
-                ref="distributionPieChartRef"
-                class="distribution-pie-chart"
-                aria-label="总消耗 89,520 Tokens"
-              />
+            <AppStateBlock
+              v-if="tokenUsageStateType"
+              class="token-distribution-state"
+              :type="tokenUsageStateType"
+              :title="tokenUsageStateTitle"
+              :description="tokenUsageStateDescription"
+              :action-label="tokenUsageStateActionLabel"
+              size="sm"
+              variant="inline"
+              @action="refreshTokenUsage"
+            />
 
-              <ul class="distribution-legend">
-                <li v-for="item in tokenDistribution" :key="item.label">
-                  <span class="legend-swatch" :style="{ backgroundColor: item.color }" />
-                  <span>{{ item.label }}</span>
-                  <strong>{{ item.value }}</strong>
-                </li>
-              </ul>
-            </div>
+            <template v-else>
+              <div class="token-distribution-body">
+                <div
+                  ref="distributionPieChartRef"
+                  class="distribution-pie-chart"
+                  aria-label="Token 总消耗环形图"
+                />
 
-            <div class="token-week-summary">
-              <span class="week-summary-icon">
-                <IconCalendarDays aria-hidden="true" />
-              </span>
-              <div>
-                <p>
-                  较上周总消耗
-                  <strong>+12.4%</strong>
-                  <IconTrendingUp aria-hidden="true" />
-                </p>
-                <span>日均消耗 12,788 Tokens</span>
+                <ul class="distribution-legend">
+                  <li v-for="item in tokenDistribution" :key="item.label">
+                    <span class="legend-swatch" :style="{ backgroundColor: item.color }" />
+                    <span>{{ item.label }}</span>
+                    <strong>{{ item.percentLabel }}</strong>
+                  </li>
+                </ul>
               </div>
-            </div>
+
+              <div class="token-week-summary">
+                <span class="week-summary-icon">
+                  <IconCalendarDays aria-hidden="true" />
+                </span>
+                <div>
+                  <p>
+                    {{ selectedTokenPeriodLabel }}总消耗
+                    <strong>{{ formatTokenNumber(tokenTotalConsumption) }}</strong>
+                    <IconTrendingUp aria-hidden="true" />
+                  </p>
+                  <span>日均消耗 {{ formatTokenNumber(tokenDailyAverage) }} Tokens</span>
+                </div>
+              </div>
+            </template>
           </aside>
         </section>
 
@@ -915,7 +1072,15 @@ watch(sidebarCollapsed, async () => {
             </div>
           </button>
 
-          <p v-if="visibleAgents.length === 0" class="empty-message">没有匹配的智能体</p>
+          <AppStateBlock
+            v-if="visibleAgents.length === 0"
+            class="agent-grid-empty"
+            type="empty"
+            title="没有匹配的智能体"
+            description="换个关键词，或切换分类查看可用智能体。"
+            size="sm"
+            variant="inline"
+          />
         </section>
       </section>
 
@@ -1471,6 +1636,12 @@ watch(sidebarCollapsed, async () => {
   margin-top: 4px;
 }
 
+.token-record-state {
+  flex: 1;
+  min-height: 0;
+  margin-top: 12px;
+}
+
 .usage-chart-panel {
   display: flex;
   min-width: 0;
@@ -1536,6 +1707,11 @@ watch(sidebarCollapsed, async () => {
   flex-direction: column;
   border-left: 1px solid #e2ebf6;
   padding-left: clamp(18px, 1.45vw, 26px);
+}
+
+.token-distribution-state {
+  flex: 1;
+  margin-top: 18px;
 }
 
 .token-distribution-body {
@@ -2017,13 +2193,10 @@ watch(sidebarCollapsed, async () => {
   height: 24px;
 }
 
-.empty-message {
+.agent-grid-empty {
   grid-column: 1 / -1;
-  margin: 40px 0;
-  color: #6d83a8;
-  font-size: 15px;
-  font-weight: 700;
-  text-align: center;
+  align-self: start;
+  margin: 24px 0;
 }
 
 .agent-toast {

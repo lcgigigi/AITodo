@@ -4,23 +4,33 @@ import type { Component } from 'vue'
 import IconBuilding2 from '~icons/lucide/building-2'
 import IconCheck from '~icons/lucide/check'
 import IconMail from '~icons/lucide/mail'
-import IconLayoutDashboard from '~icons/lucide/layout-dashboard'
 import { Button } from '@/components/ui/button'
 import bgMorning from '@/assets/morning.png'
 import bgNoon from '@/assets/noon.png'
 import bgAfternoon from '@/assets/afternoon.png'
 import bgNight from '@/assets/night.png'
 import { useFeedbackStore } from '@/stores/feedback.store'
+import { useDashboardTodosStore } from '@/stores/dashboard-todos.store'
 import { useUserStore } from '@/stores/user.store'
 import CalendarWorkspace from './dashboard/CalendarWorkspace.vue'
 import DashboardTopBar from './dashboard/DashboardTopBar.vue'
 import DetailedDashboardWorkspace from './dashboard/DetailedDashboardWorkspace.vue'
+import OnboardingTour from './dashboard/components/OnboardingTour.vue'
+import { getHomeTimePeriod } from './dashboard/homeTimeOfDay'
+import { useHomeClock } from './dashboard/useHomeClock'
+import { ymd } from './dashboard/todoDisplay'
+import { dispatchDashboardOnboardingTourStart } from './dashboard/onboardingTour'
 import {
   selectEmailProvider as submitEmailProvider,
   type SmartTodoEmailProvider,
 } from './dashboard/todo.service'
 
 type CalendarWorkspaceExpose = {
+  refreshTodos: () => Promise<void>
+  openTodoFromNotification: (payload: { id: string; date?: string }) => Promise<void>
+}
+
+type DetailedDashboardWorkspaceExpose = {
   refreshTodos: () => Promise<void>
   openTodoFromNotification: (payload: { id: string; date?: string }) => Promise<void>
 }
@@ -65,20 +75,24 @@ const emailProviderOptions: EmailProviderOption[] = [
 ]
 
 const calendarWorkspaceRef = ref<CalendarWorkspaceExpose | null>(null)
+const detailedDashboardWorkspaceRef = ref<DetailedDashboardWorkspaceExpose | null>(null)
 const homeViewMode = ref<HomeViewMode>('simple')
+const sharedSelectedDate = ref(ymd(new Date()))
 const selectedEmailProvider = ref<SmartTodoEmailProvider | ''>('')
 const isEmailProviderSaving = ref(false)
 const userStore = useUserStore()
 const feedbackStore = useFeedbackStore()
+const dashboardTodosStore = useDashboardTodosStore()
+const { now } = useHomeClock()
 
-const hour = new Date().getHours()
-let bgIndex = 0
-if (hour >= 11 && hour < 14) bgIndex = 1
-else if (hour >= 14 && hour < 18) bgIndex = 2
-else if (hour >= 18 || hour < 6) bgIndex = 3
+const bgImages = {
+  morning: bgMorning,
+  noon: bgNoon,
+  afternoon: bgAfternoon,
+  night: bgNight,
+} as const
 
-const bgImages = [bgMorning, bgNoon, bgAfternoon, bgNight]
-const currentBgImage = bgImages[bgIndex]
+const currentBgImage = computed(() => bgImages[getHomeTimePeriod(now.value)])
 
 const shouldShowEmailProviderGate = computed(() => {
   const checkEmail = userStore.profile?.checkEmail
@@ -86,16 +100,25 @@ const shouldShowEmailProviderGate = computed(() => {
 })
 
 function handleCalendarRefresh() {
-  void calendarWorkspaceRef.value?.refreshTodos()
+  void dashboardTodosStore.reloadCurrentRange()
 }
 
 async function handleOpenTodo(payload: { id: string; date?: string }) {
+  if (homeViewMode.value === 'detail') {
+    await detailedDashboardWorkspaceRef.value?.openTodoFromNotification(payload)
+    return
+  }
+
+  await calendarWorkspaceRef.value?.openTodoFromNotification(payload)
+}
+
+async function startOnboardingTour() {
   if (homeViewMode.value !== 'simple') {
     homeViewMode.value = 'simple'
     await nextTick()
   }
 
-  await calendarWorkspaceRef.value?.openTodoFromNotification(payload)
+  dispatchDashboardOnboardingTourStart()
 }
 
 function setHomeViewMode(mode: HomeViewMode) {
@@ -132,25 +155,32 @@ async function confirmEmailProvider() {
 
     <main class="dashboard-shell">
       <DashboardTopBar
-        :show-tool-dock="homeViewMode === 'simple'"
+        v-if="homeViewMode === 'detail'"
+        hide-notifications
         @calendar-refresh="handleCalendarRefresh"
         @open-todo="handleOpenTodo"
+        @start-onboarding="startOnboardingTour"
       />
       <div class="dashboard-content">
-        <button
-          v-if="homeViewMode === 'simple'"
-          type="button"
-          class="home-detail-switch"
-          aria-label="切换到详细模式"
-          @click="setHomeViewMode('detail')"
-        >
-          <IconLayoutDashboard aria-hidden="true" />
-          <span>详细模式</span>
-        </button>
-        <CalendarWorkspace v-if="homeViewMode === 'simple'" ref="calendarWorkspaceRef" />
-        <DetailedDashboardWorkspace v-else @switch-mode="setHomeViewMode" />
+        <KeepAlive>
+          <CalendarWorkspace
+            v-if="homeViewMode === 'simple'"
+            ref="calendarWorkspaceRef"
+            v-model:selected-date="sharedSelectedDate"
+            @switch-mode="setHomeViewMode"
+            @start-onboarding="startOnboardingTour"
+          />
+          <DetailedDashboardWorkspace
+            v-else
+            ref="detailedDashboardWorkspaceRef"
+            v-model:selected-date="sharedSelectedDate"
+            @switch-mode="setHomeViewMode"
+          />
+        </KeepAlive>
       </div>
     </main>
+
+    <OnboardingTour :enabled="userStore.isLoggedIn && !shouldShowEmailProviderGate" />
 
     <Transition name="email-provider-gate">
       <div
@@ -277,58 +307,6 @@ async function confirmEmailProvider() {
   position: relative;
   min-height: 0;
   flex: 1;
-}
-
-.home-detail-switch {
-  position: absolute;
-  top: 12px;
-  right: clamp(28px, 2.4vw, 44px);
-  z-index: 42;
-  min-width: 116px;
-  height: 42px;
-  border: 1px solid rgba(255, 255, 255, 0.74);
-  border-radius: 999px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(226, 239, 252, 0.72)),
-    rgba(238, 247, 255, 0.76);
-  color: #17335f;
-  padding: 0 16px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 900;
-  cursor: pointer;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.88),
-    0 14px 30px -22px rgba(15, 32, 61, 0.46);
-  backdrop-filter: blur(16px) saturate(1.12);
-  -webkit-backdrop-filter: blur(16px) saturate(1.12);
-  transition:
-    transform 180ms ease,
-    background 180ms ease,
-    box-shadow 180ms ease;
-}
-
-.home-detail-switch:hover,
-.home-detail-switch:focus-visible {
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(226, 239, 252, 0.82)),
-    rgba(238, 247, 255, 0.86);
-  transform: translateY(-1px);
-  outline: none;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    0 18px 34px -22px rgba(15, 32, 61, 0.52);
-}
-
-.home-detail-switch:active {
-  transform: translateY(0);
-}
-
-.home-detail-switch svg {
-  width: 18px;
-  height: 18px;
 }
 
 .email-provider-overlay {

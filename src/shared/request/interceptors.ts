@@ -1,7 +1,7 @@
 import type { AxiosError, AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 import { useUserStore } from '@/stores/user.store'
 import { getErrorMessage } from './error-code'
-import { notifyRequestError, releaseRequestLoading, trackRequestLoading } from './feedback'
+import { notifyRequestError } from './feedback'
 import type { RequestResponse } from './types'
 
 type BusinessErrorPayload = {
@@ -32,13 +32,11 @@ export function setupInterceptors(instance: AxiosInstance) {
       config.headers.Authorization = `Bearer ${userStore.token}`
     }
 
-    trackRequestLoading(config)
     return config
   })
 
   instance.interceptors.response.use(
     (response: AxiosResponse<RequestResponse>) => {
-      releaseRequestLoading(response.config)
       const result = response.data
 
       if (result && typeof result === 'object') {
@@ -54,7 +52,6 @@ export function setupInterceptors(instance: AxiosInstance) {
       return response
     },
     (error: AxiosError) => {
-      releaseRequestLoading(error.config)
       const message = getErrorMessage(error.response?.status, error.message)
       notifyRequestError(error.config, message)
 

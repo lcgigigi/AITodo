@@ -1,64 +1,46 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import IconBell from '~icons/lucide/bell'
-import IconCheckCheck from '~icons/lucide/check-check'
 import IconChevronDown from '~icons/lucide/chevron-down'
-import IconExternalLink from '~icons/lucide/external-link'
 import IconLogOut from '~icons/lucide/log-out'
+import IconRefreshCw from '~icons/lucide/refresh-cw'
 import IconSettings from '~icons/lucide/settings'
 import IconSlidersHorizontal from '~icons/lucide/sliders-horizontal'
-import IconTrash2 from '~icons/lucide/trash-2'
+import IconSparkles from '~icons/lucide/sparkles'
 import IconX from '~icons/lucide/x'
+import DashboardNotificationCenter from '@/modules/home/dashboard/components/DashboardNotificationCenter.vue'
 import girlImage from '@/assets/libao.png'
 import logoDarkImage from '@/assets/logoDark1.png'
 import { routeConfig } from '@/config/route.config'
+import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
 import {
-  acceptTodos,
-  loadAssignableUsers,
-  loadPendingTodos,
   logoutSmartTodo,
-  rejectTodo,
+  syncCalendar,
 } from '@/modules/home/dashboard/todo.service'
-import { formatEventTime } from '@/modules/home/dashboard/todoDisplay'
-import {
-  buildSysMessageWebSocketUrl,
-  deleteSysMessages,
-  loadSysMessages,
-  markAllSysMessagesRead,
-  markSysMessagesRead,
-  normalizeSysMessagePush,
-  type SysMessage,
-  type SysMessageFilter,
-} from '@/modules/home/dashboard/sys-message.service'
-import {
-  hasSysMessage,
-  markAllSysMessagesReadInList,
-  markSysMessageIdsReadInList,
-  mergeSysMessages,
-  removeSysMessageIdsFromList,
-} from '@/modules/home/dashboard/sys-message.state'
-import TopbarToolDock from '@/modules/home/dashboard/components/TopbarToolDock.vue'
-import {
-  navigateDashboardTool,
-  type DashboardToolTarget,
-} from '@/modules/home/dashboard/dashboardTools'
+import { resolveHomeGreetingText } from '@/modules/home/dashboard/homeTimeOfDay'
+import { useHomeClock } from '@/modules/home/dashboard/useHomeClock'
 import { useDashboardGlassSettings } from '@/modules/home/dashboard/useDashboardGlassSettings'
-import type { CalendarEvent, CalendarUser } from '@/modules/home/dashboard/types'
+import { useDashboardTodosStore } from '@/stores/dashboard-todos.store'
 import { useFeedbackStore } from '@/stores/feedback.store'
 import { useUserStore } from '@/stores/user.store'
 
 const emit = defineEmits<{
   'calendar-refresh': []
   'open-todo': [payload: { id: string; date?: string }]
+  'start-onboarding': []
+  'switch-mode': [mode: 'simple' | 'detail']
 }>()
 
 const props = withDefaults(
   defineProps<{
-    showToolDock?: boolean
+    embedded?: boolean
+    hideNotifications?: boolean
+    portalTarget?: HTMLElement | null
   }>(),
   {
-    showToolDock: true,
+    embedded: false,
+    hideNotifications: false,
+    portalTarget: null,
   },
 )
 
@@ -66,514 +48,57 @@ const router = useRouter()
 const userStore = useUserStore()
 const feedbackStore = useFeedbackStore()
 
-type PendingActionMode = 'reject' | null
-type NotificationTab = 'sys-message' | 'pending-todo'
-
-const SYS_MESSAGE_PAGE_SIZE = 10
-
-const notificationPanelRef = ref<HTMLElement | null>(null)
 const userMenuPanelRef = ref<HTMLElement | null>(null)
+const userMenuPortalRef = ref<HTMLElement | null>(null)
+const embeddedProfileTriggerRef = ref<HTMLElement | null>(null)
+const settingsMenuWrapRef = ref<HTMLElement | null>(null)
+const settingsMenuPanelRef = ref<HTMLElement | null>(null)
 const glassTriggerRef = ref<HTMLElement | null>(null)
 const glassPanelRef = ref<HTMLElement | null>(null)
 const glassPanelPosition = ref({ top: 0, right: 16 })
+const settingsMenuPosition = ref({ top: 0, right: 16 })
+const userMenuPosition = ref({ top: 0, left: 16, width: 240, arrowCenter: 120 })
 const { glassSettings, glassStyle, resetGlassSettings } = useDashboardGlassSettings()
 const isGlassPanelOpen = ref(false)
+const isSettingsMenuOpen = ref(false)
+const isSyncingCalendar = ref(false)
 const isNotificationPanelOpen = ref(false)
 const isUserMenuOpen = ref(false)
 const isLoggingOut = ref(false)
-const activeNotificationTab = ref<NotificationTab>('sys-message')
-const sysMessageFilter = ref<SysMessageFilter>('unread')
-const isSysMessageLoading = ref(false)
-const isSysMessageLoadingMore = ref(false)
-const sysMessageError = ref('')
-const sysMessages = ref<SysMessage[]>([])
-const sysMessageTotal = ref(0)
-const sysMessagePageNum = ref(1)
-const unreadSysMessageCount = ref(0)
-const processingSysMessageId = ref('')
-const isPendingLoading = ref(false)
-const pendingError = ref('')
-const pendingTodos = ref<CalendarEvent[]>([])
-const assignableUsers = ref<CalendarUser[]>([])
-const activeActionId = ref('')
-const activeActionMode = ref<PendingActionMode>(null)
-const rejectReason = ref('')
-const processingId = ref('')
-let sysMessageSocket: WebSocket | null = null
-let sysMessageReconnectTimer: ReturnType<typeof setTimeout> | null = null
-let sysMessageReconnectAttempts = 0
-let isSysMessageSocketStopped = false
-
-const currentUser = computed<CalendarUser>(() => ({
-  id: userStore.profile?.id ?? '',
-  name: userStore.profile?.name ?? '未登录',
-  role: userStore.profile?.role ?? 'employee',
-  department: userStore.profile?.department,
-  avatar: userStore.profile?.avatar,
-  leaderId: userStore.profile?.leaderId,
-  teamMemberIds: userStore.profile?.teamMemberIds,
-}))
 
 const displayName = computed(() => userStore.profile?.name ?? '刘美华')
 const department = computed(() => userStore.profile?.department ?? '信息技术部')
 const avatarUrl = computed(() => userStore.profile?.avatar ?? girlImage)
-const greetingText = computed(() => {
-  return '早上好'
+const { now } = useHomeClock()
+const greetingText = computed(() => resolveHomeGreetingText(now.value))
+
+const settingsMenuPanelStyle = computed(() => {
+  if (!props.embedded) return undefined
+
+  const position = settingsMenuPosition.value
+  return {
+    top: `${position.top}px`,
+    right: `${position.right}px`,
+  }
 })
-const unreadNotificationCount = computed(() => unreadSysMessageCount.value)
-const hasMoreSysMessages = computed(
-  () => sysMessagePageNum.value * SYS_MESSAGE_PAGE_SIZE < sysMessageTotal.value,
-)
-const sysMessageSummary = computed(() =>
-  sysMessageFilter.value === 'unread'
-    ? `未读 ${unreadSysMessageCount.value}`
-    : `全部 ${sysMessageTotal.value}`,
-)
 
-function isPendingConfirmOnly(todo: CalendarEvent) {
-  return todo.backendStatus === 9
-}
+const userMenuTeleportTarget = computed(() => props.portalTarget ?? 'body')
 
-function resetSysMessageState() {
-  sysMessages.value = []
-  sysMessageTotal.value = 0
-  sysMessagePageNum.value = 1
-  unreadSysMessageCount.value = 0
-  sysMessageError.value = ''
-}
+const userMenuPanelStyle = computed(() => {
+  if (!props.embedded || !props.portalTarget) return undefined
 
-function getSysMessageStatusText(message: SysMessage) {
-  return message.msgStatus === 0 ? '未读' : '已读'
-}
-
-function getSysMessageBizLabel(message: SysMessage) {
-  if (message.bizType === 1) return '智能待办'
-  if (message.bizType === 2) return '会议'
-  return message.msgType === 1 ? '系统消息' : '消息'
-}
-
-function isSysMessageOpenable(message: SysMessage) {
-  return Boolean(message.bizId) && (message.bizType === 1 || message.bizType === 2)
-}
-
-function formatSysMessageTime(value?: string) {
-  if (!value) return ''
-
-  const normalized = value.includes('T') ? value : value.replace(' ', 'T')
-  const date = new Date(normalized)
-  if (Number.isNaN(date.getTime())) return value
-
-  const now = new Date()
-  const isToday = date.toDateString() === now.toDateString()
-  const pad = (item: number) => String(item).padStart(2, '0')
-
-  if (isToday) {
-    return `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  const position = userMenuPosition.value
+  return {
+    top: `${position.top}px`,
+    left: `${position.left}px`,
+    width: `${position.width}px`,
+    '--user-menu-arrow-center': `${position.arrowCenter}px`,
+    ...glassStyle.value,
   }
-
-  if (date.getFullYear() === now.getFullYear()) {
-    return `${date.getMonth() + 1}月${date.getDate()}日`
-  }
-
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-}
-
-function getSysMessagePreview(content: string) {
-  return content
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .join(' · ')
-}
-
-async function refreshUnreadSysMessageCount() {
-  if (!currentUser.value.id) {
-    unreadSysMessageCount.value = 0
-    return
-  }
-
-  try {
-    const result = await loadSysMessages({ pageNum: 1, pageSize: 1, msgStatus: 0 })
-    unreadSysMessageCount.value = result.total
-  } catch {
-    // 未读数失败不阻断消息列表，弹层内会展示列表错误。
-  }
-}
-
-async function refreshSysMessages(pageNum = 1) {
-  if (!currentUser.value.id) {
-    resetSysMessageState()
-    return
-  }
-
-  const isFirstPage = pageNum === 1
-  if (isFirstPage) {
-    isSysMessageLoading.value = true
-  } else {
-    isSysMessageLoadingMore.value = true
-  }
-  sysMessageError.value = ''
-
-  try {
-    const result = await loadSysMessages({
-      pageNum,
-      pageSize: SYS_MESSAGE_PAGE_SIZE,
-      msgStatus: sysMessageFilter.value === 'unread' ? 0 : undefined,
-    })
-    sysMessages.value = mergeSysMessages(isFirstPage ? [] : sysMessages.value, result.rows)
-    sysMessageTotal.value = result.total
-    sysMessagePageNum.value = result.pageNum
-
-    if (sysMessageFilter.value === 'unread') {
-      unreadSysMessageCount.value = result.total
-    } else {
-      void refreshUnreadSysMessageCount()
-    }
-  } catch (error) {
-    if (isFirstPage) sysMessages.value = []
-    sysMessageError.value = error instanceof Error ? error.message : '加载站内消息失败'
-  } finally {
-    isSysMessageLoading.value = false
-    isSysMessageLoadingMore.value = false
-  }
-}
-
-async function loadMoreSysMessages() {
-  if (isSysMessageLoadingMore.value || !hasMoreSysMessages.value) return
-  await refreshSysMessages(sysMessagePageNum.value + 1)
-}
-
-function setNotificationTab(tab: NotificationTab) {
-  activeNotificationTab.value = tab
-
-  if (tab === 'sys-message') {
-    void refreshSysMessages()
-    return
-  }
-
-  void refreshPendingTodos()
-}
-
-function setSysMessageFilter(filter: SysMessageFilter) {
-  if (sysMessageFilter.value === filter) return
-
-  sysMessageFilter.value = filter
-  void refreshSysMessages()
-}
-
-function applySysMessageReadState(message: SysMessage) {
-  if (message.msgStatus !== 0) return
-
-  unreadSysMessageCount.value = Math.max(0, unreadSysMessageCount.value - 1)
-
-  if (sysMessageFilter.value === 'unread') {
-    sysMessages.value = removeSysMessageIdsFromList(sysMessages.value, [message.rawId])
-    sysMessageTotal.value = Math.max(0, sysMessageTotal.value - 1)
-    return
-  }
-
-  sysMessages.value = markSysMessageIdsReadInList(sysMessages.value, [message.rawId])
-}
-
-async function readSysMessage(message: SysMessage) {
-  if (message.msgStatus !== 0) return
-
-  await markSysMessagesRead([message.rawId])
-  applySysMessageReadState(message)
-}
-
-async function handleMarkSysMessageRead(message: SysMessage) {
-  if (message.msgStatus !== 0 || processingSysMessageId.value) return
-
-  processingSysMessageId.value = message.id
-  sysMessageError.value = ''
-
-  try {
-    await readSysMessage(message)
-  } catch (error) {
-    sysMessageError.value = error instanceof Error ? error.message : '标记消息已读失败'
-  } finally {
-    processingSysMessageId.value = ''
-  }
-}
-
-async function handleMarkAllSysMessagesRead() {
-  if (unreadSysMessageCount.value === 0 || processingSysMessageId.value) return
-
-  processingSysMessageId.value = 'all'
-  sysMessageError.value = ''
-
-  try {
-    await markAllSysMessagesRead()
-    unreadSysMessageCount.value = 0
-
-    if (sysMessageFilter.value === 'unread') {
-      sysMessages.value = []
-      sysMessageTotal.value = 0
-    } else {
-      sysMessages.value = markAllSysMessagesReadInList(sysMessages.value)
-    }
-  } catch (error) {
-    sysMessageError.value = error instanceof Error ? error.message : '全部标记已读失败'
-  } finally {
-    processingSysMessageId.value = ''
-  }
-}
-
-async function handleDeleteSysMessage(message: SysMessage) {
-  if (processingSysMessageId.value) return
-
-  processingSysMessageId.value = message.id
-  sysMessageError.value = ''
-
-  try {
-    await deleteSysMessages([message.rawId])
-    sysMessages.value = removeSysMessageIdsFromList(sysMessages.value, [message.rawId])
-    sysMessageTotal.value = Math.max(0, sysMessageTotal.value - 1)
-
-    if (message.msgStatus === 0) {
-      unreadSysMessageCount.value = Math.max(0, unreadSysMessageCount.value - 1)
-    }
-  } catch (error) {
-    sysMessageError.value = error instanceof Error ? error.message : '删除消息失败'
-  } finally {
-    processingSysMessageId.value = ''
-  }
-}
-
-async function handleOpenSysMessage(message: SysMessage) {
-  if (!isSysMessageOpenable(message) || processingSysMessageId.value) return
-
-  processingSysMessageId.value = message.id
-  sysMessageError.value = ''
-
-  try {
-    await readSysMessage(message)
-    emit('open-todo', { id: message.bizId ?? '' })
-    closeNotificationPanel()
-  } catch (error) {
-    sysMessageError.value = error instanceof Error ? error.message : '打开关联待办失败'
-  } finally {
-    processingSysMessageId.value = ''
-  }
-}
-
-function clearSysMessageReconnectTimer() {
-  if (!sysMessageReconnectTimer) return
-  clearTimeout(sysMessageReconnectTimer)
-  sysMessageReconnectTimer = null
-}
-
-function scheduleSysMessageReconnect() {
-  clearSysMessageReconnectTimer()
-  if (isSysMessageSocketStopped || !currentUser.value.id) return
-
-  const delay = Math.min(30_000, 3_000 + sysMessageReconnectAttempts * 2_000)
-  sysMessageReconnectAttempts += 1
-  sysMessageReconnectTimer = setTimeout(connectSysMessageSocket, delay)
-}
-
-function handleSysMessageSocketPayload(rawData: string) {
-  let parsed: unknown
-
-  try {
-    parsed = JSON.parse(rawData)
-  } catch {
-    return
-  }
-
-  const message = normalizeSysMessagePush(parsed as { type: 'sys_message' })
-  if (!message) return
-
-  const alreadyExists = hasSysMessage(sysMessages.value, message.id)
-  const shouldShowInCurrentFilter =
-    sysMessageFilter.value === 'all' || message.msgStatus === 0 || alreadyExists
-
-  if (shouldShowInCurrentFilter) {
-    sysMessages.value = mergeSysMessages(sysMessages.value, [message], { prepend: true })
-
-    if (!alreadyExists) {
-      sysMessageTotal.value += 1
-    }
-  }
-
-  if (!alreadyExists && message.msgStatus === 0) {
-    unreadSysMessageCount.value += 1
-  }
-
-  feedbackStore.info(message.msgSubject || '收到新的站内消息')
-}
-
-function stopSysMessageSocket() {
-  isSysMessageSocketStopped = true
-  clearSysMessageReconnectTimer()
-
-  if (!sysMessageSocket) return
-
-  const socket = sysMessageSocket
-  sysMessageSocket = null
-  socket.onopen = null
-  socket.onmessage = null
-  socket.onclose = null
-  socket.onerror = null
-
-  if (
-    typeof WebSocket !== 'undefined' &&
-    (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)
-  ) {
-    socket.close()
-  }
-}
-
-function connectSysMessageSocket() {
-  if (!currentUser.value.id || typeof WebSocket === 'undefined') return
-
-  const url = buildSysMessageWebSocketUrl(currentUser.value.id)
-  if (!url) return
-
-  isSysMessageSocketStopped = false
-  clearSysMessageReconnectTimer()
-
-  if (
-    sysMessageSocket &&
-    (sysMessageSocket.readyState === WebSocket.OPEN ||
-      sysMessageSocket.readyState === WebSocket.CONNECTING)
-  ) {
-    return
-  }
-
-  const socket = new WebSocket(url)
-  sysMessageSocket = socket
-
-  socket.onopen = () => {
-    sysMessageReconnectAttempts = 0
-  }
-
-  socket.onmessage = (event) => {
-    if (typeof event.data === 'string') {
-      handleSysMessageSocketPayload(event.data)
-    }
-  }
-
-  socket.onclose = () => {
-    if (sysMessageSocket === socket) {
-      sysMessageSocket = null
-    }
-    scheduleSysMessageReconnect()
-  }
-
-  socket.onerror = () => {
-    socket.close()
-  }
-}
-
-async function refreshAssignableUsers() {
-  if (!currentUser.value.id) {
-    assignableUsers.value = []
-    return
-  }
-
-  try {
-    assignableUsers.value = await loadAssignableUsers()
-  } catch {
-    assignableUsers.value = [currentUser.value]
-  }
-}
-
-async function refreshPendingTodos() {
-  if (!currentUser.value.id) {
-    pendingTodos.value = []
-    return
-  }
-
-  isPendingLoading.value = true
-  pendingError.value = ''
-
-  try {
-    pendingTodos.value = await loadPendingTodos(currentUser.value, assignableUsers.value)
-  } catch (error) {
-    pendingTodos.value = []
-    pendingError.value = error instanceof Error ? error.message : '加载待接受待办失败'
-  } finally {
-    isPendingLoading.value = false
-  }
-}
-
-function resetPendingAction() {
-  activeActionId.value = ''
-  activeActionMode.value = null
-  rejectReason.value = ''
-}
-
-function pendingSummary(event: CalendarEvent) {
-  const creator = event.creatorName ? `${event.creatorName} 派发` : '待接受待办'
-  const schedule = formatEventTime(event)
-  return `${creator} · ${schedule}`
-}
-
-function togglePendingAction(id: string, mode: Exclude<PendingActionMode, null>) {
-  if (activeActionId.value === id && activeActionMode.value === mode) {
-    resetPendingAction()
-    return
-  }
-
-  activeActionId.value = id
-  activeActionMode.value = mode
-  rejectReason.value = ''
-}
-
-async function handleAcceptTodo(id: string) {
-  processingId.value = id
-  try {
-    await acceptTodos(id)
-    resetPendingAction()
-    await refreshPendingTodos()
-    emit('calendar-refresh')
-  } catch (error) {
-    pendingError.value = error instanceof Error ? error.message : '接受待办失败'
-  } finally {
-    processingId.value = ''
-  }
-}
-
-async function handleRejectTodo(id: string) {
-  processingId.value = id
-  try {
-    await rejectTodo(id, rejectReason.value.trim() || '暂不处理')
-    resetPendingAction()
-    await refreshPendingTodos()
-    emit('calendar-refresh')
-  } catch (error) {
-    pendingError.value = error instanceof Error ? error.message : '拒绝待办失败'
-  } finally {
-    processingId.value = ''
-  }
-}
-
-function handleOpenTodo(event: CalendarEvent) {
-  emit('open-todo', { id: event.id, date: event.date })
-  closeNotificationPanel()
-}
-
-async function toggleNotificationPanel() {
-  if (!isNotificationPanelOpen.value) {
-    closeUserMenu()
-    closeGlassPanel()
-    await Promise.all([refreshSysMessages(), refreshPendingTodos()])
-  }
-  isNotificationPanelOpen.value = !isNotificationPanelOpen.value
-}
+})
 
 function closeNotificationPanel() {
   isNotificationPanelOpen.value = false
-}
-
-function toggleUserMenu() {
-  if (!isUserMenuOpen.value) {
-    closeNotificationPanel()
-    closeGlassPanel()
-  }
-  isUserMenuOpen.value = !isUserMenuOpen.value
 }
 
 function closeUserMenu() {
@@ -582,6 +107,125 @@ function closeUserMenu() {
 
 function closeGlassPanel() {
   isGlassPanelOpen.value = false
+}
+
+function closeSettingsMenu() {
+  isSettingsMenuOpen.value = false
+}
+
+watch(isNotificationPanelOpen, (open) => {
+  if (!open) return
+  closeUserMenu()
+  closeGlassPanel()
+  closeSettingsMenu()
+})
+
+watch(isUserMenuOpen, async (open) => {
+  if (open && props.embedded) {
+    await nextTick()
+    updateUserMenuPosition()
+  }
+})
+
+watch(
+  () => props.portalTarget,
+  () => {
+    if (isUserMenuOpen.value && props.embedded) updateUserMenuPosition()
+  },
+)
+
+function updateUserMenuPosition() {
+  const wrap = userMenuPanelRef.value
+  if (!wrap) return
+
+  const avatar = wrap.querySelector('.embedded-profile img')
+  const anchor =
+    avatar instanceof HTMLElement
+      ? avatar
+      : embeddedProfileTriggerRef.value ?? wrap.querySelector('.embedded-profile')
+  if (!(anchor instanceof HTMLElement)) return
+
+  const anchorRect = anchor.getBoundingClientRect()
+  const padding = 12
+  const panelWidth = 240
+
+  if (props.embedded && props.portalTarget) {
+    const containerRect = props.portalTarget.getBoundingClientRect()
+    let left = anchorRect.left + anchorRect.width / 2 - containerRect.left - panelWidth / 2
+    left = Math.max(padding, Math.min(left, containerRect.width - panelWidth - padding))
+    const top = Math.max(padding, anchorRect.bottom - containerRect.top + 8)
+    const panelRightAbs = containerRect.left + left + panelWidth
+    const avatarCenterX = anchorRect.left + anchorRect.width / 2
+    const arrowCenter = Math.max(28, Math.min(panelWidth - 28, panelRightAbs - avatarCenterX))
+
+    userMenuPosition.value = {
+      top,
+      left,
+      width: panelWidth,
+      arrowCenter,
+    }
+    return
+  }
+
+  userMenuPosition.value = {
+    top: anchorRect.bottom + 14,
+    left: anchorRect.left,
+    width: panelWidth,
+    arrowCenter: 31,
+  }
+}
+
+function toggleUserMenu() {
+  if (!isUserMenuOpen.value) {
+    closeNotificationPanel()
+    closeGlassPanel()
+    closeSettingsMenu()
+    if (props.embedded) updateUserMenuPosition()
+  }
+
+  isUserMenuOpen.value = !isUserMenuOpen.value
+
+  if (props.embedded && isUserMenuOpen.value) {
+    void nextTick(() => updateUserMenuPosition())
+  }
+}
+
+function updateSettingsMenuPosition() {
+  const trigger = settingsMenuWrapRef.value
+  if (!trigger) return
+
+  const rect = trigger.getBoundingClientRect()
+  settingsMenuPosition.value = {
+    top: rect.bottom + 12,
+    right: Math.max(16, window.innerWidth - rect.right),
+  }
+}
+
+function toggleSettingsMenu() {
+  if (!isSettingsMenuOpen.value) {
+    closeNotificationPanel()
+    closeUserMenu()
+    closeGlassPanel()
+    if (props.embedded) updateSettingsMenuPosition()
+  }
+  isSettingsMenuOpen.value = !isSettingsMenuOpen.value
+}
+
+async function syncCalendarFromEmail() {
+  if (isSyncingCalendar.value) return
+
+  isSyncingCalendar.value = true
+
+  try {
+    await syncCalendar()
+    emit('calendar-refresh')
+    feedbackStore.success('邮箱日程同步成功')
+    closeSettingsMenu()
+  } catch {
+    feedbackStore.error('同步邮箱日程失败')
+  } finally {
+    isSyncingCalendar.value = false
+  }
 }
 
 function updateGlassPanelPosition() {
@@ -599,16 +243,18 @@ function toggleGlassPanel() {
   if (!isGlassPanelOpen.value) {
     closeNotificationPanel()
     closeUserMenu()
+    closeSettingsMenu()
     updateGlassPanelPosition()
   }
   isGlassPanelOpen.value = !isGlassPanelOpen.value
 }
 
-function openTopbarTool(tool: DashboardToolTarget) {
+function openOnboardingTour() {
   closeNotificationPanel()
   closeUserMenu()
   closeGlassPanel()
-  void navigateDashboardTool(router, tool)
+  closeSettingsMenu()
+  emit('start-onboarding')
 }
 
 async function handleLogout() {
@@ -624,7 +270,7 @@ async function handleLogout() {
   } catch {
     // 即使接口失败也清除本地登录态
   } finally {
-    stopSysMessageSocket()
+    useDashboardTodosStore().reset()
     userStore.logout()
     isLoggingOut.value = false
     void router.replace({ path: routeConfig.loginRoute })
@@ -632,25 +278,31 @@ async function handleLogout() {
 }
 
 function handleDocumentPointerDown(event: PointerEvent) {
-  const notificationElement = notificationPanelRef.value
-  const userMenuElement = userMenuPanelRef.value
+  const target = event.target as Node
   const glassElement = glassPanelRef.value
+  const settingsMenuElement = settingsMenuPanelRef.value
 
-  if (notificationElement && !notificationElement.contains(event.target as Node)) {
-    closeNotificationPanel()
-  }
-
-  if (userMenuElement && !userMenuElement.contains(event.target as Node)) {
-    closeUserMenu()
+  if (isUserMenuOpen.value) {
+    const insideUserMenu =
+      userMenuPanelRef.value?.contains(target) || userMenuPortalRef.value?.contains(target)
+    if (!insideUserMenu) {
+      closeUserMenu()
+    }
   }
 
   const glassTriggerElement = glassTriggerRef.value
-  const glassTarget = event.target as Node
   const insideGlassController =
-    glassElement?.contains(glassTarget) || glassTriggerElement?.contains(glassTarget)
+    glassElement?.contains(target) || glassTriggerElement?.contains(target)
 
   if (isGlassPanelOpen.value && !insideGlassController) {
     closeGlassPanel()
+  }
+
+  const insideSettingsMenu =
+    settingsMenuWrapRef.value?.contains(target) || settingsMenuElement?.contains(target)
+
+  if (isSettingsMenuOpen.value && !insideSettingsMenu) {
+    closeSettingsMenu()
   }
 }
 
@@ -659,31 +311,16 @@ function handleDocumentKeydown(event: KeyboardEvent) {
     closeNotificationPanel()
     closeUserMenu()
     closeGlassPanel()
+    closeSettingsMenu()
   }
 }
 
 onMounted(() => {
   document.addEventListener('pointerdown', handleDocumentPointerDown)
   document.addEventListener('keydown', handleDocumentKeydown)
-  void refreshAssignableUsers().then(() => refreshPendingTodos())
-  void refreshSysMessages()
-  connectSysMessageSocket()
 })
 
-watch(
-  () => userStore.profile?.id,
-  (nextId, previousId) => {
-    if (nextId === previousId) return
-    stopSysMessageSocket()
-    resetSysMessageState()
-    void refreshAssignableUsers().then(() => refreshPendingTodos())
-    void refreshSysMessages()
-    if (nextId) connectSysMessageSocket()
-  },
-)
-
 onBeforeUnmount(() => {
-  stopSysMessageSocket()
   document.removeEventListener('pointerdown', handleDocumentPointerDown)
   document.removeEventListener('keydown', handleDocumentKeydown)
 })
@@ -692,11 +329,71 @@ onBeforeUnmount(() => {
 <template>
   <header
     class="dashboard-topbar"
-    :class="{ 'without-tools': !props.showToolDock }"
-    :style="glassStyle"
+    :class="{
+      'is-embedded': props.embedded,
+      'notification-open': props.embedded && isNotificationPanelOpen,
+      'user-menu-open': props.embedded && isUserMenuOpen,
+    }"
+    :style="props.embedded ? undefined : glassStyle"
     aria-label="顶部导航"
+    data-tour-target="dashboard-topbar"
   >
-    <div class="brand-block" aria-label="华力企业级AI平台">
+    <div
+      v-if="props.embedded"
+      ref="userMenuPanelRef"
+      class="embedded-profile-wrap"
+      :class="{ 'is-open': isUserMenuOpen }"
+    >
+      <button
+        ref="embeddedProfileTriggerRef"
+        class="embedded-profile"
+        type="button"
+        aria-label="个人中心"
+        aria-controls="dashboard-user-menu"
+        :aria-expanded="isUserMenuOpen"
+        @click="toggleUserMenu"
+      >
+        <img :src="avatarUrl" alt="" />
+        <span>
+          <strong>{{ greetingText }}，{{ displayName }}</strong>
+          <em>{{ department }}</em>
+        </span>
+      </button>
+
+      <Teleport :to="userMenuTeleportTarget" :disabled="!props.embedded || !props.portalTarget">
+        <Transition name="user-menu-popover">
+          <section
+            v-if="isUserMenuOpen"
+            id="dashboard-user-menu"
+            ref="userMenuPortalRef"
+            class="user-menu-panel is-scoped-portal"
+            :style="userMenuPanelStyle"
+            aria-label="个人中心"
+          >
+            <span class="user-menu-panel__arrow" aria-hidden="true" />
+            <header class="user-menu-panel__header">
+              <img :src="avatarUrl" alt="" />
+              <div>
+                <strong>{{ displayName }}</strong>
+                <span>{{ department }}</span>
+              </div>
+            </header>
+
+            <button
+              class="user-menu-panel__logout"
+              type="button"
+              :disabled="isLoggingOut"
+              @click="handleLogout"
+            >
+              <IconLogOut aria-hidden="true" />
+              <span>{{ isLoggingOut ? '正在退出…' : '退出登录' }}</span>
+            </button>
+          </section>
+        </Transition>
+      </Teleport>
+    </div>
+
+    <div v-else class="brand-block" aria-label="华力企业级AI平台">
       <span class="logo-mark" aria-hidden="true">
         <img :src="logoDarkImage" alt="" />
       </span>
@@ -706,280 +403,81 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <TopbarToolDock v-if="props.showToolDock" @select="openTopbarTool" />
+    <div
+      v-if="props.embedded"
+      class="embedded-mode-toggle"
+      role="tablist"
+      aria-label="视图模式"
+      data-tour-target="detail-mode"
+    >
+      <button type="button" role="tab" aria-selected="true" class="active">简约模式</button>
+      <button type="button" role="tab" aria-selected="false" @click="emit('switch-mode', 'detail')">
+        详细模式
+      </button>
+    </div>
 
-    <div class="topbar-actions">
-      <div ref="notificationPanelRef" class="notification-wrap">
+    <div class="topbar-actions" :class="{ 'is-embedded-actions': props.embedded }">
+      <DashboardNotificationCenter
+        v-if="!props.hideNotifications"
+        v-model:open="isNotificationPanelOpen"
+        :use-portal="props.embedded"
+        :portal-target="props.portalTarget"
+        @calendar-refresh="emit('calendar-refresh')"
+        @open-todo="(payload) => emit('open-todo', payload)"
+      />
+      <button
+        v-if="!props.embedded"
+        class="icon-button"
+        type="button"
+        aria-label="打开新手引导"
+        title="打开新手引导"
+        @click="openOnboardingTour"
+      >
+        <IconSparkles />
+      </button>
+
+      <div ref="settingsMenuWrapRef" class="settings-menu-wrap">
         <button
-          class="icon-button has-badge"
+          class="icon-button"
           type="button"
-          aria-label="消息通知"
-          aria-controls="dashboard-notification-panel"
-          :aria-expanded="isNotificationPanelOpen"
-          @click="toggleNotificationPanel"
+          aria-label="设置"
+          aria-controls="dashboard-settings-menu"
+          :aria-expanded="isSettingsMenuOpen"
+          title="设置"
+          @click.stop="toggleSettingsMenu"
         >
-          <IconBell />
-          <span v-if="unreadNotificationCount">{{ unreadNotificationCount }}</span>
+          <IconSettings />
         </button>
 
-        <Transition name="notification-popover">
-          <section
-            v-if="isNotificationPanelOpen"
-            id="dashboard-notification-panel"
-            class="notification-panel"
-            aria-label="消息通知"
-          >
-            <header class="notification-panel__header">
-              <div>
-                <strong>消息中心</strong>
-                <span>{{ sysMessageSummary }} · 待处理 {{ pendingTodos.length }}</span>
-              </div>
-              <button
-                v-if="activeNotificationTab === 'sys-message'"
-                type="button"
-                aria-label="全部标记已读"
-                title="全部标记已读"
-                :disabled="unreadSysMessageCount === 0 || processingSysMessageId === 'all'"
-                @click="handleMarkAllSysMessagesRead"
-              >
-                <IconCheckCheck />
-              </button>
+        <Teleport to="body" :disabled="!props.embedded">
+          <Transition name="settings-menu-popover">
+            <section
+              v-if="isSettingsMenuOpen"
+              id="dashboard-settings-menu"
+              ref="settingsMenuPanelRef"
+              class="settings-menu-panel"
+              :class="{ 'is-portal': props.embedded }"
+              :style="settingsMenuPanelStyle"
+              aria-label="设置菜单"
+              @click.stop
+            >
+              <span v-if="!props.embedded" class="settings-menu-panel__arrow" aria-hidden="true" />
               <button
                 type="button"
-                aria-label="关闭消息通知"
-                title="关闭消息通知"
-                @click="closeNotificationPanel"
+                class="settings-menu-item"
+                :disabled="isSyncingCalendar"
+                @click="syncCalendarFromEmail"
               >
-                <IconX />
+                <IconRefreshCw
+                  aria-hidden="true"
+                  :class="{ 'is-spinning': isSyncingCalendar }"
+                />
+                <span>{{ isSyncingCalendar ? '同步中…' : '同步邮箱日程' }}</span>
               </button>
-            </header>
-
-            <div class="notification-tabs" role="tablist" aria-label="消息分类">
-              <button
-                type="button"
-                role="tab"
-                :aria-selected="activeNotificationTab === 'sys-message'"
-                :class="{ active: activeNotificationTab === 'sys-message' }"
-                @click="setNotificationTab('sys-message')"
-              >
-                站内消息
-                <span>{{ unreadSysMessageCount }}</span>
-              </button>
-              <button
-                type="button"
-                role="tab"
-                :aria-selected="activeNotificationTab === 'pending-todo'"
-                :class="{ active: activeNotificationTab === 'pending-todo' }"
-                @click="setNotificationTab('pending-todo')"
-              >
-                待接受待办
-                <span>{{ pendingTodos.length }}</span>
-              </button>
-            </div>
-
-            <template v-if="activeNotificationTab === 'sys-message'">
-              <div class="notification-filter" aria-label="站内消息筛选">
-                <button
-                  type="button"
-                  :class="{ active: sysMessageFilter === 'unread' }"
-                  @click="setSysMessageFilter('unread')"
-                >
-                  未读
-                </button>
-                <button
-                  type="button"
-                  :class="{ active: sysMessageFilter === 'all' }"
-                  @click="setSysMessageFilter('all')"
-                >
-                  全部
-                </button>
-              </div>
-
-              <p v-if="sysMessageError" class="notification-error">{{ sysMessageError }}</p>
-
-              <div class="notification-list">
-                <p v-if="isSysMessageLoading" class="notification-empty">正在加载站内消息…</p>
-                <p v-else-if="!sysMessages.length" class="notification-empty">
-                  {{ sysMessageFilter === 'unread' ? '暂无未读消息' : '暂无站内消息' }}
-                </p>
-
-                <article
-                  v-for="message in sysMessages"
-                  :key="message.id"
-                  class="notification-item"
-                  :class="{ 'is-unread': message.msgStatus === 0 }"
-                >
-                  <span
-                    class="notification-item__marker"
-                    :class="message.bizType === 2 ? 'is-green' : 'is-blue'"
-                    aria-hidden="true"
-                  />
-                  <div class="notification-item__content">
-                    <div class="notification-item__title-row">
-                      <strong>{{ message.msgSubject }}</strong>
-                      <time>{{ formatSysMessageTime(message.createTime) }}</time>
-                    </div>
-                    <p>{{ getSysMessagePreview(message.msgContent) || '暂无消息内容' }}</p>
-                    <div class="notification-item__meta-row">
-                      <span>{{ getSysMessageBizLabel(message) }}</span>
-                      <span>{{ getSysMessageStatusText(message) }}</span>
-                    </div>
-
-                    <div class="notification-item__actions">
-                      <button
-                        v-if="isSysMessageOpenable(message)"
-                        type="button"
-                        class="action-btn is-view has-icon"
-                        :disabled="processingSysMessageId === message.id"
-                        @click="handleOpenSysMessage(message)"
-                      >
-                        <IconExternalLink aria-hidden="true" />
-                        <span>{{
-                          processingSysMessageId === message.id ? '打开中…' : '查看'
-                        }}</span>
-                      </button>
-                      <button
-                        v-if="message.msgStatus === 0"
-                        type="button"
-                        class="action-btn is-accept has-icon"
-                        :disabled="processingSysMessageId === message.id"
-                        @click="handleMarkSysMessageRead(message)"
-                      >
-                        <IconCheckCheck aria-hidden="true" />
-                        <span>已读</span>
-                      </button>
-                      <button
-                        type="button"
-                        class="action-btn is-reject has-icon"
-                        :disabled="processingSysMessageId === message.id"
-                        @click="handleDeleteSysMessage(message)"
-                      >
-                        <IconTrash2 aria-hidden="true" />
-                        <span>删除</span>
-                      </button>
-                    </div>
-                  </div>
-                </article>
-
-                <button
-                  v-if="hasMoreSysMessages && !isSysMessageLoading"
-                  type="button"
-                  class="notification-load-more"
-                  :disabled="isSysMessageLoadingMore"
-                  @click="loadMoreSysMessages"
-                >
-                  {{ isSysMessageLoadingMore ? '加载中…' : '加载更多' }}
-                </button>
-              </div>
-            </template>
-
-            <template v-else>
-              <p v-if="pendingError" class="notification-error">{{ pendingError }}</p>
-
-              <div class="notification-list">
-                <p v-if="isPendingLoading" class="notification-empty">正在加载待接受待办…</p>
-                <p v-else-if="!pendingTodos.length" class="notification-empty">暂无待接受待办</p>
-
-                <article
-                  v-for="todo in pendingTodos"
-                  :key="todo.id"
-                  class="notification-item is-unread"
-                >
-                  <span class="notification-item__marker is-amber" aria-hidden="true" />
-                  <div class="notification-item__content">
-                    <div class="notification-item__title-row">
-                      <strong>{{ todo.title }}</strong>
-                      <time>{{ formatEventTime(todo) }}</time>
-                    </div>
-                    <p>{{ pendingSummary(todo) }}</p>
-                    <div class="notification-item__meta-row">
-                      <span>待接受</span>
-                    </div>
-
-                    <div class="notification-item__actions">
-                      <template v-if="isPendingConfirmOnly(todo)">
-                        <button
-                          type="button"
-                          class="action-btn is-accept"
-                          :disabled="processingId === todo.id"
-                          @click="handleAcceptTodo(todo.id)"
-                        >
-                          {{ processingId === todo.id ? '处理中…' : '确认' }}
-                        </button>
-                      </template>
-                      <template v-else>
-                        <button
-                          type="button"
-                          class="action-btn is-accept"
-                          :disabled="processingId === todo.id"
-                          @click="handleAcceptTodo(todo.id)"
-                        >
-                          {{
-                            processingId === todo.id && activeActionMode !== 'reject'
-                              ? '处理中…'
-                              : '接受'
-                          }}
-                        </button>
-                        <button
-                          type="button"
-                          class="action-btn is-reject"
-                          :disabled="processingId === todo.id"
-                          @click="togglePendingAction(todo.id, 'reject')"
-                        >
-                          拒绝
-                        </button>
-                        <button
-                          type="button"
-                          class="action-btn is-view"
-                          @click="handleOpenTodo(todo)"
-                        >
-                          查看
-                        </button>
-                      </template>
-                    </div>
-
-                    <div
-                      v-if="
-                        !isPendingConfirmOnly(todo) &&
-                        activeActionId === todo.id &&
-                        activeActionMode === 'reject'
-                      "
-                      class="notification-item__form"
-                    >
-                      <input
-                        v-model="rejectReason"
-                        type="text"
-                        class="notification-input"
-                        placeholder="拒绝原因（可选）"
-                      />
-                      <div class="notification-item__form-actions">
-                        <button
-                          type="button"
-                          class="action-btn is-reject"
-                          :disabled="processingId === todo.id"
-                          @click="handleRejectTodo(todo.id)"
-                        >
-                          确认拒绝
-                        </button>
-                        <button
-                          type="button"
-                          class="action-btn is-muted"
-                          @click="resetPendingAction"
-                        >
-                          取消
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </article>
-              </div>
-            </template>
-          </section>
-        </Transition>
+            </section>
+          </Transition>
+        </Teleport>
       </div>
-      <button class="icon-button" type="button" aria-label="设置">
-        <IconSettings />
-      </button>
 
       <div ref="glassTriggerRef" class="glass-controller-wrap">
         <button
@@ -1012,7 +510,9 @@ onBeforeUnmount(() => {
             <header class="glass-controller-panel__header">
               <div>
                 <strong>磨砂效果</strong>
-                <span>同步调节 Topbar 与简约模式右下角模块</span>
+                <span>{{
+                  props.embedded ? '同步调节卡片磨砂效果' : '同步调节 Topbar 与简约模式右下角模块'
+                }}</span>
               </div>
               <button type="button" aria-label="关闭" title="关闭" @click="closeGlassPanel">
                 <IconX />
@@ -1020,12 +520,16 @@ onBeforeUnmount(() => {
             </header>
 
             <label class="glass-controller-field">
-              <span>模糊强度 <em>{{ glassSettings.blur }}px</em></span>
+              <span
+                >模糊强度 <em>{{ glassSettings.blur }}px</em></span
+              >
               <input v-model.number="glassSettings.blur" type="range" min="0" max="40" step="1" />
             </label>
 
             <label class="glass-controller-field">
-              <span>饱和度 <em>{{ glassSettings.saturate.toFixed(2) }}</em></span>
+              <span
+                >饱和度 <em>{{ glassSettings.saturate.toFixed(2) }}</em></span
+              >
               <input
                 v-model.number="glassSettings.saturate"
                 type="range"
@@ -1036,7 +540,9 @@ onBeforeUnmount(() => {
             </label>
 
             <label class="glass-controller-field">
-              <span>底色透明度 <em>{{ glassSettings.baseOpacity.toFixed(2) }}</em></span>
+              <span
+                >底色透明度 <em>{{ glassSettings.baseOpacity.toFixed(2) }}</em></span
+              >
               <input
                 v-model.number="glassSettings.baseOpacity"
                 type="range"
@@ -1047,7 +553,9 @@ onBeforeUnmount(() => {
             </label>
 
             <label class="glass-controller-field">
-              <span>高光强度 <em>{{ glassSettings.highlightOpacity.toFixed(2) }}</em></span>
+              <span
+                >高光强度 <em>{{ glassSettings.highlightOpacity.toFixed(2) }}</em></span
+              >
               <input
                 v-model.number="glassSettings.highlightOpacity"
                 type="range"
@@ -1058,7 +566,9 @@ onBeforeUnmount(() => {
             </label>
 
             <label class="glass-controller-field">
-              <span>渐变起点 <em>{{ glassSettings.gradientStart.toFixed(2) }}</em></span>
+              <span
+                >渐变起点 <em>{{ glassSettings.gradientStart.toFixed(2) }}</em></span
+              >
               <input
                 v-model.number="glassSettings.gradientStart"
                 type="range"
@@ -1069,7 +579,9 @@ onBeforeUnmount(() => {
             </label>
 
             <label class="glass-controller-field">
-              <span>渐变终点 <em>{{ glassSettings.gradientEnd.toFixed(2) }}</em></span>
+              <span
+                >渐变终点 <em>{{ glassSettings.gradientEnd.toFixed(2) }}</em></span
+              >
               <input
                 v-model.number="glassSettings.gradientEnd"
                 type="range"
@@ -1080,7 +592,9 @@ onBeforeUnmount(() => {
             </label>
 
             <label class="glass-controller-field">
-              <span>边框透明度 <em>{{ glassSettings.borderOpacity.toFixed(2) }}</em></span>
+              <span
+                >边框透明度 <em>{{ glassSettings.borderOpacity.toFixed(2) }}</em></span
+              >
               <input
                 v-model.number="glassSettings.borderOpacity"
                 type="range"
@@ -1097,7 +611,7 @@ onBeforeUnmount(() => {
         </Transition>
       </Teleport>
 
-      <div ref="userMenuPanelRef" class="user-menu-wrap">
+      <div v-if="!props.embedded" ref="userMenuPanelRef" class="user-menu-wrap">
         <button
           class="user-chip"
           type="button"
@@ -1121,6 +635,7 @@ onBeforeUnmount(() => {
             class="user-menu-panel"
             aria-label="个人中心"
           >
+            <span class="user-menu-panel__arrow" aria-hidden="true" />
             <header class="user-menu-panel__header">
               <img :src="avatarUrl" alt="" />
               <div>
@@ -1203,14 +718,123 @@ onBeforeUnmount(() => {
   outline-offset: 3px;
 }
 
-.notification-wrap,
 .user-menu-wrap,
+.settings-menu-wrap,
 .glass-controller-wrap {
   position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
+}
+
+.settings-menu-panel {
+  --settings-menu-arrow-center: 31px;
+  position: absolute;
+  top: calc(100% + 12px);
+  right: 0;
+  width: min(220px, calc(100vw - 28px));
+  box-sizing: border-box;
+  border: 1px solid rgba(226, 232, 240, 0.92);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(24px);
+  box-shadow:
+    0 26px 58px -28px rgba(15, 23, 42, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
+  padding: 6px;
+  z-index: 30;
+}
+
+.settings-menu-panel.is-portal {
+  position: fixed;
+  z-index: 120;
+}
+
+.settings-menu-panel__arrow {
+  position: absolute;
+  top: -11px;
+  right: calc(var(--settings-menu-arrow-center) - 11px);
+  width: 22px;
+  height: 11px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.settings-menu-panel__arrow::before {
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  width: 16px;
+  height: 16px;
+  border: 1px solid rgba(226, 232, 240, 0.92);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.82);
+  transform: translateX(-50%) rotate(45deg);
+  content: '';
+}
+
+.settings-menu-item {
+  width: 100%;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #0f172a;
+  padding: 10px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease;
+}
+
+.settings-menu-item:hover:not(:disabled),
+.settings-menu-item:focus-visible {
+  background: rgba(241, 245, 249, 0.92);
+  color: #1d4ed8;
+  outline: none;
+}
+
+.settings-menu-item:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.settings-menu-item svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.settings-menu-item svg.is-spinning {
+  animation: settings-menu-spin 0.8s linear infinite;
+}
+
+@keyframes settings-menu-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.settings-menu-popover-enter-active,
+.settings-menu-popover-leave-active {
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.settings-menu-popover-enter-from,
+.settings-menu-popover-leave-to {
+  opacity: 0;
+  transform: translateY(-6px) scale(0.98);
 }
 
 .glass-controller-panel {
@@ -1346,493 +970,8 @@ onBeforeUnmount(() => {
   transform: translateY(-6px) scale(0.98);
 }
 
-.icon-button.has-badge span {
-  position: absolute;
-  top: -5px;
-  right: -5px;
-  min-width: 18px;
-  height: 18px;
-  box-sizing: border-box;
-  border: 2px solid #ffffff;
-  border-radius: 999px;
-  background: #ef4444;
-  color: #ffffff;
-  padding: 0 5px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  font-weight: 900;
-  line-height: 1;
-}
-
-.notification-panel {
-  position: absolute;
-  top: calc(100% + 14px);
-  right: -104px;
-  width: min(420px, calc(100vw - 28px));
-  box-sizing: border-box;
-  border: 1px solid rgba(226, 232, 240, 0.92);
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(24px);
-  box-shadow:
-    0 26px 58px -28px rgba(15, 23, 42, 0.45),
-    inset 0 1px 0 rgba(255, 255, 255, 0.82);
-  padding: 14px;
-  z-index: 30;
-}
-
-.notification-panel::before {
-  position: absolute;
-  top: -7px;
-  right: 116px;
-  width: 14px;
-  height: 14px;
-  border-top: 1px solid rgba(226, 232, 240, 0.92);
-  border-left: 1px solid rgba(226, 232, 240, 0.92);
-  background: rgba(255, 255, 255, 0.92);
-  transform: rotate(45deg);
-  content: '';
-}
-
-.notification-panel__header {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-start;
-  gap: 8px;
-  padding: 2px 2px 12px;
-}
-
-.notification-panel__header div {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.notification-panel__header strong {
-  color: #0f172a;
-  font-size: 16px;
-  line-height: 1.2;
-  font-weight: 900;
-}
-
-.notification-panel__header span {
-  color: #64748b;
-  font-size: 12px;
-  line-height: 1.2;
-  font-weight: 800;
-}
-
-.notification-panel__header button {
-  width: 30px;
-  height: 30px;
-  border: 0;
-  border-radius: 999px;
-  background: rgba(241, 245, 249, 0.92);
-  color: #64748b;
-  cursor: pointer;
-  font: inherit;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition:
-    background 0.18s ease,
-    color 0.18s ease,
-    transform 0.18s ease;
-}
-
-.notification-panel__header button:hover {
-  background: #e2e8f0;
-  color: #0f172a;
-  transform: translateY(-1px);
-}
-
-.notification-panel__header button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-  transform: none;
-}
-
-.notification-panel__header button svg {
-  width: 16px;
-  height: 16px;
-}
-
-.notification-tabs,
-.notification-filter {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-}
-
-.notification-tabs {
-  gap: 6px;
-  margin-bottom: 10px;
-  border-radius: 14px;
-  background: rgba(241, 245, 249, 0.78);
-  padding: 4px;
-}
-
-.notification-tabs button,
-.notification-filter button {
-  border: 0;
-  font: inherit;
-  cursor: pointer;
-  transition:
-    background 0.18s ease,
-    color 0.18s ease,
-    box-shadow 0.18s ease;
-}
-
-.notification-tabs button {
-  min-width: 0;
-  min-height: 34px;
-  flex: 1 1 0;
-  border-radius: 11px;
-  background: transparent;
-  color: #64748b;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  font-size: 12px;
-  line-height: 1;
-  font-weight: 850;
-}
-
-.notification-tabs button.active {
-  background: rgba(255, 255, 255, 0.94);
-  color: #0f172a;
-  box-shadow: 0 8px 16px -14px rgba(15, 23, 42, 0.48);
-}
-
-.notification-tabs button span {
-  min-width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  background: rgba(226, 232, 240, 0.88);
-  color: #475569;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  font-weight: 900;
-}
-
-.notification-tabs button.active span {
-  background: rgba(219, 234, 254, 0.92);
-  color: #1d4ed8;
-}
-
-.notification-filter {
-  gap: 4px;
-  margin: 0 0 10px;
-}
-
-.notification-filter button {
-  min-height: 28px;
-  border-radius: 999px;
-  background: transparent;
-  color: #64748b;
-  padding: 0 10px;
-  font-size: 12px;
-  line-height: 1;
-  font-weight: 850;
-}
-
-.notification-filter button.active {
-  background: rgba(219, 234, 254, 0.88);
-  color: #1d4ed8;
-}
-
-.notification-list {
-  position: relative;
-  z-index: 1;
-  max-height: min(430px, calc(100vh - 150px));
-  overflow: auto;
-  padding-right: 2px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.notification-item {
-  position: relative;
-  border: 1px solid rgba(226, 232, 240, 0.82);
-  border-radius: 16px;
-  background: rgba(248, 250, 252, 0.74);
-  padding: 12px 12px 12px 34px;
-  display: flex;
-  gap: 10px;
-  transition:
-    border-color 0.18s ease,
-    background 0.18s ease,
-    box-shadow 0.18s ease;
-}
-
-.notification-item:hover {
-  border-color: rgba(191, 219, 254, 0.96);
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
-}
-
-.notification-item.is-unread {
-  background: linear-gradient(135deg, rgba(239, 246, 255, 0.95), rgba(255, 255, 255, 0.92));
-}
-
-.notification-item__marker {
-  position: absolute;
-  top: 17px;
-  left: 14px;
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  box-shadow: 0 0 0 4px rgba(226, 232, 240, 0.74);
-}
-
-.notification-item__marker.is-blue {
-  background: #2563eb;
-  box-shadow: 0 0 0 4px rgba(191, 219, 254, 0.78);
-}
-
-.notification-item__marker.is-green {
-  background: #10b981;
-  box-shadow: 0 0 0 4px rgba(187, 247, 208, 0.72);
-}
-
-.notification-item__marker.is-amber {
-  background: #f59e0b;
-  box-shadow: 0 0 0 4px rgba(254, 240, 138, 0.7);
-}
-
-.notification-item__content {
-  min-width: 0;
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.notification-item__title-row {
-  min-width: 0;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.notification-item__title-row strong {
-  min-width: 0;
-  overflow: hidden;
-  color: #0f172a;
-  font-size: 13px;
-  line-height: 1.25;
-  font-weight: 900;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.notification-item__title-row time {
-  flex: 0 0 auto;
-  color: #94a3b8;
-  font-size: 11px;
-  line-height: 1.35;
-  font-weight: 800;
-}
-
-.notification-item p {
-  display: -webkit-box;
-  overflow: hidden;
-  margin: 0;
-  color: #475569;
-  font-size: 12px;
-  line-height: 1.55;
-  font-weight: 700;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.notification-item__meta-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.notification-item__meta-row span {
-  align-self: flex-start;
-  border-radius: 999px;
-  background: rgba(241, 245, 249, 0.92);
-  color: #64748b;
-  font-size: 11px;
-  line-height: 1;
-  font-weight: 850;
-  padding: 6px 8px;
-}
-
-.notification-error {
-  margin: 0 2px 8px;
-  border-radius: 12px;
-  background: rgba(254, 226, 226, 0.72);
-  color: #b91c1c;
-  font-size: 12px;
-  line-height: 1.45;
-  font-weight: 750;
-  padding: 8px 10px;
-}
-
-.notification-empty {
-  margin: 0;
-  border: 1px dashed rgba(226, 232, 240, 0.92);
-  border-radius: 14px;
-  background: rgba(248, 250, 252, 0.72);
-  color: #64748b;
-  font-size: 12px;
-  line-height: 1.5;
-  font-weight: 750;
-  padding: 18px 14px;
-  text-align: center;
-}
-
-.notification-item__actions,
-.notification-item__form-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.notification-item__actions {
-  margin-top: 2px;
-}
-
-.notification-item__form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 4px;
-  overflow: visible;
-}
-
-.notification-input {
-  width: 100%;
-  min-width: 0;
-  min-height: 34px;
-  border: 1px solid rgba(226, 232, 240, 0.92);
-  border-radius: 10px;
-  background: #ffffff;
-  color: #0f172a;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  padding: 0 10px;
-}
-
-.notification-input:focus-visible {
-  outline: 2px solid rgba(37, 99, 235, 0.28);
-  outline-offset: 2px;
-}
-
-.action-btn {
-  border: 0;
-  border-radius: 999px;
-  background: rgba(241, 245, 249, 0.92);
-  color: #334155;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 850;
-  line-height: 1;
-  padding: 7px 10px;
-  cursor: pointer;
-  transition:
-    background 0.18s ease,
-    color 0.18s ease,
-    transform 0.18s ease;
-}
-
-.action-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-}
-
-.action-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.58;
-}
-
-.action-btn.is-accept {
-  background: rgba(220, 252, 231, 0.92);
-  color: #047857;
-}
-
-.action-btn.is-reject {
-  background: rgba(254, 226, 226, 0.92);
-  color: #b91c1c;
-}
-
-.action-btn.is-view,
-.action-btn.is-muted {
-  background: rgba(241, 245, 249, 0.92);
-  color: #64748b;
-}
-
-.action-btn.has-icon {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.action-btn.has-icon svg {
-  width: 13px;
-  height: 13px;
-  flex: 0 0 auto;
-}
-
-.notification-load-more {
-  min-height: 34px;
-  border: 1px dashed rgba(203, 213, 225, 0.92);
-  border-radius: 12px;
-  background: rgba(248, 250, 252, 0.72);
-  color: #475569;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 850;
-  cursor: pointer;
-  transition:
-    border-color 0.18s ease,
-    background 0.18s ease,
-    color 0.18s ease;
-}
-
-.notification-load-more:hover:not(:disabled) {
-  border-color: rgba(147, 197, 253, 0.9);
-  background: rgba(239, 246, 255, 0.82);
-  color: #1d4ed8;
-}
-
-.notification-load-more:disabled {
-  cursor: not-allowed;
-  opacity: 0.58;
-}
-
-.notification-popover-enter-active,
-.notification-popover-leave-active {
-  transition:
-    opacity 0.18s ease,
-    transform 0.18s ease;
-}
-
-.notification-popover-enter-from,
-.notification-popover-leave-to {
-  opacity: 0;
-  transform: translateY(-6px) scale(0.98);
-}
-
 .user-menu-panel {
+  --user-menu-arrow-center: 31px;
   position: absolute;
   top: calc(100% + 14px);
   right: 0;
@@ -1849,16 +988,75 @@ onBeforeUnmount(() => {
   z-index: 30;
 }
 
-.user-menu-panel::before {
+.user-menu-panel.is-scoped-portal {
+  top: auto;
+  right: auto;
+  left: auto;
+  z-index: 12;
+  overflow: visible;
+  border: 1px solid rgba(255, 255, 255, var(--glass-border-opacity, 0.58));
+  background: radial-gradient(
+      circle at 22% 20%,
+      rgba(255, 255, 255, var(--glass-highlight-opacity, 0.62)),
+      rgba(255, 255, 255, 0) 34%
+    ),
+    linear-gradient(
+      145deg,
+      rgba(255, 255, 255, var(--glass-gradient-start, 0.24)),
+      rgba(238, 246, 255, var(--glass-gradient-end, 0.16))
+    ),
+    rgba(248, 252, 255, calc(var(--glass-base-opacity, 0.18) + 0.04));
+  backdrop-filter: blur(calc(var(--glass-blur, 24px) + 4px))
+    saturate(calc(var(--glass-saturate, 1.16) + 0.12));
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur, 24px) + 4px))
+    saturate(calc(var(--glass-saturate, 1.16) + 0.12));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.68),
+    0 20px 36px -24px rgba(15, 23, 42, 0.24);
+}
+
+.user-menu-panel.is-scoped-portal .user-menu-panel__arrow::before {
+  border-color: rgba(255, 255, 255, var(--glass-border-opacity, 0.64));
+  background: rgba(248, 252, 255, calc(var(--glass-base-opacity, 0.18) + 0.34));
+  backdrop-filter: blur(var(--glass-blur, 24px));
+  -webkit-backdrop-filter: blur(var(--glass-blur, 24px));
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.72),
+    0 -2px 6px -4px rgba(15, 23, 42, 0.12);
+}
+
+.user-menu-panel.is-scoped-portal .user-menu-panel__header,
+.user-menu-panel.is-scoped-portal .user-menu-panel__logout {
+  position: relative;
+  z-index: 1;
+  background: inherit;
+}
+
+.user-menu-panel.is-scoped-portal .user-menu-panel__header {
+  border-radius: 18px 18px 0 0;
+}
+
+.user-menu-panel__arrow {
   position: absolute;
-  top: -7px;
-  right: 24px;
-  width: 14px;
-  height: 14px;
-  border-top: 1px solid rgba(226, 232, 240, 0.92);
-  border-left: 1px solid rgba(226, 232, 240, 0.92);
+  top: -11px;
+  right: calc(var(--user-menu-arrow-center) - 11px);
+  width: 22px;
+  height: 11px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.user-menu-panel__arrow::before {
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  width: 16px;
+  height: 16px;
+  border: 1px solid rgba(226, 232, 240, 0.92);
   background: rgba(255, 255, 255, 0.92);
-  transform: rotate(45deg);
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.82);
+  transform: translateX(-50%) rotate(45deg);
   content: '';
 }
 
@@ -1996,12 +1194,9 @@ onBeforeUnmount(() => {
   }
 
   .notification-panel {
+    --notification-arrow-center: 151px;
     right: -132px;
     border-radius: 18px;
-  }
-
-  .notification-panel::before {
-    right: 144px;
   }
 
   .user-chip {
@@ -2024,8 +1219,7 @@ onBeforeUnmount(() => {
   position: relative;
   z-index: 60;
   box-sizing: border-box;
-  border: 1px solid rgba(255, 255, 255, var(--glass-border-opacity, 0.64));
-  border-radius: 20px;
+  border-radius: 16px;
   background: radial-gradient(
       circle at 22% 20%,
       rgba(255, 255, 255, var(--glass-highlight-opacity, 0.7)),
@@ -2037,25 +1231,166 @@ onBeforeUnmount(() => {
       rgba(238, 246, 255, var(--glass-gradient-end, 0.2))
     ),
     rgba(248, 252, 255, var(--glass-base-opacity, 0.18));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.72),
-    0 20px 36px -30px rgba(18, 38, 72, 0.4);
+ 
   backdrop-filter: blur(var(--glass-blur, 24px)) saturate(var(--glass-saturate, 1.16));
   -webkit-backdrop-filter: blur(var(--glass-blur, 24px)) saturate(var(--glass-saturate, 1.16));
   justify-content: space-between;
   width: calc(100% - clamp(48px, 3.8vw, 76px));
   height: 60px;
   min-height: 60px;
-  margin: 14px auto 0;
-  padding: 0 24px;
+  margin: 8px auto 0;
+  padding: 5px 24px;
   display: grid;
-  grid-template-columns: minmax(270px, 0.78fr) minmax(560px, auto) minmax(270px, 0.78fr);
+  grid-template-columns: minmax(270px, 1fr) auto;
   align-items: center;
   gap: 18px;
 }
 
-.dashboard-topbar.without-tools {
-  grid-template-columns: minmax(270px, 1fr) auto;
+.dashboard-topbar.is-embedded.notification-open,
+.dashboard-topbar.is-embedded.user-menu-open {
+  z-index: 13;
+}
+
+.dashboard-topbar.is-embedded {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 2px 4px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  overflow: visible;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.embedded-profile-wrap {
+  position: relative;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  z-index: 1;
+}
+
+.embedded-profile-wrap.is-open .embedded-profile img {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.94),
+    0 0 0 2px rgba(67, 139, 255, 0.18),
+    0 10px 22px -14px rgba(67, 139, 255, 0.42);
+}
+
+.embedded-profile {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.embedded-profile:hover,
+.embedded-profile:focus-visible {
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.embedded-profile img {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  object-fit: cover;
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.84);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.94),
+    0 10px 22px -18px rgba(15, 32, 61, 0.42);
+}
+
+.embedded-profile span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.embedded-profile strong {
+  color: #101936;
+  font-size: 15px;
+  line-height: 1.1;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.embedded-profile em {
+  color: rgba(67, 82, 113, 0.82);
+  font-size: 12px;
+  line-height: 1;
+  font-style: normal;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.embedded-mode-toggle {
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.58);
+  padding: 3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+.embedded-mode-toggle button {
+  height: 30px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #60708d;
+  padding: 0 14px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.embedded-mode-toggle button.active {
+  background: linear-gradient(180deg, #5a9bff 0%, #438bff 100%);
+  color: #ffffff;
+  box-shadow:
+    0 8px 18px -10px rgba(67, 139, 255, 0.88),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.embedded-mode-toggle button:not(.active):hover {
+  color: #2f7cff;
+}
+
+.topbar-actions.is-embedded-actions {
+  gap: 8px;
+  padding-right: 0;
 }
 
 .brand-block {
@@ -2182,12 +1517,24 @@ onBeforeUnmount(() => {
   height: 15px;
 }
 
-@media (max-width: 1280px) {
-  .dashboard-topbar {
-    grid-template-columns: minmax(220px, 0.7fr) minmax(0, 1fr) auto;
+@media (max-width: 760px) {
+  .dashboard-topbar.is-embedded {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
   }
 
-  .dashboard-topbar.without-tools {
+  .embedded-mode-toggle {
+    grid-column: 1 / -1;
+    justify-self: center;
+  }
+
+  .embedded-profile em {
+    display: none;
+  }
+}
+
+@media (max-width: 1280px) {
+  .dashboard-topbar {
     grid-template-columns: minmax(220px, 1fr) auto;
   }
 
@@ -2217,7 +1564,7 @@ onBeforeUnmount(() => {
     height: 60px;
     min-height: 60px;
     margin-top: 10px;
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     padding: 0 14px;
   }
 

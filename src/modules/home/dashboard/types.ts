@@ -28,6 +28,10 @@ export interface CalendarEvent {
   completable?: boolean
   backendStatus?: 0 | 3 | 6 | 9 | 99
   receiveStatus?: number
+  timeType?: 1 | 2
+  startDateShow?: string
+  endDateShow?: string
+  handlerName?: string
   handleDesc?: string
   currentHandlerId?: string
   handlerIds?: string
@@ -41,6 +45,8 @@ export interface CalendarTodoDraft {
   time?: string
   endTime?: string
   title: string
+  /** 一句话 AI 解析时的用户原话，创建时作为接口 title 传递 */
+  aiPrompt?: string
   owner?: string
   source?: string
   assigneeId?: string

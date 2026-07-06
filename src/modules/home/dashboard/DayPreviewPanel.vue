@@ -53,6 +53,7 @@ const props = defineProps<{
   currentUser: CalendarUser
   assignableUsers: CalendarUser[]
   showClose?: boolean
+  formOnly?: boolean
   quickCreatePrompt?: string
   quickCreateKey?: number
   externalDraft?: CalendarTodoDraft | null
@@ -76,6 +77,7 @@ const statusFilter = ref<TodoStatusFilter>('all')
 const typeFilter = ref<TodoTypeFilter>('all')
 const editingId = ref('')
 const aiPrompt = ref('')
+const aiParsedOriginalText = ref('')
 const isParsing = ref(false)
 const highlightedFields = ref<Set<ParsedHighlightField>>(new Set())
 const todoForm = ref<CalendarTodoForm>(createEmptyForm(props.date))
@@ -156,7 +158,10 @@ watch(
 watch(
   () => props.quickCreateKey,
   async () => {
-    if (!props.quickCreatePrompt?.trim()) return
+    if (!props.quickCreatePrompt?.trim()) {
+      if (props.formOnly) beginCreateForm()
+      return
+    }
 
     beginCreateForm()
     aiPrompt.value = props.quickCreatePrompt
@@ -339,6 +344,7 @@ function resetFormState() {
   const nextForm = createEmptyForm(props.date)
   editingId.value = ''
   aiPrompt.value = ''
+  aiParsedOriginalText.value = ''
   isParsing.value = false
   todoForm.value = nextForm
   syncFormSnapshot(nextForm)
@@ -355,6 +361,7 @@ function beginCreateForm(overrides: Partial<CalendarTodoForm> = {}) {
   }
   editingId.value = ''
   aiPrompt.value = ''
+  aiParsedOriginalText.value = ''
   isParsing.value = false
   todoForm.value = nextForm
   syncFormSnapshot(nextForm)
@@ -407,6 +414,7 @@ async function beginViewForm(event: CalendarEvent) {
   const nextForm = createFormFromEvent(detailEvent)
   editingId.value = detailEvent.id
   aiPrompt.value = ''
+  aiParsedOriginalText.value = ''
   isParsing.value = false
   todoForm.value = nextForm
   syncFormSnapshot(nextForm)
@@ -427,6 +435,7 @@ async function beginEditForm(event: CalendarEvent) {
   const nextForm = createFormFromEvent(detailEvent)
   editingId.value = detailEvent.id
   aiPrompt.value = ''
+  aiParsedOriginalText.value = ''
   isParsing.value = false
   todoForm.value = nextForm
   syncFormSnapshot(nextForm)
@@ -435,6 +444,11 @@ async function beginEditForm(event: CalendarEvent) {
 }
 
 function requestCancelForm() {
+  if (props.formOnly) {
+    requestClosePanel()
+    return
+  }
+
   if (!confirmDiscardChanges(resetFormState)) return
   resetFormState()
 }
@@ -473,6 +487,7 @@ async function parseTodoText() {
       endTime: parsed.endTime ?? todoForm.value.endTime,
     }
     todoForm.value = nextForm
+    aiParsedOriginalText.value = aiPrompt.value.trim()
     triggerParsedHighlights(previousForm, nextForm)
   } catch (error) {
     emit('notify', error instanceof Error ? error.message : 'AI 解析待办失败，请稍后重试', 'error')
@@ -631,6 +646,7 @@ function submitTodo() {
       time: payload.time || undefined,
       endTime: payload.mode === 'deadline' ? payload.endTime || undefined : undefined,
       title: payload.title,
+      aiPrompt: aiParsedOriginalText.value || undefined,
       owner: payload.owner,
       source: payload.source,
       assigneeId: payload.assigneeId,
@@ -693,9 +709,9 @@ defineExpose({
         <button
           v-if="showClose"
           class="close-btn"
-          :class="{ 'is-back': isFormMode }"
+          :class="{ 'is-back': isFormMode && !formOnly }"
           type="button"
-          :aria-label="isFormMode ? '返回待办列表' : '关闭当天待办'"
+          :aria-label="isFormMode && !formOnly ? '返回待办列表' : '关闭'"
           @click="isFormMode ? requestCancelForm() : requestClosePanel()"
         >
           <IconArrowLeft v-if="isFormMode" aria-hidden="true" />
@@ -946,6 +962,7 @@ defineExpose({
         class="inline-section ai-inline-section"
         :class="{ 'is-parsing': isParsing }"
         :aria-busy="isParsing"
+        data-tour-target="todo-ai-parser"
       >
         <label class="field field-full">
           <span>一句话创建待办</span>
@@ -981,6 +998,7 @@ defineExpose({
         class="inline-section todo-details-section"
         :class="{ 'is-readonly': isViewMode }"
         :aria-disabled="isFormReadonly"
+        data-tour-target="todo-detail-fields"
       >
         <div class="basic-info-layout" :inert="isFormReadonly">
           <div class="basic-info-columns">
@@ -1137,7 +1155,7 @@ defineExpose({
         </div>
       </section>
 
-      <div class="form-actions">
+      <div class="form-actions" data-tour-target="todo-save-actions">
         <template v-if="isViewMode">
           <Button type="button" @click="requestCancelForm">返回</Button>
         </template>

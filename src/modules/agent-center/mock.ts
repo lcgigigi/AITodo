@@ -1,4 +1,5 @@
 import type { AgentCatalogItem, AgentCategory, SkillCatalogItem, SkillCategory } from './types'
+import { agentLaunchUrls } from './links'
 
 export const agentCategories: AgentCategory[] = ['文字', '办公', '创作', '研发', '生活']
 
@@ -21,6 +22,7 @@ export const agents: AgentCatalogItem[] = [
     theme: 'blue',
     permissionState: 'available',
     scenarios: ['制度查询', '流程入口定位', '新人入职问答'],
+    launchUrl: agentLaunchUrls['policy-qa'],
     recommended: true,
   },
   {
@@ -33,6 +35,7 @@ export const agents: AgentCatalogItem[] = [
     theme: 'orange',
     permissionState: 'available',
     scenarios: ['素材审阅', '图片内容摘要', '竞品图文拆解'],
+    launchUrl: agentLaunchUrls['image-analysis'],
   },
   {
     id: 'agent-meeting-notes',
@@ -44,17 +47,19 @@ export const agents: AgentCatalogItem[] = [
     theme: 'green',
     permissionState: 'available',
     scenarios: ['周会纪要', '项目复盘', '行动项拆解'],
+    launchUrl: agentLaunchUrls['meeting-notes'],
   },
   {
     id: 'agent-ppt-creator',
     key: 'ppt-creator',
-    name: 'PPT创作',
+    name: '智能PPT',
     description: 'AI 一键生成演示文稿，快速完成汇报结构与页面文案。',
     category: '创作',
     icon: 'P',
     theme: 'purple',
     permissionState: 'available',
     scenarios: ['经营汇报', '项目复盘', '客户方案初稿'],
+    launchUrl: agentLaunchUrls['ppt-creator'],
     recommended: true,
   },
   {
@@ -65,8 +70,9 @@ export const agents: AgentCatalogItem[] = [
     category: '研发',
     icon: '坊',
     theme: 'violet',
-    permissionState: 'locked',
+    permissionState: 'available',
     scenarios: ['智能体搭建', '流程编排', '能力调试'],
+    launchUrl: agentLaunchUrls['agent-workshop'],
   },
   {
     id: 'agent-code-assistant',
@@ -76,19 +82,33 @@ export const agents: AgentCatalogItem[] = [
     category: '研发',
     icon: '</>',
     theme: 'cyan',
-    permissionState: 'locked',
+    permissionState: 'available',
     scenarios: ['组件开发', '接口联调', '代码审查辅助'],
+    launchUrl: agentLaunchUrls['code-assistant'],
+  },
+  {
+    id: 'agent-interview-center',
+    key: 'interview-center',
+    name: '面试中心',
+    description: '统一进入招聘面试流程，支持候选人信息与面试安排管理。',
+    category: '办公',
+    icon: '面',
+    theme: 'blue',
+    permissionState: 'available',
+    scenarios: ['面试安排', '候选人管理', '招聘协同'],
+    launchUrl: agentLaunchUrls['interview-center'],
   },
   {
     id: 'agent-compliance-assistant',
     key: 'compliance-assistant',
-    name: '合规助手',
+    name: '合规检查',
     description: '政策法规解读与合规检查，降低业务风险，保障合规运营。',
     category: '办公',
     icon: '盾',
     theme: 'indigo',
-    permissionState: 'locked',
+    permissionState: 'available',
     scenarios: ['政策解读', '合规检查', '风险提示'],
+    launchUrl: agentLaunchUrls['compliance-assistant'],
   },
 ]
 
