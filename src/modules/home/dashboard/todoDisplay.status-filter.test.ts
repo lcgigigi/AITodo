@@ -3,6 +3,7 @@ import type { CalendarEvent } from './types'
 import {
   isCompletedTodoEvent,
   isOtherStatusTodoEvent,
+  isPendingDetailStatusEvent,
   isPendingProcessTodoEvent,
   matchesDetailStatusFilter,
 } from './todoDisplay'
@@ -32,17 +33,24 @@ describe('detail status filters', () => {
     expect(isOtherStatusTodoEvent(event({ backendStatus: 0 }))).toBe(false)
   })
 
-  it('matches the four filter tabs without overlap', () => {
+  it('groups pending acceptance into pending detail status', () => {
+    expect(isPendingDetailStatusEvent(event({ receiveStatus: 2 }))).toBe(true)
+    expect(isPendingDetailStatusEvent(event({ backendStatus: 9 }))).toBe(false)
+  })
+
+  it('matches the status sub-filters without overlap', () => {
     const pending = event({ backendStatus: 0 })
     const accepted = event({ backendStatus: 3, receiveStatus: 1 })
+    const waiting = event({ receiveStatus: 2 })
     const done = event({ backendStatus: 6, status: 'done' })
     const rejected = event({ backendStatus: 9 })
 
     expect(matchesDetailStatusFilter(pending, 'pending')).toBe(true)
     expect(matchesDetailStatusFilter(accepted, 'pending')).toBe(true)
+    expect(matchesDetailStatusFilter(waiting, 'pending')).toBe(true)
     expect(matchesDetailStatusFilter(done, 'done')).toBe(true)
     expect(isCompletedTodoEvent(done)).toBe(true)
-    expect(matchesDetailStatusFilter(rejected, 'other')).toBe(true)
+    expect(matchesDetailStatusFilter(rejected, 'rejected')).toBe(true)
     expect(matchesDetailStatusFilter(pending, 'all')).toBe(true)
   })
 })

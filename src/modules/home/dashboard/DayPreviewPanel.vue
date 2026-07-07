@@ -60,6 +60,7 @@ const props = defineProps<{
   externalDraftKey?: number
   presetCreateTime?: string
   presetCreateKey?: number
+  statusUpdatingIds?: Set<string>
 }>()
 
 const emit = defineEmits<{
@@ -288,6 +289,10 @@ function hideDeleteWarning() {
 
 function canDeleteEvent(event: CalendarEvent) {
   return Boolean(event.editable)
+}
+
+function isStatusUpdating(id: string) {
+  return props.statusUpdatingIds?.has(id) ?? false
 }
 
 function showDiscardWarning(onConfirm?: () => void) {
@@ -673,7 +678,7 @@ function confirmDeleteWarning() {
 }
 
 function toggleStatus(event: CalendarEvent) {
-  if (!event.completable) return
+  if (!event.completable || isStatusUpdating(event.id)) return
   emit('updateStatus', event.id, event.status === 'done' ? 'todo' : 'done')
 }
 
@@ -884,11 +889,22 @@ defineExpose({
                 v-if="event.completable"
                 class="status-toggle"
                 type="button"
-                :class="{ 'is-done': event.status === 'done' }"
+                :class="{
+                  'is-done': event.status === 'done',
+                  'is-syncing': isStatusUpdating(event.id),
+                }"
+                :disabled="isStatusUpdating(event.id)"
+                :aria-busy="isStatusUpdating(event.id)"
                 @click.stop="toggleStatus(event)"
               >
                 <span aria-hidden="true">{{ event.status === 'done' ? '✓' : '' }}</span>
-                {{ event.status === 'done' ? '撤销' : '完成' }}
+                {{
+                  isStatusUpdating(event.id)
+                    ? '处理中...'
+                    : event.status === 'done'
+                      ? '撤销'
+                      : '完成'
+                }}
               </button>
               <button
                 v-if="shouldOpenViewForm(event)"
@@ -1551,6 +1567,17 @@ defineExpose({
   color: #111827;
 }
 
+.item-actions button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.item-actions button:disabled:hover {
+  border-color: #e5edf6;
+  background: #ffffff;
+  color: #475569;
+}
+
 .add-btn:hover,
 .form-actions button[type='submit']:not(:disabled):hover,
 .ai-inline-row button:not(:disabled):hover {
@@ -1905,6 +1932,11 @@ p {
 .status-toggle.is-done span {
   border-color: #16a34a;
   background: #16a34a;
+}
+
+.status-toggle.is-syncing span {
+  border-color: #94a3b8;
+  background: #94a3b8;
 }
 
 .edit-action {

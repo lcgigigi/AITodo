@@ -1,4 +1,4 @@
-import { computed, ref, watch } from 'vue'
+import { computed } from 'vue'
 
 export type DashboardGlassSettings = {
   blur: number
@@ -10,40 +10,15 @@ export type DashboardGlassSettings = {
   borderOpacity: number
 }
 
-export const DASHBOARD_GLASS_STORAGE_KEY = 'dashboard-glass-settings'
-const LEGACY_GLASS_STORAGE_KEY = 'dashboard-topbar-glass-settings'
-
-export const DEFAULT_DASHBOARD_GLASS_SETTINGS: DashboardGlassSettings = {
-  blur: 24,
-  saturate: 1.16,
-  baseOpacity: 0.18,
-  highlightOpacity: 0.7,
-  gradientStart: 0.28,
-  gradientEnd: 0.2,
-  borderOpacity: 0.64,
+export const DASHBOARD_GLASS_SETTINGS: DashboardGlassSettings = {
+  blur: 40,
+  saturate: 2,
+  baseOpacity: 0.6,
+  highlightOpacity: 0,
+  gradientStart: 0,
+  gradientEnd: 0,
+  borderOpacity: 0,
 }
-
-function loadDashboardGlassSettings(): DashboardGlassSettings {
-  try {
-    const raw =
-      localStorage.getItem(DASHBOARD_GLASS_STORAGE_KEY) ??
-      localStorage.getItem(LEGACY_GLASS_STORAGE_KEY)
-    if (!raw) return { ...DEFAULT_DASHBOARD_GLASS_SETTINGS }
-    return { ...DEFAULT_DASHBOARD_GLASS_SETTINGS, ...JSON.parse(raw) }
-  } catch {
-    return { ...DEFAULT_DASHBOARD_GLASS_SETTINGS }
-  }
-}
-
-const glassSettings = ref<DashboardGlassSettings>(loadDashboardGlassSettings())
-
-watch(
-  glassSettings,
-  (value) => {
-    localStorage.setItem(DASHBOARD_GLASS_STORAGE_KEY, JSON.stringify(value))
-  },
-  { deep: true },
-)
 
 export function buildDashboardGlassStyle(settings: DashboardGlassSettings) {
   return {
@@ -57,16 +32,12 @@ export function buildDashboardGlassStyle(settings: DashboardGlassSettings) {
   }
 }
 
-export function useDashboardGlassSettings() {
-  const glassStyle = computed(() => buildDashboardGlassStyle(glassSettings.value))
+const dashboardGlassStyle = buildDashboardGlassStyle(DASHBOARD_GLASS_SETTINGS)
 
-  function resetGlassSettings() {
-    glassSettings.value = { ...DEFAULT_DASHBOARD_GLASS_SETTINGS }
-  }
+export function useDashboardGlassSettings() {
+  const glassStyle = computed(() => dashboardGlassStyle)
 
   return {
-    glassSettings,
     glassStyle,
-    resetGlassSettings,
   }
 }

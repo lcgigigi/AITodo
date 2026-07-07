@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import type { Component } from 'vue'
+import { useRouter } from 'vue-router'
 import IconBuilding2 from '~icons/lucide/building-2'
 import IconCheck from '~icons/lucide/check'
 import IconMail from '~icons/lucide/mail'
@@ -16,6 +17,7 @@ import CalendarWorkspace from './dashboard/CalendarWorkspace.vue'
 import DashboardTopBar from './dashboard/DashboardTopBar.vue'
 import DetailedDashboardWorkspace from './dashboard/DetailedDashboardWorkspace.vue'
 import OnboardingTour from './dashboard/components/OnboardingTour.vue'
+import { navigateDashboardTool, type DashboardToolTarget } from './dashboard/dashboardTools'
 import { getHomeTimePeriod } from './dashboard/homeTimeOfDay'
 import { useHomeClock } from './dashboard/useHomeClock'
 import { ymd } from './dashboard/todoDisplay'
@@ -83,6 +85,7 @@ const isEmailProviderSaving = ref(false)
 const userStore = useUserStore()
 const feedbackStore = useFeedbackStore()
 const dashboardTodosStore = useDashboardTodosStore()
+const router = useRouter()
 const { now } = useHomeClock()
 
 const bgImages = {
@@ -125,6 +128,10 @@ function setHomeViewMode(mode: HomeViewMode) {
   homeViewMode.value = mode
 }
 
+function handleTopbarToolSelect(tool: DashboardToolTarget) {
+  void navigateDashboardTool(router, tool)
+}
+
 function selectEmailProvider(provider: SmartTodoEmailProvider) {
   if (isEmailProviderSaving.value) return
   selectedEmailProvider.value = provider
@@ -156,10 +163,11 @@ async function confirmEmailProvider() {
     <main class="dashboard-shell">
       <DashboardTopBar
         v-if="homeViewMode === 'detail'"
-        hide-notifications
+        show-tool-dock
         @calendar-refresh="handleCalendarRefresh"
         @open-todo="handleOpenTodo"
         @start-onboarding="startOnboardingTour"
+        @select-tool="handleTopbarToolSelect"
       />
       <div class="dashboard-content">
         <KeepAlive>

@@ -1,8 +1,10 @@
 import { defineStore } from 'pinia'
+import defaultUserAvatar from '@/assets/touxiang.png'
 import { storage } from '@/shared/utils/storage'
 
 const TOKEN_STORAGE_KEY = 'ai-workbench:user-token'
 const PROFILE_STORAGE_KEY = 'ai-workbench:user-profile'
+export const DEFAULT_USER_AVATAR = defaultUserAvatar
 
 export interface UserProfile {
   id: string
@@ -18,10 +20,14 @@ export interface UserProfile {
   checkEmail?: string | null
 }
 
+function normalizeUserProfile(profile: UserProfile | null) {
+  return profile ? { ...profile, avatar: DEFAULT_USER_AVATAR } : null
+}
+
 export const useUserStore = defineStore('user', {
   state: () => ({
     token: storage.get(TOKEN_STORAGE_KEY, ''),
-    profile: storage.get<UserProfile | null>(PROFILE_STORAGE_KEY, null),
+    profile: normalizeUserProfile(storage.get<UserProfile | null>(PROFILE_STORAGE_KEY, null)),
   }),
   getters: {
     isLoggedIn: (state) => Boolean(state.token),
@@ -32,8 +38,8 @@ export const useUserStore = defineStore('user', {
       storage.set(TOKEN_STORAGE_KEY, token)
     },
     setProfile(profile: UserProfile) {
-      this.profile = profile
-      storage.set(PROFILE_STORAGE_KEY, profile)
+      this.profile = normalizeUserProfile(profile)
+      storage.set(PROFILE_STORAGE_KEY, this.profile)
     },
     setCheckEmail(checkEmail: string) {
       if (!this.profile) return

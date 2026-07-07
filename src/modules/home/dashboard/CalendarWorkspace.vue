@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import IconBell from '~icons/lucide/bell'
-import IconChevronRight from '~icons/lucide/chevron-right'
+import IconCheck from '~icons/lucide/check'
+import IconLayoutList from '~icons/lucide/layout-list'
 import IconPresentation from '~icons/lucide/presentation'
 import IconSquareCheck from '~icons/lucide/square-check'
 import { routeConfig } from '@/config/route.config'
@@ -12,7 +12,9 @@ import HomePanelToolDock from './components/HomePanelToolDock.vue'
 import TodoQuickCreateBar from './components/TodoQuickCreateBar.vue'
 import DashboardTopBar from './DashboardTopBar.vue'
 import DayPreviewPanel from './DayPreviewPanel.vue'
+import { filterEventsByType, isMeetingEvent, type TodoTypeFilter } from './dayPreviewPanel.helpers'
 import { navigateDashboardTool, type DashboardToolTarget } from './dashboardTools'
+import { resolveHomeGreetingText } from './homeTimeOfDay'
 import { DASHBOARD_ONBOARDING_TOUR_CLOSE_DAY_PREVIEW_EVENT } from './onboardingTour'
 import type {
   CalendarEvent,
@@ -29,19 +31,14 @@ import {
   getTodoWeekRange,
   loadTodoDetail,
   updateTodo as serviceUpdateTodo,
-  updateTodoStatus as serviceUpdateTodoStatus,
 } from './todo.service'
 import { useDashboardTodos } from './useDashboardTodos'
 import { useDashboardGlassSettings } from './useDashboardGlassSettings'
-
-type TodoStatusFilter = 'all' | 'pending' | 'done'
-type TodoTypeFilter = 'all' | 'task' | 'meeting'
 
 type DayPreviewPanelExpose = {
   showDiscardWarning: (onConfirm?: () => void) => void
   openCreateForm: () => void
   openEventDetailById: (id: string) => boolean
-  applyStatusFilter: (filter: TodoStatusFilter) => void
   applyTypeFilter: (filter: TodoTypeFilter) => void
 }
 
@@ -67,6 +64,7 @@ const isDayPreviewFormDirty = ref(false)
 const dayPreviewPanelRef = ref<DayPreviewPanelExpose | null>(null)
 const homeMainPanelRef = ref<HTMLElement | null>(null)
 const calendarViewMode = ref<'month' | 'week'>('month')
+const homeTodoCategoryFilter = ref<TodoTypeFilter>('all')
 const route = useRoute()
 const router = useRouter()
 const feedbackStore = useFeedbackStore()
@@ -74,11 +72,20 @@ const { glassStyle } = useDashboardGlassSettings()
 let clockTimer: ReturnType<typeof setInterval> | undefined
 let isConsumingDesktopTodoText = false
 
-const { assignableUsers, currentUser, eventMap, initializeDashboardTodos, isLoading, refreshTodos } =
-  useDashboardTodos({
-    getLoadRange: getActiveTodoLoadRange,
-    onUnauthorized: redirectToLogin,
-  })
+const {
+  assignableUsers,
+  currentUser,
+  eventMap,
+  initializeDashboardTodos,
+  isTodoStatusUpdating,
+  isLoading,
+  refreshTodos,
+  statusUpdatingIds,
+  updateTodoStatusOptimistically,
+} = useDashboardTodos({
+  getLoadRange: getActiveTodoLoadRange,
+  onUnauthorized: redirectToLogin,
+})
 
 onMounted(() => {
   clockTimer = setInterval(() => {
@@ -187,15 +194,30 @@ const todayDate = computed(() => ymd(now.value))
 const isSelectedToday = computed(() => props.selectedDate === todayDate.value)
 const selectedEvents = computed(() => eventMap.value.get(props.selectedDate) ?? [])
 const selectedSpecialDays = computed(() => specialDayMap.value.get(props.selectedDate) ?? [])
-const selectedDayPreviewTasks = computed(() => [...selectedEvents.value].sort(compareEvents))
-const selectedDayPendingEvents = computed(() =>
-  selectedEvents.value.filter((event) => event.status !== 'done'),
+const selectedDayPreviewTasks = computed(() =>
+  filterEventsByType(
+    [...selectedEvents.value].sort((a, b) => {
+      const aDone = a.status === 'done' ? 1 : 0
+      const bDone = b.status === 'done' ? 1 : 0
+      if (aDone !== bDone) return aDone - bDone
+      return compareEvents(a, b)
+    }),
+    homeTodoCategoryFilter.value,
+  ),
+)
+const selectedDayAllCount = computed(() => selectedEvents.value.length)
+const selectedDayTodoCount = computed(
+  () => selectedEvents.value.filter((event) => !isMeetingEvent(event)).length,
 )
 const selectedDayMeetingCount = computed(
-  () => selectedEvents.value.filter((event) => event.type === 'meeting').length,
+  () => selectedEvents.value.filter((event) => isMeetingEvent(event)).length,
 )
-const selectedDayCompletedCount = computed(
-  () => selectedEvents.value.length - selectedDayPendingEvents.value.length,
+
+watch(
+  () => props.selectedDate,
+  () => {
+    homeTodoCategoryFilter.value = 'all'
+  },
 )
 const currentWeekDates = computed(() => {
   const start = new Date(`${props.selectedDate}T12:00:00`)
@@ -233,6 +255,10 @@ const homeFooterDateLabel = computed(() => {
   const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()]
   return `${date.getMonth() + 1}月${date.getDate()}日 ${weekday}`
 })
+const homeWeekMonthLabel = computed(() => {
+  const date = new Date(`${props.selectedDate}T12:00:00`)
+  return `${date.getMonth() + 1}月`
+})
 const homeMainPanelAriaLabel = computed(() =>
   isSelectedToday.value ? '今日待办' : `${homeFooterDateLabel.value}待办`,
 )
@@ -242,16 +268,34 @@ const homeTodoStatsAriaLabel = computed(() =>
 const homeTodoListAriaLabel = computed(() =>
   isSelectedToday.value ? '今日待办列表' : `${homeFooterDateLabel.value}待办列表`,
 )
-const homeTodoEmptyTitle = computed(() =>
-  isSelectedToday.value ? '今日暂无待办' : `${homeFooterDateLabel.value}暂无待办`,
-)
-const homeCornerClockTime = computed(() => {
-  const pad = (value: number) => String(value).padStart(2, '0')
-  return `${pad(now.value.getHours())}:${pad(now.value.getMinutes())}`
+const homeTodoEmptyTitle = computed(() => {
+  const dateLabel = isSelectedToday.value ? '今日' : homeFooterDateLabel.value
+  if (homeTodoCategoryFilter.value === 'task') {
+    return `${dateLabel}暂无待办事项`
+  }
+  if (homeTodoCategoryFilter.value === 'meeting') {
+    return `${dateLabel}暂无会议信息`
+  }
+  return isSelectedToday.value ? '今日暂无待办' : `${homeFooterDateLabel.value}暂无待办`
 })
-const homeCornerClockDate = computed(() => {
+const homeGreetingText = computed(() => resolveHomeGreetingText(now.value))
+const homeGreetingDisplayName = computed(() =>
+  currentUser.value.name && currentUser.value.name !== '未登录' ? currentUser.value.name : '刘美华',
+)
+const homeGreetingDepartment = computed(() => currentUser.value.department ?? '信息技术部')
+const homeCornerClockHours = computed(() => String(now.value.getHours()).padStart(2, '0'))
+const homeCornerClockMinutes = computed(() => String(now.value.getMinutes()).padStart(2, '0'))
+const homeCornerClockDateParts = computed(() => {
   const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][now.value.getDay()]
-  return `${now.value.getFullYear()}年${now.value.getMonth() + 1}月${now.value.getDate()}日 ${weekday}`
+  return {
+    year: `${now.value.getFullYear()}年`,
+    monthDay: `${now.value.getMonth() + 1}月${now.value.getDate()}日`,
+    weekday,
+  }
+})
+const homeCornerClockAriaLabel = computed(() => {
+  const date = homeCornerClockDateParts.value
+  return `${homeGreetingText.value}，${homeGreetingDisplayName.value}，${homeGreetingDepartment.value}，当前时间 ${homeCornerClockHours.value}:${homeCornerClockMinutes.value}，${date.year}${date.monthDay} ${date.weekday}`
 })
 const homeCornerClockIso = computed(() => now.value.toISOString())
 const selectedDateLabel = computed(() => {
@@ -317,6 +361,7 @@ function openSelectedDayTask(event: CalendarEvent) {
     selectDate(props.selectedDate)
     openTodoPanel()
     void nextTick(() => {
+      dayPreviewPanelRef.value?.applyTypeFilter(homeTodoCategoryFilter.value)
       dayPreviewPanelRef.value?.openEventDetailById(event.id)
     })
   }
@@ -327,6 +372,8 @@ function openSelectedDayTask(event: CalendarEvent) {
 }
 
 async function toggleTodayTaskStatus(event: CalendarEvent) {
+  if (isTodoStatusUpdating(event.id)) return
+
   if (event.completable === false) {
     showToast('当前待办不可由你完成', 'info')
     return
@@ -336,70 +383,14 @@ async function toggleTodayTaskStatus(event: CalendarEvent) {
   await updateTodoStatus(event.id, nextStatus)
 }
 
-function openDayPreviewWithStatusFilter(date: string, filter: TodoStatusFilter) {
-  const applyFilter = () => {
-    void nextTick(() => {
-      dayPreviewPanelRef.value?.applyStatusFilter(filter)
-    })
-  }
+function selectHomeTodoCategoryFilter(filter: TodoTypeFilter) {
+  homeTodoCategoryFilter.value = filter
 
-  const openSelectedDay = () => {
-    isDayPreviewFormDirty.value = false
-    quickCreatePrompt.value = ''
-    presetCreateTime.value = ''
-    selectDate(date, calendarViewMode.value === 'week')
-    openTodoPanel()
-    applyFilter()
-  }
+  if (!isDayPreviewOpen.value) return
 
-  if (isDayPreviewOpen.value && props.selectedDate === date) {
-    const switchFilter = () => {
-      isDayPreviewFormDirty.value = false
-      applyFilter()
-    }
-
-    if (!confirmDiscardPreviewChanges(switchFilter)) return
-
-    switchFilter()
-    return
-  }
-
-  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges(openSelectedDay)) return
-
-  openSelectedDay()
-}
-
-function openDayPreviewWithTypeFilter(date: string, filter: TodoTypeFilter) {
-  const applyFilter = () => {
-    void nextTick(() => {
-      dayPreviewPanelRef.value?.applyTypeFilter(filter)
-    })
-  }
-
-  const openSelectedDay = () => {
-    isDayPreviewFormDirty.value = false
-    quickCreatePrompt.value = ''
-    presetCreateTime.value = ''
-    selectDate(date, calendarViewMode.value === 'week')
-    openTodoPanel()
-    applyFilter()
-  }
-
-  if (isDayPreviewOpen.value && props.selectedDate === date) {
-    const switchFilter = () => {
-      isDayPreviewFormDirty.value = false
-      applyFilter()
-    }
-
-    if (!confirmDiscardPreviewChanges(switchFilter)) return
-
-    switchFilter()
-    return
-  }
-
-  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges(openSelectedDay)) return
-
-  openSelectedDay()
+  void nextTick(() => {
+    dayPreviewPanelRef.value?.applyTypeFilter(filter)
+  })
 }
 
 function closeDayPreview() {
@@ -557,9 +548,10 @@ async function updateTodo(payload: CalendarTodoUpdate) {
 
 async function updateTodoStatus(id: string, status: CalendarEventStatus) {
   try {
-    await serviceUpdateTodoStatus(id, currentUser.value, status, assignableUsers.value)
-    await refreshTodos()
-    showToast(status === 'done' ? '已标记完成' : '已撤销完成')
+    const updated = await updateTodoStatusOptimistically(id, status)
+    if (updated) {
+      showToast(status === 'done' ? '已标记完成' : '已撤销完成')
+    }
   } catch {
     // 全局拦截器已统一提示错误
   }
@@ -605,9 +597,21 @@ defineExpose({
 
 <template>
   <div class="calendar-workspace" @click="closeDayPreview">
-    <div class="home-corner-clock" aria-label="当前时间" aria-live="polite">
-      <time :datetime="homeCornerClockIso">{{ homeCornerClockTime }}</time>
-      <span class="home-corner-clock-date">{{ homeCornerClockDate }}</span>
+    <div class="home-time-mark" :aria-label="homeCornerClockAriaLabel" aria-live="polite">
+      <div class="home-time-mark__greeting" aria-hidden="true">
+        <strong>{{ homeGreetingText }}，{{ homeGreetingDisplayName }}</strong>
+        <span>{{ homeGreetingDepartment }}</span>
+      </div>
+      <time class="home-time-mark__time" :datetime="homeCornerClockIso">
+        <span>{{ homeCornerClockHours }}</span>
+        <span class="home-time-mark__colon" aria-hidden="true">:</span>
+        <span>{{ homeCornerClockMinutes }}</span>
+      </time>
+      <time class="home-time-mark__date" :datetime="todayDate">
+        <strong>{{ homeCornerClockDateParts.monthDay }}</strong>
+        <em>{{ homeCornerClockDateParts.weekday }}</em>
+        <span>{{ homeCornerClockDateParts.year }}</span>
+      </time>
     </div>
 
     <section class="layout-column left-column" aria-label="日历与待办" @click.stop>
@@ -629,6 +633,7 @@ defineExpose({
             :special-days="selectedSpecialDays"
             :current-user="currentUser"
             :assignable-users="assignableUsers"
+            :status-updating-ids="statusUpdatingIds"
             :quick-create-prompt="quickCreatePrompt"
             :quick-create-key="quickCreateKey"
             :preset-create-time="presetCreateTime"
@@ -664,30 +669,21 @@ defineExpose({
         <header class="home-todo-calendar-header">
           <div class="home-todo-calendar-card">
             <div class="home-todo-calendar-left">
-              <strong>{{ homeFooterDateLabel }}</strong>
-              <div class="home-week-strip" aria-label="本周日期">
-                <button
-                  v-for="day in homeWeekDays"
-                  :key="day.date"
-                  type="button"
-                  :class="{ active: day.isSelected, 'is-today': day.isToday }"
-                  @click.stop="selectHomeWeekDay(day.date)"
-                >
-                  <strong>{{ day.day }}</strong>
-                  <span>{{ day.weekday }}</span>
-                </button>
+              <div class="home-week-row">
+                <span class="home-week-month-label">{{ homeWeekMonthLabel }}</span>
+                <div class="home-week-strip" :aria-label="`${homeWeekMonthLabel}本周日期`">
+                  <button
+                    v-for="day in homeWeekDays"
+                    :key="day.date"
+                    type="button"
+                    :class="{ active: day.isSelected, 'is-today': day.isToday }"
+                    @click.stop="selectHomeWeekDay(day.date)"
+                  >
+                    <span>{{ day.weekday }}</span>
+                    <strong>{{ day.day }}</strong>
+                  </button>
+                </div>
               </div>
-            </div>
-            <div class="home-todo-calendar-actions">
-              <button
-                type="button"
-                class="home-todo-view-all"
-                aria-label="进入详细视图"
-                @click.stop="emit('switch-mode', 'detail')"
-              >
-                <span>详细视图</span>
-                <IconChevronRight aria-hidden="true" />
-              </button>
             </div>
           </div>
         </header>
@@ -696,43 +692,49 @@ defineExpose({
           <div class="home-todo-stats" :aria-label="homeTodoStatsAriaLabel">
             <button
               type="button"
-              class="home-todo-stat pending-stat"
-              :aria-label="`${isSelectedToday ? '今日' : homeFooterDateLabel}待处理待办`"
-              @click.stop="openDayPreviewWithStatusFilter(props.selectedDate, 'pending')"
+              class="home-todo-stat all-stat"
+              :class="{ active: homeTodoCategoryFilter === 'all' }"
+              :aria-pressed="homeTodoCategoryFilter === 'all'"
+              :aria-label="`${isSelectedToday ? '今日' : homeFooterDateLabel}全部待办`"
+              @click.stop="selectHomeTodoCategoryFilter('all')"
             >
               <span class="home-todo-stat-icon" aria-hidden="true">
-                <IconBell />
+                <IconLayoutList />
               </span>
               <span class="home-todo-stat-copy">
-                <span>待处理</span>
-                <strong>{{ selectedDayPendingEvents.length }}</strong>
+                <span>全部</span>
+                <strong>{{ selectedDayAllCount }}</strong>
               </span>
             </button>
             <button
               type="button"
-              class="home-todo-stat done-stat"
-              :aria-label="`${isSelectedToday ? '今日' : homeFooterDateLabel}已完成待办`"
-              @click.stop="openDayPreviewWithStatusFilter(props.selectedDate, 'done')"
+              class="home-todo-stat task-stat"
+              :class="{ active: homeTodoCategoryFilter === 'task' }"
+              :aria-pressed="homeTodoCategoryFilter === 'task'"
+              :aria-label="`${isSelectedToday ? '今日' : homeFooterDateLabel}待办事项`"
+              @click.stop="selectHomeTodoCategoryFilter('task')"
             >
               <span class="home-todo-stat-icon" aria-hidden="true">
                 <IconSquareCheck />
               </span>
               <span class="home-todo-stat-copy">
-                <span>已完成</span>
-                <strong>{{ selectedDayCompletedCount }}</strong>
+                <span>待办事项</span>
+                <strong>{{ selectedDayTodoCount }}</strong>
               </span>
             </button>
             <button
               type="button"
               class="home-todo-stat meeting-stat"
-              :aria-label="`${isSelectedToday ? '今日' : homeFooterDateLabel}会议`"
-              @click.stop="openDayPreviewWithTypeFilter(props.selectedDate, 'meeting')"
+              :class="{ active: homeTodoCategoryFilter === 'meeting' }"
+              :aria-pressed="homeTodoCategoryFilter === 'meeting'"
+              :aria-label="`${isSelectedToday ? '今日' : homeFooterDateLabel}会议信息`"
+              @click.stop="selectHomeTodoCategoryFilter('meeting')"
             >
               <span class="home-todo-stat-icon" aria-hidden="true">
                 <IconPresentation />
               </span>
               <span class="home-todo-stat-copy">
-                <span>会议</span>
+                <span>会议信息</span>
                 <strong>{{ selectedDayMeetingCount }}</strong>
               </span>
             </button>
@@ -765,24 +767,33 @@ defineExpose({
                 :class="{ 'is-done': task.status === 'done' }"
               >
                 <div class="home-todo-item-main">
+                  <time>{{ formatHomeTodoMeta(task) }}</time>
                   <span class="home-todo-item-title">{{ task.title }}</span>
-                  <span
-                    v-if="task.status === 'done'"
-                    class="home-todo-status-tag"
-                  >
+                  <span v-if="task.status === 'done'" class="home-todo-status-tag">
+                    <IconCheck aria-hidden="true" />
                     已完成
                   </span>
-                  <time v-else>{{ formatHomeTodoMeta(task) }}</time>
                 </div>
                 <div class="home-todo-item-actions">
                   <button
                     v-if="task.completable !== false"
                     type="button"
                     class="home-todo-action complete-action"
-                    :class="{ 'is-done': task.status === 'done' }"
+                    :class="{
+                      'is-done': task.status === 'done',
+                      'is-syncing': isTodoStatusUpdating(task.id),
+                    }"
+                    :disabled="isTodoStatusUpdating(task.id)"
+                    :aria-busy="isTodoStatusUpdating(task.id)"
                     @click.stop="toggleTodayTaskStatus(task)"
                   >
-                    {{ task.status === 'done' ? '撤销' : '完成' }}
+                    {{
+                      isTodoStatusUpdating(task.id)
+                        ? '处理中...'
+                        : task.status === 'done'
+                          ? '撤销'
+                          : '完成'
+                    }}
                   </button>
                   <button
                     type="button"
@@ -826,17 +837,72 @@ defineExpose({
   overflow: hidden;
 }
 
-.home-corner-clock {
+.home-time-mark {
+  --home-glass-text-fill: rgba(248, 252, 255, 0.9);
+  --home-glass-text-gradient: radial-gradient(
+      circle at 22% 20%,
+      rgba(255, 255, 255, 0.96),
+      rgba(255, 255, 255, 0.58) 34%,
+      rgba(236, 246, 255, 0.76) 68%
+    ),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(223, 238, 255, 0.72)),
+    rgba(248, 252, 255, 0.6);
+  --home-glass-text-shadow: 0 1px 0 rgba(255, 255, 255, 0.46),
+    0 14px 34px rgba(15, 23, 42, 0.34),
+    0 2px 8px rgba(15, 23, 42, 0.24);
   position: absolute;
-  top: clamp(28px, 3.6vh, 48px);
+  top: clamp(32px, 4vh, 56px);
   left: clamp(32px, 2.4vw, 48px);
   z-index: 1;
+  box-sizing: border-box;
+  max-width: min(620px, calc(100vw - 96px));
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
   pointer-events: none;
   user-select: none;
+  filter: drop-shadow(0 18px 30px rgba(15, 23, 42, 0.2));
 }
 
-.home-corner-clock time {
-  display: block;
+.home-time-mark__greeting {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 12px;
+  font-family:
+    'SF Pro Text',
+    -apple-system,
+    BlinkMacSystemFont,
+    'Helvetica Neue',
+    'Segoe UI',
+    sans-serif;
+  text-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.18),
+    0 8px 22px rgba(15, 23, 42, 0.2);
+}
+
+.home-time-mark__greeting strong {
+  color: rgba(255, 255, 255, 0.95);
+  font-size: clamp(18px, 1.5vw, 22px);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.home-time-mark__greeting span {
+  border-left: 1px solid rgba(255, 255, 255, 0.28);
+  color: rgba(255, 255, 255, 0.66);
+  padding-left: 12px;
+  font-size: clamp(12px, 0.95vw, 14px);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.home-time-mark__time {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
   font-family:
     'SF Pro Display',
     'SF Pro Text',
@@ -845,21 +911,31 @@ defineExpose({
     'Helvetica Neue',
     'Segoe UI',
     sans-serif;
-  font-size: clamp(72px, 7.2vw, 108px);
-  line-height: 1;
-  font-weight: 700;
-  letter-spacing: -0.05em;
+  color: rgba(255, 255, 255, 0.94);
+  margin: 0;
+  font-size: clamp(76px, 7.6vw, 116px);
+  font-weight: 800;
+  line-height: 0.86;
+  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
-  color: rgba(255, 255, 255, 0.96);
   text-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.36),
-    0 0 32px rgba(255, 255, 255, 0.16),
-    0 10px 28px rgba(15, 23, 42, 0.14);
+    0 1px 0 rgba(255, 255, 255, 0.28),
+    0 12px 30px rgba(15, 23, 42, 0.24),
+    0 2px 10px rgba(15, 23, 42, 0.18);
 }
 
-.home-corner-clock-date {
-  display: block;
-  margin-top: 10px;
+.home-time-mark__colon {
+  margin: 0 0.04em;
+  color: rgba(255, 255, 255, 0.72);
+  transform: translateY(-0.05em);
+}
+
+.home-time-mark__date {
+  min-width: 0;
+  margin-top: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
   font-family:
     'SF Pro Text',
     -apple-system,
@@ -867,12 +943,55 @@ defineExpose({
     'Helvetica Neue',
     'Segoe UI',
     sans-serif;
-  font-size: clamp(13px, 1vw, 15px);
-  line-height: 1.25;
-  font-weight: 500;
-  letter-spacing: 0.02em;
+  white-space: nowrap;
+  font-size: clamp(15px, 1.2vw, 18px);
+  line-height: 1;
+  text-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.18),
+    0 8px 22px rgba(15, 23, 42, 0.22);
+}
+
+.home-time-mark__date strong {
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.home-time-mark__date em {
   color: rgba(255, 255, 255, 0.78);
-  text-shadow: 0 1px 10px rgba(15, 23, 42, 0.16);
+  font-style: normal;
+  font-weight: 700;
+}
+
+.home-time-mark__date span {
+  color: rgba(255, 255, 255, 0.55);
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.home-time-mark__greeting strong,
+.home-time-mark__greeting span,
+.home-time-mark__time span,
+.home-time-mark__date strong,
+.home-time-mark__date em,
+.home-time-mark__date span {
+  color: var(--home-glass-text-fill);
+  text-shadow: var(--home-glass-text-shadow);
+  -webkit-text-stroke: 0.35px rgba(18, 42, 74, 0.16);
+}
+
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .home-time-mark__greeting strong,
+  .home-time-mark__greeting span,
+  .home-time-mark__time span,
+  .home-time-mark__date strong,
+  .home-time-mark__date em,
+  .home-time-mark__date span {
+    background: var(--home-glass-text-gradient);
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
 }
 
 .left-column {
@@ -934,36 +1053,41 @@ defineExpose({
   border: 1px solid rgba(255, 255, 255, 0.72);
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.58);
-  min-height: 108px;
-  padding: 10px 16px 10px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: stretch;
-  gap: 14px;
+  min-height: 78px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
 }
 
 .home-todo-calendar-left {
   min-width: 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
   justify-content: center;
+}
+
+.home-week-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
   gap: 12px;
 }
 
-.home-todo-calendar-left > strong {
-  color: var(--home-ink);
-  font-size: 15px;
-  line-height: 1;
-  font-weight: 950;
-}
-
-.home-todo-calendar-actions {
-  display: flex;
-  flex-direction: column;
+.home-week-month-label {
+  flex: 0 0 42px;
+  min-height: 34px;
+  border-radius: 12px;
+  background: rgba(67, 139, 255, 0.12);
+  color: #438bff;
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
-  gap: 8px;
-  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 950;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .home-todo-body {
@@ -1004,9 +1128,14 @@ defineExpose({
     transform 0.18s ease;
 }
 
-.home-todo-stat:hover {
+.home-todo-stat:hover,
+.home-todo-stat.active {
   background: rgba(255, 255, 255, 0.92);
   transform: translateY(-1px);
+}
+
+.home-todo-stat.active {
+  box-shadow: inset 0 0 0 1px rgba(67, 139, 255, 0.18);
 }
 
 .home-todo-stat-icon {
@@ -1024,12 +1153,12 @@ defineExpose({
   height: 16px;
 }
 
-.pending-stat .home-todo-stat-icon {
+.all-stat .home-todo-stat-icon {
   background: rgba(67, 139, 255, 0.14);
   color: #438bff;
 }
 
-.done-stat .home-todo-stat-icon {
+.task-stat .home-todo-stat-icon {
   background: rgba(40, 200, 121, 0.14);
   color: #28c879;
 }
@@ -1120,8 +1249,7 @@ defineExpose({
   padding: 11px 0;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 14px;
+  gap: 10px;
 }
 
 .home-todo-item-actions {
@@ -1171,6 +1299,15 @@ defineExpose({
   color: #1f2f4d;
 }
 
+.home-todo-action:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.home-todo-action:disabled:hover {
+  color: #64748b;
+}
+
 .home-todo-action.complete-action {
   color: #16a34a;
   background: rgba(34, 197, 94, 0.12);
@@ -1191,6 +1328,12 @@ defineExpose({
   color: #475569;
 }
 
+.home-todo-action.complete-action.is-syncing,
+.home-todo-action.complete-action.is-syncing:hover {
+  color: #64748b;
+  background: rgba(148, 163, 184, 0.16);
+}
+
 .home-todo-action.detail-action {
   color: #438bff;
   background: rgba(67, 139, 255, 0.1);
@@ -1202,6 +1345,7 @@ defineExpose({
 }
 
 .home-todo-item-title {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   color: #1f2f4d;
@@ -1222,10 +1366,19 @@ defineExpose({
   font-size: 12px;
   font-weight: 800;
   white-space: nowrap;
-  text-align: right;
+  text-align: left;
   transition:
     opacity 0.2s ease,
     transform 0.2s ease;
+}
+
+.home-todo-item.is-done {
+  opacity: 0.85;
+}
+
+.home-todo-item.is-done .home-todo-item-title {
+  color: #94a3b8;
+  text-decoration: line-through;
 }
 
 .home-todo-item.is-done .home-todo-item-actions {
@@ -1234,26 +1387,28 @@ defineExpose({
 
 .home-todo-status-tag {
   flex: 0 0 auto;
+  margin-left: auto;
   position: relative;
   z-index: 3;
   min-height: 24px;
-  border: 1px solid rgba(34, 197, 94, 0.34);
+  border: 1px solid rgba(21, 128, 61, 0.2);
   border-radius: 999px;
-  background: rgba(34, 197, 94, 0.16);
+  background: rgba(34, 197, 94, 0.1);
   color: #15803d;
-  padding: 0 10px;
+  padding: 0 8px 0 6px;
   display: inline-flex;
   align-items: center;
+  gap: 3px;
   font-size: 11px;
   font-weight: 900;
   line-height: 1;
   white-space: nowrap;
 }
 
-.home-todo-item:hover time,
-.home-todo-item:focus-within time {
-  opacity: 0;
-  transform: translateX(8px);
+.home-todo-status-tag svg {
+  width: 12px;
+  height: 12px;
+  stroke-width: 3px;
 }
 
 .home-todo-item:not(.is-done):hover .home-todo-item-title,
@@ -1263,30 +1418,31 @@ defineExpose({
 
 .home-todo-item.is-done:hover .home-todo-item-title,
 .home-todo-item.is-done:focus-within .home-todo-item-title {
-  padding-right: 4px;
+  padding-right: 170px;
 }
 
 .home-week-strip {
   min-width: 0;
+  flex: 1 1 auto;
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  align-items: stretch;
+  align-items: center;
   gap: 4px;
 }
 
 .home-week-strip button {
   min-width: 0;
-  min-height: 0;
+  height: 50px;
   border: 0;
   border-radius: 10px;
   background: transparent;
   color: #8b99ae;
-  padding: 4px 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
+  padding: 0;
+  display: grid;
+  grid-template-rows: 12px 30px;
+  align-content: center;
+  justify-items: center;
+  row-gap: 4px;
   font: inherit;
   cursor: pointer;
 }
@@ -1305,7 +1461,11 @@ defineExpose({
 }
 
 .home-week-strip button span {
+  height: 12px;
   color: #9aa6b8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 10px;
   font-weight: 900;
   line-height: 1;
@@ -1315,37 +1475,6 @@ defineExpose({
   background: #438bff;
   color: #ffffff;
   box-shadow: 0 8px 16px -10px rgba(67, 139, 255, 0.84);
-}
-
-.home-todo-view-all {
-  height: 36px;
-  border: 0;
-  border-radius: 12px;
-  background: rgba(67, 139, 255, 0.12);
-  color: #438bff;
-  padding: 0 14px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 900;
-  white-space: nowrap;
-  cursor: pointer;
-  transition:
-    background 0.18s ease,
-    transform 0.18s ease;
-}
-
-.home-todo-view-all:hover {
-  background: rgba(67, 139, 255, 0.18);
-  transform: translateY(-1px);
-}
-
-.home-todo-view-all svg {
-  width: 16px;
-  height: 16px;
 }
 
 .day-preview-popover {
@@ -1410,15 +1539,16 @@ defineExpose({
     padding: 16px;
   }
 
-  .home-corner-clock {
+  .home-time-mark {
     position: relative;
     top: auto;
     left: auto;
+    max-width: 100%;
     margin: 4px 0 8px;
   }
 
-  .home-corner-clock time {
-    font-size: clamp(56px, 16vw, 80px);
+  .home-time-mark__time {
+    font-size: clamp(54px, 15vw, 82px);
   }
 
   .left-column {
@@ -1465,15 +1595,8 @@ defineExpose({
   }
 
   .home-todo-calendar-card {
-    grid-template-columns: 1fr;
-  }
-
-  .home-todo-calendar-actions {
-    flex-direction: row;
-  }
-
-  .home-todo-view-all {
-    flex: 1 1 0;
+    min-height: 74px;
+    padding: 10px 12px;
   }
 }
 </style>

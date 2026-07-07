@@ -5,27 +5,41 @@ alwaysApply: true
 
 # 前端代码定位
 
-完整文件索引与职责说明见 `docs/frontend-code-index.md`（2026-06-25）。探索或修改前端代码前，先读该文档或按下列结构定位。
+完整文件索引与职责说明见 `docs/frontend-code-index.md`（2026-07-06）。探索或修改前端代码前，先读该文档或按下列结构定位。
+
+技术栈：Vue 3.5 + TS + Vite 4 + Pinia + Tailwind 3 + reka-ui + ECharts 6，图标用 unplugin-icons（lucide）。
 
 ## 架构速查
 
-- **入口/路由**：`src/app/main.ts` → `App.vue`；路由在 `src/router/`（`routes.ts`、`module-routes.ts`、`guards.ts`）
+- **入口/路由**：`src/app/main.ts` → `App.vue`；路由在 `src/router/`（`routes.ts`、`module-routes.ts`、`guards.ts`）；页面：`/login`、`/`、`/agents`、`/leader-board`
 - **登录**：`src/modules/auth/`
 - **首页/待办日历（核心）**：`src/modules/home/`
-  - 容器：`DashboardPage.vue`（总览/详细切换、邮箱确认）
-  - 总览：`dashboard/CalendarWorkspace.vue`
-  - 详细：`dashboard/DetailedDashboardWorkspace.vue`
-  - 顶栏：`dashboard/DashboardTopBar.vue`、`components/TopbarToolDock.vue`
-  - 单日面板：`dashboard/DayPreviewPanel.vue`
-  - 数据层：`dashboard/todo.service.ts`、`useDashboardTodos.ts`、`sys-message.service.ts`
+  - 容器：`DashboardPage.vue`（总览/详细切换、共享选中日期、邮箱确认、启动新手引导）
+  - 总览模式：`dashboard/CalendarWorkspace.vue`（问候语、今日待办、周/月日历，内含 2026 节假日硬编码）
+  - 详细模式：`dashboard/DetailedDashboardWorkspace.vue`（工作台列表 + `CalendarMonth.vue` 大月历/周时间轴）
+  - 顶栏：`dashboard/DashboardTopBar.vue` + `components/TopbarToolDock.vue`（工具入口）+ `components/DashboardNotificationCenter.vue`（通知中心）
+  - 单日面板：`dashboard/DayPreviewPanel.vue`（查看/创建/编辑/删除/AI 解析，两种模式共用）
+  - AI 快捷创建条：`components/TodoQuickCreateBar.vue`；总览面板工具入口：`components/HomePanelToolDock.vue`
+  - 新手引导：`components/OnboardingTour.vue` + `dashboard/onboardingTour.ts`（事件）
+  - 数据层：`dashboard/todo.service.ts`（待办 CRUD/状态流转/AI 解析）、`sys-message.service.ts` + `sys-message.state.ts`（站内消息）、`notification.inbox.ts`（收件箱聚合）
+  - Composable：`useDashboardTodos.ts`（待办加载/映射）、`useDashboardNotifications.ts`（通知中心/WebSocket）、`useDashboardGlassSettings.ts`（玻璃拟态参数）、`useHomeClock.ts` + `homeTimeOfDay.ts`（时段/问候语）
+  - 工具入口配置：`dashboard/dashboardTools.ts`（顶栏 + 面板两组，跳转依赖 `agent-center/links.ts`）
   - 类型/展示：`dashboard/types.ts`、`todoDisplay.ts`、`dayPreviewPanel.helpers.ts`
-  - 日期时间选择器：`dashboard/components/TodoDatePicker.vue`、`TodoTimePicker.vue`、`TodoDeadlineDateTimeRange.vue`、`picker.helpers.ts`
-- **智能体中心**：`src/modules/agent-center/`（含 `mock.ts` 静态数据）
-- **Token 看板**：`src/modules/leader-board/`
+  - 日期时间选择器：`components/TodoDatePicker.vue`、`TodoTimePicker.vue`、`TodoDeadlineDateTimeRange.vue`、`TodoAssigneeSelect.vue`、`picker.helpers.ts`
+- **智能体中心**：`src/modules/agent-center/`（目录/技能仍来自 `mock.ts`；外部跳转 URL 在 `links.ts`；个人 Token 图表已接真实接口）
+- **Token 用量数据层**：`src/modules/token-usage/`（`token-usage.service.ts` + helpers，无页面，供 agent-center 与 leader-board 消费）
+- **Token 看板**：`src/modules/leader-board/`（管理员看板，数据走 `loadAdminTokenDashboard` 真实接口）
+- **全局 Store**：`src/stores/`（`user.store`、`feedback.store`、`dashboard-todos.store`——首页待办按日期范围缓存的全局 store）
 - **共享 UI**：`src/components/ui/`（button、input、popover、select、calendar、scroll-area）
-- **共享能力**：`src/shared/request/`（HTTP）、`src/stores/`（user、feedback）、`src/shared/components/feedback/GlobalFeedback.vue`
-- **样式**：`src/styles/`；**测试**：`src/modules/home/dashboard/*.test.ts`
+- **共享能力**：`src/shared/request/`（HTTP/拦截器）、`src/shared/components/`（`GlobalFeedback.vue`、`AppRive.vue`、`state/AppStateBlock.vue` 通用加载/空/错误状态块）
+- **样式**：`src/styles/`；**测试**：`src/modules/home/dashboard/*.test.ts`、`src/modules/token-usage/*.test.ts`（vitest）
 
 ## 模拟数据注意
 
-以下仍为前端 mock/占位，改接口行为前先确认：`agent-center/mock.ts`、`agent-center/index.vue`（Token 图表）、`leader-board/index.vue`、`CalendarWorkspace.vue`（2026 节假日硬编码）。首页邮箱确认已接真实接口 `POST /smart-todo/select-email`。
+仍为前端 mock/硬编码，改相关行为前先确认：`agent-center/mock.ts`（智能体目录/技能/权限）、`agent-center/links.ts`（外部跳转 URL 硬编码）、`CalendarWorkspace.vue`（2026 节假日/节气硬编码）。
+
+已接真实接口：首页邮箱确认（`POST /smart-todo/select-email`）、待办与站内消息全链路、Token 看板与智能体中心 Token 图表（`token-usage.service.ts`）。
+
+## 遗留文件
+
+`dashboard/components/CalendarWeekTimeline.vue` 无引用（逻辑已并入 `CalendarMonth.vue`），改周视图请改 `CalendarMonth.vue`。

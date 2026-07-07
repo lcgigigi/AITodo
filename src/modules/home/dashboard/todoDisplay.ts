@@ -97,6 +97,13 @@ export function formatMonthEventTime(event: CalendarEvent) {
   return event.time || '·'
 }
 
+export function getCalendarEventTypeLabel(type: CalendarEvent['type']) {
+  if (type === 'meeting') return '会议'
+  if (type === 'approval') return '审批'
+  if (type === 'ai') return 'AI'
+  return '待办'
+}
+
 export function formatFormDateTime(
   event: Pick<CalendarEvent, 'date' | 'endDate' | 'time' | 'endTime'>,
 ) {
@@ -133,6 +140,22 @@ export function compareEvents(a: CalendarEvent, b: CalendarEvent) {
   if (aRank !== bRank) return aRank - bRank
   if ((a.time || '') !== (b.time || '')) return (a.time || '').localeCompare(b.time || '')
   return a.title.localeCompare(b.title, 'zh-CN')
+}
+
+export function isMeetingTodoEvent(event: CalendarEvent) {
+  return event.type === 'meeting'
+}
+
+export function compareCalendarDisplayEvents(a: CalendarEvent, b: CalendarEvent) {
+  if (isMeetingTodoEvent(a) !== isMeetingTodoEvent(b)) {
+    return isMeetingTodoEvent(a) ? -1 : 1
+  }
+
+  return compareEvents(a, b)
+}
+
+export function getActiveCalendarDisplayEvents(events: CalendarEvent[]) {
+  return events.filter((event) => !isCompletedTodoEvent(event)).sort(compareCalendarDisplayEvents)
 }
 
 function normalizeShowDateTime(value?: string) {
@@ -189,7 +212,8 @@ export function getBackendTodoStatusLabel(event: CalendarEvent) {
   }
 }
 
-export type DetailStatusFilter = 'all' | 'pending' | 'done' | 'other'
+export type DetailCategoryFilter = 'all' | 'task' | 'meeting'
+export type DetailStatusFilter = 'all' | 'pending' | 'done' | 'rejected'
 
 export function isCompletedTodoEvent(event: CalendarEvent) {
   return event.backendStatus === 6 || event.status === 'done'
@@ -202,16 +226,29 @@ export function isPendingProcessTodoEvent(event: CalendarEvent) {
   return label === '待处理' || label === '已接受'
 }
 
+export function isPendingDetailStatusEvent(event: CalendarEvent) {
+  if (isCompletedTodoEvent(event) || isRejectedTodo(event)) return false
+
+  const label = getBackendTodoStatusLabel(event)
+  return label === '待处理' || label === '已接受' || label === '待接受'
+}
+
 export function isOtherStatusTodoEvent(event: CalendarEvent) {
   if (isCompletedTodoEvent(event) || isPendingProcessTodoEvent(event)) return false
   return true
 }
 
+export function matchesDetailCategoryFilter(event: CalendarEvent, filter: DetailCategoryFilter) {
+  if (filter === 'all') return true
+  if (filter === 'meeting') return event.type === 'meeting'
+  return event.type !== 'meeting'
+}
+
 export function matchesDetailStatusFilter(event: CalendarEvent, filter: DetailStatusFilter) {
   if (filter === 'all') return true
   if (filter === 'done') return isCompletedTodoEvent(event)
-  if (filter === 'pending') return isPendingProcessTodoEvent(event)
-  return isOtherStatusTodoEvent(event)
+  if (filter === 'rejected') return isRejectedTodo(event)
+  return isPendingDetailStatusEvent(event)
 }
 
 export function getTodoCreatorDisplayName(event: CalendarEvent) {

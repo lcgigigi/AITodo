@@ -96,8 +96,8 @@ const dashboardToolCatalog: Record<DashboardToolId, DashboardTool> = {
 }
 
 const HOME_PANEL_TOOL_IDS: DashboardToolId[] = [
-  'image-analysis',
   'policy-qa',
+  'image-analysis',
   'meeting-notes',
   'ppt-creator',
   'more',

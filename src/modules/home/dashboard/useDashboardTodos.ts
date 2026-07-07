@@ -1,5 +1,6 @@
 import { storeToRefs } from 'pinia'
 import { useDashboardTodosStore } from '@/stores/dashboard-todos.store'
+import type { CalendarEventStatus } from './types'
 import type { TodoDateRange } from './todo.service'
 
 type UseDashboardTodosOptions = {
@@ -10,8 +11,15 @@ type UseDashboardTodosOptions = {
 
 export function useDashboardTodos(options: UseDashboardTodosOptions) {
   const store = useDashboardTodosStore()
-  const { assignableUsers, currentUser, eventMap, events, isLoading, loadError } =
-    storeToRefs(store)
+  const {
+    assignableUsers,
+    currentUser,
+    eventMap,
+    events,
+    isLoading,
+    loadError,
+    statusUpdatingIds,
+  } = storeToRefs(store)
 
   async function refreshTodos() {
     const range = options.getLoadRange()
@@ -31,6 +39,16 @@ export function useDashboardTodos(options: UseDashboardTodosOptions) {
     })
   }
 
+  function isTodoStatusUpdating(id: string) {
+    return statusUpdatingIds.value.has(id)
+  }
+
+  async function updateTodoStatusOptimistically(id: string, status: CalendarEventStatus) {
+    return store.updateTodoStatusOptimistically(id, status, {
+      onUnauthorized: options.onUnauthorized,
+    })
+  }
+
   return {
     assignableUsers,
     currentUser,
@@ -38,7 +56,10 @@ export function useDashboardTodos(options: UseDashboardTodosOptions) {
     events,
     isLoading,
     loadError,
+    statusUpdatingIds,
     refreshTodos,
     initializeDashboardTodos,
+    isTodoStatusUpdating,
+    updateTodoStatusOptimistically,
   }
 }
