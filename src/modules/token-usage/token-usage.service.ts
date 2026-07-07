@@ -11,10 +11,15 @@ export type {
   TokenUsagePeriodCode,
 } from './token-usage.helpers'
 export {
+  collectDatesInRange,
   collectTrendDates,
+  getMonthDateRange,
   getTokenUsagePeriodDayCount,
   getTokenUsagePeriodName,
+  getYearDateRange,
+  isDateInRange,
   resolveTokenUsageDateRange,
+  sumDailyInRange,
   sumDailyTokenUsage,
 } from './token-usage.helpers'
 

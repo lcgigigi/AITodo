@@ -2,15 +2,12 @@
 import type { Component, ComponentPublicInstance } from 'vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
-import IconArrowRight from '~icons/lucide/arrow-right'
 import IconBlocks from '~icons/lucide/blocks'
 import IconBox from '~icons/lucide/box'
 import IconBriefcaseBusiness from '~icons/lucide/briefcase-business'
 import IconBuilding2 from '~icons/lucide/building-2'
-import IconChevronDown from '~icons/lucide/chevron-down'
+import IconCalendarDays from '~icons/lucide/calendar-days'
 import IconCode2 from '~icons/lucide/code-2'
-import IconDownload from '~icons/lucide/download'
-import IconFilter from '~icons/lucide/filter'
 import IconFlame from '~icons/lucide/flame'
 import IconGrid2x2 from '~icons/lucide/grid-2x2'
 import IconHeadphones from '~icons/lucide/headphones'
@@ -21,13 +18,14 @@ import IconTrendingUp from '~icons/lucide/trending-up'
 import IconTrophy from '~icons/lucide/trophy'
 import IconUserRound from '~icons/lucide/user-round'
 import {
-  getTokenUsagePeriodDayCount,
+  getMonthDateRange,
+  getYearDateRange,
+  isDateInRange,
   loadAdminTokenDashboard,
-  resolveTokenUsageDateRange,
-  sumDailyTokenUsage,
+  sumDailyInRange,
   type AdminTokenUsageDashboard,
   type AdminTokenUsageModule,
-  type TokenUsagePeriodCode,
+  type TokenUsageDateRange,
 } from '@/modules/token-usage/token-usage.service'
 import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
 
@@ -76,29 +74,39 @@ interface TrendDataset {
   selectedTotal: number
 }
 
-const timeModes = ['日', '周', '月']
-const departmentModes = ['按部门', '按团队']
-const appModes = ['按应用', '按场景']
-const selectedTimeMode = ref('日')
-const selectedDepartmentMode = ref('按部门')
-const selectedAppMode = ref('按应用')
-const selectedDepartmentPeriod = ref('周')
-const selectedAppPeriod = ref('周')
+const timeModes = ['月', '年']
+
+function getCurrentYearMonth() {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
+
+const selectedTimeMode = ref('月')
+const selectedMonth = ref(getCurrentYearMonth())
 const tokenDashboard = ref<AdminTokenUsageDashboard | null>(null)
 const isDashboardLoading = ref(true)
 const dashboardError = ref('')
 
-const periodCodeByMode: Record<string, TokenUsagePeriodCode> = {
-  日: 'today',
-  周: 'last7Days',
-  月: 'last30Days',
-}
+const dashboardDateRange = computed<TokenUsageDateRange>(() => {
+  if (selectedTimeMode.value === '年') {
+    const year = Number(selectedMonth.value.split('-')[0])
+    return getYearDateRange(year)
+  }
 
-const periodNameByCode: Record<string, string> = {
-  today: '今天',
-  last7Days: '近7天',
-  last30Days: '近30天',
-}
+  return getMonthDateRange(selectedMonth.value)
+})
+
+const periodDisplayName = computed(() => {
+  const [yearText, monthText] = selectedMonth.value.split('-')
+  const year = Number(yearText)
+  const month = Number(monthText)
+
+  if (selectedTimeMode.value === '年') {
+    return Number.isFinite(year) ? `${year}年` : '本年度'
+  }
+
+  return Number.isFinite(year) && Number.isFinite(month) ? `${year}年${month}月` : '本月'
+})
 
 const departmentColors = ['#1273f8', '#7a5cff', '#1fb7e8', '#18bf9e', '#ff9418', '#6a6cff']
 const departmentIcons = [
@@ -232,30 +240,20 @@ function createTrendDataset(
   }
 }
 
-function getPeriodCode(mode: string): TokenUsagePeriodCode {
-  return periodCodeByMode[mode] ?? 'last30Days'
-}
-
-function getPeriodName(periodCode: TokenUsagePeriodCode) {
-  return periodNameByCode[periodCode] ?? String(periodCode)
-}
-
-function getPeriodTokenUsage(module: AdminTokenUsageModule, periodCode: TokenUsagePeriodCode) {
-  return sumDailyTokenUsage(module.dailyList, periodCode)
-}
-
-function getSelectedTrendDates(periodCode: TokenUsagePeriodCode) {
+function getTrendDatesInRange(range: TokenUsageDateRange) {
   const dates = new Set<string>()
 
   for (const dept of tokenDashboard.value?.deptList ?? []) {
     for (const module of dept.moduleList) {
       for (const point of module.dailyList) {
-        dates.add(point.usageDate)
+        if (isDateInRange(point.usageDate, range)) {
+          dates.add(point.usageDate)
+        }
       }
     }
   }
 
-  return [...dates].sort().slice(-getTokenUsagePeriodDayCount(periodCode))
+  return [...dates].sort()
 }
 
 function formatDateLabel(date: string) {
@@ -274,8 +272,8 @@ function formatTokenCompact(value: number) {
   }).format(value)
 }
 
-function aggregateModuleDailyList(moduleList: AdminTokenUsageModule[], selectedDates: Set<string>) {
-  return [...selectedDates].map((date) =>
+function aggregateModuleDailyList(moduleList: AdminTokenUsageModule[], dates: string[]) {
+  return dates.map((date) =>
     moduleList.reduce((sum, module) => {
       const point = module.dailyList.find((item) => item.usageDate === date)
       return sum + (point?.tokenUsage ?? 0)
@@ -283,10 +281,52 @@ function aggregateModuleDailyList(moduleList: AdminTokenUsageModule[], selectedD
   )
 }
 
+function aggregateModuleMonthlyTrend(moduleList: AdminTokenUsageModule[], range: TokenUsageDateRange) {
+  const monthMap = new Map<string, number>()
+
+  for (const module of moduleList) {
+    for (const point of module.dailyList) {
+      if (!isDateInRange(point.usageDate, range)) continue
+      const monthKey = point.usageDate.slice(0, 7)
+      monthMap.set(monthKey, (monthMap.get(monthKey) ?? 0) + point.tokenUsage)
+    }
+  }
+
+  const months = [...monthMap.keys()].sort()
+  return months.map((monthKey) => monthMap.get(monthKey) ?? 0)
+}
+
 const trendDataset = computed(() => {
-  const periodCode = getPeriodCode(selectedTimeMode.value)
-  const selectedDates = getSelectedTrendDates(periodCode)
-  const selectedDateSet = new Set(selectedDates)
+  const range = dashboardDateRange.value
+
+  if (selectedTimeMode.value === '年') {
+    const monthMap = new Map<string, number>()
+
+    for (const dept of tokenDashboard.value?.deptList ?? []) {
+      for (const module of dept.moduleList) {
+        for (const point of module.dailyList) {
+          if (!isDateInRange(point.usageDate, range)) continue
+          const monthKey = point.usageDate.slice(0, 7)
+          monthMap.set(monthKey, (monthMap.get(monthKey) ?? 0) + point.tokenUsage)
+        }
+      }
+    }
+
+    const months = [...monthMap.keys()].sort()
+    const totals = months.map((monthKey) => monthMap.get(monthKey) ?? 0)
+    const labels = months.map((monthKey) => {
+      const [, month] = monthKey.split('-')
+      return `${Number(month)}月`
+    })
+
+    if (totals.length) {
+      return createTrendDataset(labels, totals, months.length - 1)
+    }
+
+    return createTrendDataset([periodDisplayName.value], [0], 0)
+  }
+
+  const selectedDates = getTrendDatesInRange(range)
   const totals = selectedDates.map((date) =>
     (tokenDashboard.value?.deptList ?? []).reduce((deptSum, dept) => {
       const moduleTotal = dept.moduleList.reduce((moduleSum, module) => {
@@ -302,46 +342,36 @@ const trendDataset = computed(() => {
     return createTrendDataset(selectedDates.map(formatDateLabel), totals, selectedDates.length - 1)
   }
 
-  const fallbackTotal = (tokenDashboard.value?.deptList ?? []).reduce(
-    (sum, dept) =>
-      sum +
-      dept.moduleList.reduce(
-        (moduleSum, module) => moduleSum + getPeriodTokenUsage(module, periodCode),
-        0,
-      ),
-    0,
-  )
-
-  return createTrendDataset(
-    [getPeriodName(periodCode)],
-    [fallbackTotal],
-    selectedDateSet.size ? selectedDateSet.size - 1 : 0,
-  )
+  return createTrendDataset([periodDisplayName.value], [0], 0)
 })
 
-const selectedDepartmentPeriodCode = computed(() => getPeriodCode(selectedDepartmentPeriod.value))
-const selectedAppPeriodCode = computed(() => getPeriodCode(selectedAppPeriod.value))
-
 const departments = computed<DepartmentUsage[]>(() => {
-  const periodCode = selectedDepartmentPeriodCode.value
+  const range = dashboardDateRange.value
   const total = (tokenDashboard.value?.deptList ?? []).reduce(
     (sum, dept) =>
       sum +
       dept.moduleList.reduce(
-        (moduleSum, module) => moduleSum + getPeriodTokenUsage(module, periodCode),
+        (moduleSum, module) => moduleSum + sumDailyInRange(module.dailyList, range),
         0,
       ),
     0,
   )
-  const selectedDates = new Set(getSelectedTrendDates(periodCode))
+  const trendDates =
+    selectedTimeMode.value === '年'
+      ? []
+      : getTrendDatesInRange(range)
 
   return (tokenDashboard.value?.deptList ?? [])
     .map((dept, index) => {
       const value = dept.moduleList.reduce(
-        (sum, module) => sum + getPeriodTokenUsage(module, periodCode),
+        (sum, module) => sum + sumDailyInRange(module.dailyList, range),
         0,
       )
       const color = departmentColors[index % departmentColors.length]
+      const trend =
+        selectedTimeMode.value === '年'
+          ? aggregateModuleMonthlyTrend(dept.moduleList, range)
+          : aggregateModuleDailyList(dept.moduleList, trendDates)
 
       return {
         id: dept.deptId || dept.deptName,
@@ -352,7 +382,7 @@ const departments = computed<DepartmentUsage[]>(() => {
         share: total > 0 ? (value / total) * 100 : 0,
         color,
         icon: departmentIcons[index % departmentIcons.length],
-        trend: aggregateModuleDailyList(dept.moduleList, selectedDates),
+        trend,
       }
     })
     .sort((a, b) => b.value - a.value)
@@ -363,14 +393,14 @@ const departments = computed<DepartmentUsage[]>(() => {
 })
 
 const appUsages = computed<AppUsage[]>(() => {
-  const periodCode = selectedAppPeriodCode.value
+  const range = dashboardDateRange.value
   const moduleMap = new Map<string, { name: string; value: number }>()
 
   for (const dept of tokenDashboard.value?.deptList ?? []) {
     for (const module of dept.moduleList) {
       const key = module.moduleCode || module.moduleName
       const current = moduleMap.get(key) ?? { name: module.moduleName, value: 0 }
-      current.value += getPeriodTokenUsage(module, periodCode)
+      current.value += sumDailyInRange(module.dailyList, range)
       moduleMap.set(key, current)
     }
   }
@@ -413,7 +443,7 @@ const departmentStats = computed<StatCard[]>(() => {
       id: 'usage',
       label: '部门总消耗',
       value: formatTokenCompact(departments.value.reduce((sum, dept) => sum + dept.value, 0)),
-      meta: getPeriodName(selectedDepartmentPeriodCode.value),
+      meta: periodDisplayName.value,
       icon: IconTrendingUp,
       tone: 'blue',
     },
@@ -428,7 +458,7 @@ const appStats = computed<StatCard[]>(() => {
       id: 'active',
       label: '活跃模块数',
       value: formatTokenNumber(appUsages.value.length),
-      meta: getPeriodName(selectedAppPeriodCode.value),
+      meta: periodDisplayName.value,
       icon: IconGrid2x2,
       tone: 'blue',
     },
@@ -444,7 +474,7 @@ const appStats = computed<StatCard[]>(() => {
       id: 'total',
       label: '总消耗',
       value: formatTokenCompact(appUsages.value.reduce((sum, app) => sum + app.value, 0)),
-      meta: getPeriodName(selectedAppPeriodCode.value),
+      meta: periodDisplayName.value,
       icon: IconBlocks,
       tone: 'purple',
     },
@@ -688,7 +718,7 @@ function renderAppDonutChart() {
       color: apps.map((app) => app.color),
       title: {
         text: `总 Token\n${formatTokenCompact(total)}`,
-        subtext: getPeriodName(selectedAppPeriodCode.value),
+        subtext: periodDisplayName.value,
         left: 'center',
         top: '39%',
         textStyle: {
@@ -822,7 +852,7 @@ async function refreshTokenDashboard() {
   dashboardError.value = ''
 
   try {
-    tokenDashboard.value = await loadAdminTokenDashboard(resolveTokenUsageDateRange('last30Days'))
+    tokenDashboard.value = await loadAdminTokenDashboard(dashboardDateRange.value)
     await nextTick()
     currentDisplayedTotal = trendDataset.value.selectedTotal || 0
     renderAllCharts()
@@ -838,14 +868,8 @@ async function refreshTokenDashboard() {
   }
 }
 
-watch(selectedTimeMode, () => {
-  currentDisplayedTotal = trendDataset.value.selectedTotal || 0
-  renderTrendChart()
-})
-
-watch([selectedDepartmentPeriod, selectedAppPeriod], async () => {
-  await nextTick()
-  renderAllCharts()
+watch([selectedTimeMode, selectedMonth], async () => {
+  await refreshTokenDashboard()
 })
 
 onMounted(async () => {
@@ -907,21 +931,14 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
-          <button class="toolbar-button compare-button" type="button">
-            <span>数据口径：近30天</span>
-            <IconChevronDown aria-hidden="true" />
-          </button>
-
-          <button class="toolbar-button" type="button" disabled>
-            <IconFilter aria-hidden="true" />
-            <span>筛选</span>
-          </button>
-
-          <button class="toolbar-button" type="button" disabled>
-            <IconDownload aria-hidden="true" />
-            <span>导出</span>
-            <IconChevronDown aria-hidden="true" />
-          </button>
+          <label class="month-picker" :class="{ 'is-year-mode': selectedTimeMode === '年' }">
+            <IconCalendarDays aria-hidden="true" />
+            <input
+              v-model="selectedMonth"
+              type="month"
+              :aria-label="selectedTimeMode === '年' ? '选择年份' : '选择月份'"
+            />
+          </label>
         </div>
       </header>
 
@@ -957,35 +974,6 @@ onBeforeUnmount(() => {
               <h2>各部门 Token 使用量</h2>
               <IconInfo aria-hidden="true" />
             </div>
-
-            <div class="panel-actions">
-              <div class="soft-toggle" role="tablist" aria-label="部门维度">
-                <button
-                  v-for="mode in departmentModes"
-                  :key="mode"
-                  type="button"
-                  role="tab"
-                  :aria-selected="selectedDepartmentMode === mode"
-                  :class="{ 'is-active': selectedDepartmentMode === mode }"
-                  @click="selectedDepartmentMode = mode"
-                >
-                  {{ mode }}
-                </button>
-              </div>
-              <div class="mini-period" role="tablist" aria-label="部门统计周期">
-                <button
-                  v-for="mode in timeModes"
-                  :key="mode"
-                  type="button"
-                  role="tab"
-                  :aria-selected="selectedDepartmentPeriod === mode"
-                  :class="{ 'is-active': selectedDepartmentPeriod === mode }"
-                  @click="selectedDepartmentPeriod = mode"
-                >
-                  {{ mode }}
-                </button>
-              </div>
-            </div>
           </div>
 
           <div class="stat-strip department-stats">
@@ -1014,7 +1002,7 @@ onBeforeUnmount(() => {
                   <th scope="col">Token 使用量</th>
                   <th scope="col">占比</th>
                   <th scope="col">环比增长</th>
-                  <th scope="col">趋势（近7日）</th>
+                  <th scope="col">趋势</th>
                 </tr>
               </thead>
               <tbody>
@@ -1058,18 +1046,13 @@ onBeforeUnmount(() => {
                     <div
                       :ref="(el) => setDepartmentSparklineRef(department.id, el)"
                       class="sparkline-chart"
-                      :aria-label="`${department.name}近7日 Token 趋势`"
+                      :aria-label="`${department.name} Token 趋势`"
                     ></div>
                   </td>
                 </tr>
               </tbody>
             </table>
           </div>
-
-          <button class="detail-link" type="button">
-            查看部门详情
-            <IconArrowRight aria-hidden="true" />
-          </button>
         </article>
 
         <article class="panel usage-panel app-panel" aria-label="分应用 Token 使用量">
@@ -1077,35 +1060,6 @@ onBeforeUnmount(() => {
             <div class="heading-with-info">
               <h2>分应用 Token 使用量</h2>
               <IconInfo aria-hidden="true" />
-            </div>
-
-            <div class="panel-actions">
-              <div class="soft-toggle" role="tablist" aria-label="应用维度">
-                <button
-                  v-for="mode in appModes"
-                  :key="mode"
-                  type="button"
-                  role="tab"
-                  :aria-selected="selectedAppMode === mode"
-                  :class="{ 'is-active': selectedAppMode === mode }"
-                  @click="selectedAppMode = mode"
-                >
-                  {{ mode }}
-                </button>
-              </div>
-              <div class="mini-period" role="tablist" aria-label="应用统计周期">
-                <button
-                  v-for="mode in timeModes"
-                  :key="mode"
-                  type="button"
-                  role="tab"
-                  :aria-selected="selectedAppPeriod === mode"
-                  :class="{ 'is-active': selectedAppPeriod === mode }"
-                  @click="selectedAppPeriod = mode"
-                >
-                  {{ mode }}
-                </button>
-              </div>
             </div>
           </div>
 
@@ -1180,11 +1134,6 @@ onBeforeUnmount(() => {
               </table>
             </div>
           </div>
-
-          <button class="detail-link" type="button" disabled>
-            模块明细来自接口汇总
-            <IconArrowRight aria-hidden="true" />
-          </button>
         </article>
       </section>
     </div>
@@ -1256,19 +1205,15 @@ onBeforeUnmount(() => {
 .leader-topbar,
 .topbar-actions,
 .segmented-control,
-.toolbar-button,
+.month-picker,
 .panel-header,
 .heading-with-info,
-.panel-actions,
-.soft-toggle,
-.mini-period,
 .stat-card,
 .entity-name,
 .usage-meter-cell,
 .app-usage-body,
 .app-name,
-.app-meter-cell,
-.detail-link {
+.app-meter-cell {
   display: flex;
   align-items: center;
 }
@@ -1311,7 +1256,7 @@ onBeforeUnmount(() => {
 }
 
 .segmented-control {
-  width: 280px;
+  width: 200px;
   height: 56px;
   border: 1px solid #dce8fb;
   border-radius: 28px;
@@ -1362,44 +1307,58 @@ onBeforeUnmount(() => {
   opacity: 0;
 }
 
-.toolbar-button {
+.month-picker {
   position: relative;
   min-height: 56px;
   border: 1px solid #dce8fb;
   border-radius: 28px;
   background: rgba(255, 255, 255, 0.88);
   color: #0d1d4a;
-  padding: 0 24px;
+  padding: 0 20px 0 24px;
   gap: 12px;
   box-shadow: 0 10px 24px rgba(26, 77, 145, 0.07);
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.month-picker:hover,
+.month-picker:focus-within {
+  border-color: rgba(18, 115, 248, 0.42);
+  box-shadow: 0 14px 28px rgba(26, 77, 145, 0.12);
+}
+
+.month-picker svg {
+  width: 21px;
+  height: 21px;
+  flex: 0 0 auto;
+  color: var(--blue);
+}
+
+.month-picker input {
+  min-width: 132px;
+  border: 0;
+  background: transparent;
+  color: #0d1d4a;
   font: inherit;
   font-size: 16px;
   font-weight: 900;
   cursor: pointer;
-  white-space: nowrap;
-  transition:
-    border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    transform 0.18s ease;
-}
-
-.toolbar-button:hover,
-.toolbar-button:focus-visible {
-  border-color: rgba(18, 115, 248, 0.42);
-  box-shadow: 0 14px 28px rgba(26, 77, 145, 0.12);
   outline: none;
-  transform: translateY(-1px);
 }
 
-.toolbar-button svg {
-  width: 21px;
-  height: 21px;
-  flex: 0 0 auto;
+.month-picker input::-webkit-calendar-picker-indicator {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
 }
 
-.compare-button {
-  min-width: 218px;
-  justify-content: center;
+.month-picker.is-year-mode input {
+  min-width: 88px;
 }
 
 .panel {
@@ -1472,54 +1431,6 @@ onBeforeUnmount(() => {
 .usage-header {
   min-height: 42px;
   margin-bottom: 10px;
-}
-
-.panel-actions {
-  gap: 18px;
-}
-
-.soft-toggle,
-.mini-period {
-  height: 36px;
-  border: 1px solid #dce8fb;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.82);
-  padding: 3px;
-}
-
-.soft-toggle button,
-.mini-period button {
-  min-width: 64px;
-  min-height: 28px;
-  border: 0;
-  border-radius: 14px;
-  background: transparent;
-  color: #385487;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 900;
-  cursor: pointer;
-}
-
-.soft-toggle button.is-active,
-.mini-period button.is-active {
-  background: #dbeaff;
-  color: var(--blue);
-}
-
-.mini-period {
-  width: 154px;
-}
-
-.mini-period button {
-  min-width: 0;
-  flex: 1 1 0;
-}
-
-.mini-period button.is-active {
-  background: linear-gradient(180deg, #1686ff 0%, #0069ef 100%);
-  color: #ffffff;
-  box-shadow: 0 8px 18px rgba(18, 115, 248, 0.25);
 }
 
 .stat-strip {
@@ -1769,28 +1680,6 @@ onBeforeUnmount(() => {
 .sparkline-chart {
   width: 118px;
   height: 28px;
-}
-
-.detail-link {
-  position: absolute;
-  bottom: 20px;
-  left: 50%;
-  min-height: 34px;
-  border: 0;
-  background: transparent;
-  color: var(--blue);
-  gap: 8px;
-  padding: 0;
-  font: inherit;
-  font-size: 15px;
-  font-weight: 900;
-  cursor: pointer;
-  transform: translateX(-50%);
-}
-
-.detail-link svg {
-  width: 17px;
-  height: 17px;
 }
 
 .app-usage-body {

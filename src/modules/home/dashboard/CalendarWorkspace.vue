@@ -9,10 +9,20 @@ import { routeConfig } from '@/config/route.config'
 import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
 import { useFeedbackStore } from '@/stores/feedback.store'
 import HomePanelToolDock from './components/HomePanelToolDock.vue'
+import TodoDetailViewPanel from './components/TodoDetailViewPanel.vue'
 import TodoQuickCreateBar from './components/TodoQuickCreateBar.vue'
 import DashboardTopBar from './DashboardTopBar.vue'
 import DayPreviewPanel from './DayPreviewPanel.vue'
-import { filterEventsByType, isMeetingEvent, type TodoTypeFilter } from './dayPreviewPanel.helpers'
+import {
+  eventTypeLabel,
+  filterEventsByType,
+  isMeetingEvent,
+  type TodoTypeFilter,
+} from './dayPreviewPanel.helpers'
+import {
+  clearDesktopTodoDetailQuery as buildClearedDesktopTodoDetailQuery,
+  getDesktopTodoDetailRequest,
+} from './desktopTodoQuery'
 import { navigateDashboardTool, type DashboardToolTarget } from './dashboardTools'
 import { resolveHomeGreetingText } from './homeTimeOfDay'
 import { DASHBOARD_ONBOARDING_TOUR_CLOSE_DAY_PREVIEW_EVENT } from './onboardingTour'
@@ -23,23 +33,36 @@ import type {
   CalendarTodoDraft,
   CalendarTodoUpdate,
 } from './types'
-import { compareEvents, formatEventTime, isAllDayEvent } from './todoDisplay'
 import {
+  compareEvents,
+  formatEventTimeForDayList,
+  isCompletedTodoEvent,
+  isRangeEvent,
+} from './todoDisplay'
+import {
+  buildTodoDetailPanelViewModel,
+  canEditTodoEvent,
+  isPendingAcceptanceTask,
+} from './todoDetailPanel.helpers'
+import {
+  acceptTodos,
   createTodo as serviceCreateTodo,
   deleteTodo as serviceDeleteTodo,
   getTodoMonthRange,
   getTodoWeekRange,
   loadTodoDetail,
+  rejectTodo,
   updateTodo as serviceUpdateTodo,
 } from './todo.service'
 import { useDashboardTodos } from './useDashboardTodos'
 import { useDashboardGlassSettings } from './useDashboardGlassSettings'
 
+type HomePanelMode = 'view' | 'edit' | 'create'
+
 type DayPreviewPanelExpose = {
   showDiscardWarning: (onConfirm?: () => void) => void
   openCreateForm: () => void
-  openEventDetailById: (id: string) => boolean
-  applyTypeFilter: (filter: TodoTypeFilter) => void
+  openEditFormById: (id: string) => boolean
 }
 
 const props = defineProps<{
@@ -47,7 +70,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (event: 'switch-mode', mode: 'detail'): void
+  (event: 'switch-mode', mode: 'simple' | 'detail'): void
   (event: 'start-onboarding'): void
   (event: 'update:selectedDate', date: string): void
 }>()
@@ -55,6 +78,13 @@ const emit = defineEmits<{
 const now = ref(new Date())
 const currentMonth = ref(new Date(now.value.getFullYear(), now.value.getMonth(), 1))
 const isDayPreviewOpen = ref(false)
+const homePanelMode = ref<HomePanelMode>('view')
+const activePanelTaskId = ref('')
+const taskDetails = ref<Record<string, CalendarEvent>>({})
+const detailLoadingId = ref('')
+const pendingDeleteTaskId = ref('')
+const pendingActionProcessing = ref(false)
+const deleteActionProcessing = ref(false)
 const quickCreatePrompt = ref('')
 const homeQuickTodoText = ref('')
 const quickCreateKey = ref(0)
@@ -62,6 +92,7 @@ const presetCreateTime = ref('')
 const presetCreateKey = ref(0)
 const isDayPreviewFormDirty = ref(false)
 const dayPreviewPanelRef = ref<DayPreviewPanelExpose | null>(null)
+const dayPreviewEditPanelRef = ref<DayPreviewPanelExpose | null>(null)
 const homeMainPanelRef = ref<HTMLElement | null>(null)
 const calendarViewMode = ref<'month' | 'week'>('month')
 const homeTodoCategoryFilter = ref<TodoTypeFilter>('all')
@@ -71,16 +102,16 @@ const feedbackStore = useFeedbackStore()
 const { glassStyle } = useDashboardGlassSettings()
 let clockTimer: ReturnType<typeof setInterval> | undefined
 let isConsumingDesktopTodoText = false
+let isConsumingDesktopTodoDetail = false
 
 const {
   assignableUsers,
   currentUser,
   eventMap,
   initializeDashboardTodos,
-  isTodoStatusUpdating,
   isLoading,
+  isTodoStatusUpdating,
   refreshTodos,
-  statusUpdatingIds,
   updateTodoStatusOptimistically,
 } = useDashboardTodos({
   getLoadRange: getActiveTodoLoadRange,
@@ -193,17 +224,49 @@ const specialDayMap = computed(() => {
 const todayDate = computed(() => ymd(now.value))
 const isSelectedToday = computed(() => props.selectedDate === todayDate.value)
 const selectedEvents = computed(() => eventMap.value.get(props.selectedDate) ?? [])
+const activePanelTask = computed(() => {
+  if (!activePanelTaskId.value) return null
+
+  const fromList = selectedEvents.value.find((event) => event.id === activePanelTaskId.value)
+  const cached = taskDetails.value[activePanelTaskId.value]
+
+  if (cached && fromList) {
+    return { ...cached, ...fromList }
+  }
+
+  return fromList ?? cached ?? null
+})
+const panelTaskDetail = computed(() => {
+  const task = activePanelTask.value
+  if (!task) return null
+
+  const detail = taskDetails.value[task.id] ?? task
+  return buildTodoDetailPanelViewModel(detail, currentUser.value)
+})
+const isPanelDetailLoading = computed(() =>
+  Boolean(activePanelTaskId.value && detailLoadingId.value === activePanelTaskId.value),
+)
+const showPanelEditAction = computed(() => {
+  const task = activePanelTask.value
+  if (!task) return false
+  return canEditTodoEvent(taskDetails.value[task.id] ?? task)
+})
+const showPanelDeleteAction = computed(() => {
+  const task = activePanelTask.value
+  if (!task) return false
+  return isCompletedTodoEvent(task)
+})
+const showPanelPendingInboxActions = computed(() => {
+  const task = activePanelTask.value
+  if (!task) return false
+  return isPendingAcceptanceTask(taskDetails.value[task.id] ?? task, currentUser.value)
+})
+const isPanelDeleteConfirming = computed(() =>
+  Boolean(activePanelTaskId.value && pendingDeleteTaskId.value === activePanelTaskId.value),
+)
 const selectedSpecialDays = computed(() => specialDayMap.value.get(props.selectedDate) ?? [])
 const selectedDayPreviewTasks = computed(() =>
-  filterEventsByType(
-    [...selectedEvents.value].sort((a, b) => {
-      const aDone = a.status === 'done' ? 1 : 0
-      const bDone = b.status === 'done' ? 1 : 0
-      if (aDone !== bDone) return aDone - bDone
-      return compareEvents(a, b)
-    }),
-    homeTodoCategoryFilter.value,
-  ),
+  filterEventsByType([...selectedEvents.value].sort(compareEvents), homeTodoCategoryFilter.value),
 )
 const selectedDayAllCount = computed(() => selectedEvents.value.length)
 const selectedDayTodoCount = computed(
@@ -317,8 +380,10 @@ function selectDate(date: string, syncMonth = true) {
 }
 
 function formatHomeTodoMeta(event: CalendarEvent) {
-  if (isAllDayEvent(event) && isSelectedToday.value) return '今天'
-  return formatEventTime(event)
+  return formatEventTimeForDayList(event, props.selectedDate, {
+    isToday: isSelectedToday.value,
+    todayText: '今天',
+  })
 }
 
 function selectHomeWeekDay(date: string) {
@@ -341,7 +406,9 @@ function openSelectedDayAddTodo() {
     isDayPreviewFormDirty.value = false
     quickCreatePrompt.value = ''
     presetCreateTime.value = ''
+    activePanelTaskId.value = ''
     selectDate(props.selectedDate)
+    homePanelMode.value = 'create'
     openTodoPanel()
     void nextTick(() => {
       dayPreviewPanelRef.value?.openCreateForm()
@@ -353,50 +420,179 @@ function openSelectedDayAddTodo() {
   openCreate()
 }
 
-function openSelectedDayTask(event: CalendarEvent) {
-  const openDetail = () => {
+async function loadPanelTaskDetail(task: CalendarEvent) {
+  detailLoadingId.value = task.id
+
+  try {
+    const detail = await loadTodoDetail(task.id, currentUser.value, assignableUsers.value)
+    taskDetails.value = {
+      ...taskDetails.value,
+      [task.id]: detail,
+    }
+  } catch {
+    showToast('查询待办详情失败', 'error')
+  } finally {
+    detailLoadingId.value = ''
+  }
+}
+
+function openHomePanel(mode: HomePanelMode, task?: CalendarEvent) {
+  homePanelMode.value = mode
+  activePanelTaskId.value = task?.id ?? ''
+  pendingDeleteTaskId.value = ''
+  openTodoPanel()
+}
+
+function openSelectedDayView(event: CalendarEvent) {
+  const openView = () => {
     isDayPreviewFormDirty.value = false
     quickCreatePrompt.value = ''
     presetCreateTime.value = ''
     selectDate(props.selectedDate)
-    openTodoPanel()
+    openHomePanel('view', event)
+    void loadPanelTaskDetail(event)
+  }
+
+  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges(openView)) return
+
+  openView()
+}
+
+function openSelectedDayEdit(event: CalendarEvent) {
+  const openEdit = () => {
+    isDayPreviewFormDirty.value = false
+    quickCreatePrompt.value = ''
+    presetCreateTime.value = ''
+    selectDate(props.selectedDate)
+    openHomePanel('edit', event)
     void nextTick(() => {
-      dayPreviewPanelRef.value?.applyTypeFilter(homeTodoCategoryFilter.value)
-      dayPreviewPanelRef.value?.openEventDetailById(event.id)
+      dayPreviewEditPanelRef.value?.openEditFormById(event.id)
     })
   }
 
-  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges(openDetail)) return
+  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges(openEdit)) return
 
-  openDetail()
+  openEdit()
 }
 
-async function toggleTodayTaskStatus(event: CalendarEvent) {
-  if (isTodoStatusUpdating(event.id)) return
+function switchPanelToEdit() {
+  const task = activePanelTask.value
+  if (!task || !showPanelEditAction.value) return
 
-  if (event.completable === false) {
-    showToast('当前待办不可由你完成', 'info')
+  homePanelMode.value = 'edit'
+  void nextTick(() => {
+    dayPreviewEditPanelRef.value?.openEditFormById(task.id)
+  })
+}
+
+function requestCloseEditPanel(onConfirm?: () => void) {
+  const close = () => {
+    isDayPreviewFormDirty.value = false
+    isDayPreviewOpen.value = false
+    activePanelTaskId.value = ''
+    pendingDeleteTaskId.value = ''
+    onConfirm?.()
+  }
+
+  if (!isDayPreviewFormDirty.value) {
+    close()
     return
   }
 
+  dayPreviewEditPanelRef.value?.showDiscardWarning(close)
+}
+
+async function togglePanelTaskStatus() {
+  const task = activePanelTask.value
+  if (!task) return
+
+  const updated = await toggleTodayTaskStatus(task)
+  if (!updated) return
+
+  const updatedTask = selectedEvents.value.find((event) => event.id === task.id)
+  await loadPanelTaskDetail(updatedTask ?? task)
+}
+
+async function handleAcceptPanelTodo() {
+  const task = activePanelTask.value
+  if (!task || pendingActionProcessing.value) return
+
+  pendingActionProcessing.value = true
+  try {
+    await acceptTodos([task.id])
+    await refreshTodos()
+    await loadPanelTaskDetail(task)
+    showToast('已接受待办')
+  } catch {
+    // 全局拦截器已统一提示错误
+  } finally {
+    pendingActionProcessing.value = false
+  }
+}
+
+async function handleRejectPanelTodo() {
+  const task = activePanelTask.value
+  if (!task || pendingActionProcessing.value) return
+
+  pendingActionProcessing.value = true
+  try {
+    await rejectTodo(task.id, '暂不处理')
+    await refreshTodos()
+    closeDayPreview()
+    showToast('已拒绝待办')
+  } catch {
+    // 全局拦截器已统一提示错误
+  } finally {
+    pendingActionProcessing.value = false
+  }
+}
+
+function requestDeletePanelTask() {
+  const task = activePanelTask.value
+  if (!task || !showPanelDeleteAction.value || isPanelDetailLoading.value) return
+  pendingDeleteTaskId.value = task.id
+}
+
+function cancelDeletePanelTask() {
+  pendingDeleteTaskId.value = ''
+}
+
+async function confirmDeletePanelTask() {
+  const task = activePanelTask.value
+  if (!task || deleteActionProcessing.value) return
+
+  deleteActionProcessing.value = true
+  try {
+    await deleteTodo(task.id)
+    closeDayPreview()
+  } finally {
+    deleteActionProcessing.value = false
+    pendingDeleteTaskId.value = ''
+  }
+}
+
+async function toggleTodayTaskStatus(event: CalendarEvent) {
+  if (isTodoStatusUpdating(event.id)) return false
+
+  if (event.completable === false) {
+    showToast('当前待办不可由你完成', 'info')
+    return false
+  }
+
   const nextStatus: CalendarEventStatus = event.status === 'done' ? 'todo' : 'done'
-  await updateTodoStatus(event.id, nextStatus)
+  return updateTodoStatus(event.id, nextStatus)
 }
 
 function selectHomeTodoCategoryFilter(filter: TodoTypeFilter) {
   homeTodoCategoryFilter.value = filter
-
-  if (!isDayPreviewOpen.value) return
-
-  void nextTick(() => {
-    dayPreviewPanelRef.value?.applyTypeFilter(filter)
-  })
 }
 
 function closeDayPreview() {
   const closePreview = () => {
     isDayPreviewOpen.value = false
     isDayPreviewFormDirty.value = false
+    activePanelTaskId.value = ''
+    pendingDeleteTaskId.value = ''
   }
 
   if (!confirmDiscardPreviewChanges(closePreview)) return
@@ -429,6 +625,7 @@ async function initializeDashboardData() {
 
   hasInitializedTodoRange = true
   await nextTick()
+  await consumeDesktopTodoDetailQuery()
   consumeDesktopTodoText()
 }
 
@@ -454,6 +651,31 @@ function clearDesktopTodoTextQuery() {
     query,
     hash: route.hash,
   })
+}
+
+function clearDesktopTodoDetailQuery() {
+  void router.replace({
+    path: route.path,
+    query: buildClearedDesktopTodoDetailQuery(route.query),
+    hash: route.hash,
+  })
+}
+
+async function consumeDesktopTodoDetailQuery() {
+  if (isConsumingDesktopTodoDetail || !hasInitializedTodoRange) return false
+
+  const request = getDesktopTodoDetailRequest(route.query)
+  if (!request) return false
+
+  isConsumingDesktopTodoDetail = true
+  try {
+    await openTodoFromNotification({ id: request.todoId })
+  } finally {
+    clearDesktopTodoDetailQuery()
+    isConsumingDesktopTodoDetail = false
+  }
+
+  return true
 }
 
 function consumeDesktopTodoText() {
@@ -483,13 +705,24 @@ watch(
   () => route.query.desktopTodoText,
   async () => {
     await nextTick()
+    if (getDesktopTodoDetailRequest(route.query)) return
+    consumeDesktopTodoText()
+  },
+)
+
+watch(
+  () => route.query.desktopTodoId,
+  async () => {
+    await nextTick()
+    await consumeDesktopTodoDetailQuery()
     consumeDesktopTodoText()
   },
 )
 
 function confirmDiscardPreviewChanges(onConfirm?: () => void) {
   if (!isDayPreviewFormDirty.value) return true
-  dayPreviewPanelRef.value?.showDiscardWarning(onConfirm)
+  const panelRef = homePanelMode.value === 'edit' ? dayPreviewEditPanelRef : dayPreviewPanelRef
+  panelRef.value?.showDiscardWarning(onConfirm)
   return false
 }
 
@@ -499,7 +732,9 @@ function quickCreateTodo(prompt: string, date: string) {
     quickCreatePrompt.value = prompt
     presetCreateTime.value = ''
     quickCreateKey.value += 1
+    activePanelTaskId.value = ''
     selectDate(date)
+    homePanelMode.value = 'create'
     openTodoPanel()
   }
 
@@ -527,7 +762,7 @@ async function createTodo(payload: CalendarTodoDraft) {
     await serviceCreateTodo(payload)
     await refreshTodos()
     selectDate(payload.date)
-    openTodoPanel()
+    closeDayPreview()
     showToast('待办已创建')
   } catch {
     // 全局拦截器已统一提示错误
@@ -538,8 +773,15 @@ async function updateTodo(payload: CalendarTodoUpdate) {
   try {
     await serviceUpdateTodo(payload)
     await refreshTodos()
+    isDayPreviewFormDirty.value = false
+    homePanelMode.value = 'view'
     selectDate(payload.date)
-    openTodoPanel()
+    if (activePanelTaskId.value) {
+      const task = selectedEvents.value.find((event) => event.id === activePanelTaskId.value)
+      if (task) {
+        await loadPanelTaskDetail(task)
+      }
+    }
     showToast('待办已保存')
   } catch {
     // 全局拦截器已统一提示错误
@@ -549,11 +791,13 @@ async function updateTodo(payload: CalendarTodoUpdate) {
 async function updateTodoStatus(id: string, status: CalendarEventStatus) {
   try {
     const updated = await updateTodoStatusOptimistically(id, status)
-    if (updated) {
-      showToast(status === 'done' ? '已标记完成' : '已撤销完成')
-    }
+    if (!updated) return false
+
+    showToast(status === 'done' ? '已标记完成' : '已撤销完成')
+    return true
   } catch {
     // 全局拦截器已统一提示错误
+    return false
   }
 }
 
@@ -570,11 +814,12 @@ async function deleteTodo(id: string) {
 
 async function openTodoFromNotification(payload: { id: string; date?: string }) {
   let targetDate = payload.date
+  let cachedDetail: CalendarEvent | null = null
 
   if (!targetDate) {
     try {
-      const detailEvent = await loadTodoDetail(payload.id, currentUser.value, assignableUsers.value)
-      targetDate = detailEvent.date
+      cachedDetail = await loadTodoDetail(payload.id, currentUser.value, assignableUsers.value)
+      targetDate = cachedDetail.date
     } catch {
       showToast('查询消息关联待办失败', 'error')
       return
@@ -583,10 +828,31 @@ async function openTodoFromNotification(payload: { id: string; date?: string }) 
 
   isDayPreviewFormDirty.value = false
   selectDate(targetDate)
+  activePanelTaskId.value = payload.id
+  homePanelMode.value = 'view'
   openTodoPanel()
   await refreshTodos()
-  await nextTick()
-  dayPreviewPanelRef.value?.openEventDetailById(payload.id)
+
+  const task = selectedEvents.value.find((event) => event.id === payload.id)
+  if (task) {
+    await loadPanelTaskDetail(task)
+    return
+  }
+
+  if (!cachedDetail) {
+    try {
+      cachedDetail = await loadTodoDetail(payload.id, currentUser.value, assignableUsers.value)
+    } catch {
+      showToast('查询待办详情失败', 'error')
+      closeDayPreview()
+      return
+    }
+  }
+
+  taskDetails.value = {
+    ...taskDetails.value,
+    [payload.id]: cachedDetail,
+  }
 }
 
 defineExpose({
@@ -619,30 +885,143 @@ defineExpose({
         <aside
           v-if="isDayPreviewOpen"
           class="day-preview-popover"
-          :style="glassStyle"
+          :class="{ 'is-detail-view': homePanelMode === 'view' }"
+          :style="homePanelMode === 'view' ? undefined : glassStyle"
           aria-label="当天待办详情"
           data-tour-target="todo-create-panel"
           @click.stop
           @pointerdown.stop
         >
+          <TodoDetailViewPanel
+            v-if="homePanelMode === 'view' && activePanelTask"
+            :panel="panelTaskDetail"
+            :loading="isPanelDetailLoading"
+            @close="closeDayPreview"
+          >
+            <template #footer>
+              <div
+                class="detail-panel-actions"
+                :class="{
+                  'is-pending-inbox': showPanelPendingInboxActions,
+                  'is-completed-detail':
+                    (showPanelDeleteAction || showPanelEditAction) && !isPanelDeleteConfirming,
+                  'is-delete-confirm': isPanelDeleteConfirming,
+                }"
+              >
+                <template v-if="showPanelPendingInboxActions">
+                  <button
+                    type="button"
+                    class="detail-action accept"
+                    :disabled="pendingActionProcessing || isPanelDetailLoading"
+                    @click="handleAcceptPanelTodo"
+                  >
+                    {{ pendingActionProcessing ? '处理中…' : '接受' }}
+                  </button>
+                  <button
+                    type="button"
+                    class="detail-action reject"
+                    :disabled="pendingActionProcessing || isPanelDetailLoading"
+                    @click="handleRejectPanelTodo"
+                  >
+                    拒绝
+                  </button>
+                </template>
+                <template v-else-if="isPanelDeleteConfirming">
+                  <span class="detail-delete-confirm">确定删除？</span>
+                  <button
+                    type="button"
+                    class="detail-action secondary"
+                    :disabled="deleteActionProcessing"
+                    @click="cancelDeletePanelTask"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    class="detail-action delete"
+                    :disabled="deleteActionProcessing"
+                    @click="confirmDeletePanelTask"
+                  >
+                    {{ deleteActionProcessing ? '删除中…' : '确认删除' }}
+                  </button>
+                </template>
+                <template v-else>
+                  <button
+                    type="button"
+                    class="detail-action primary"
+                    :class="{ 'is-syncing': isTodoStatusUpdating(activePanelTask.id) }"
+                    :disabled="
+                      activePanelTask.completable === false ||
+                      isPanelDetailLoading ||
+                      isTodoStatusUpdating(activePanelTask.id)
+                    "
+                    :aria-busy="isTodoStatusUpdating(activePanelTask.id)"
+                    @click="togglePanelTaskStatus"
+                  >
+                    {{
+                      isTodoStatusUpdating(activePanelTask.id)
+                        ? '处理中...'
+                        : activePanelTask.status === 'done'
+                          ? '恢复待处理'
+                          : '标记完成'
+                    }}
+                  </button>
+                  <button
+                    v-if="showPanelEditAction"
+                    type="button"
+                    class="detail-action secondary"
+                    :disabled="isPanelDetailLoading"
+                    @click="switchPanelToEdit"
+                  >
+                    编辑
+                  </button>
+                  <button
+                    v-if="showPanelDeleteAction"
+                    type="button"
+                    class="detail-action delete"
+                    :disabled="isPanelDetailLoading"
+                    @click="requestDeletePanelTask"
+                  >
+                    删除
+                  </button>
+                </template>
+              </div>
+            </template>
+          </TodoDetailViewPanel>
+
           <DayPreviewPanel
+            v-else-if="homePanelMode === 'edit' && activePanelTask"
+            ref="dayPreviewEditPanelRef"
+            form-only
+            show-close
+            :date="props.selectedDate"
+            :date-label="selectedDateLabel"
+            :events="[activePanelTask]"
+            :special-days="selectedSpecialDays"
+            :current-user="currentUser"
+            :assignable-users="assignableUsers"
+            @update-todo="updateTodo"
+            @dirty-change="isDayPreviewFormDirty = $event"
+            @notify="showToast"
+            @close="requestCloseEditPanel()"
+          />
+
+          <DayPreviewPanel
+            v-else-if="homePanelMode === 'create'"
             ref="dayPreviewPanelRef"
+            form-only
+            show-close
             :date="props.selectedDate"
             :date-label="selectedDateLabel"
             :events="selectedEvents"
             :special-days="selectedSpecialDays"
             :current-user="currentUser"
             :assignable-users="assignableUsers"
-            :status-updating-ids="statusUpdatingIds"
             :quick-create-prompt="quickCreatePrompt"
             :quick-create-key="quickCreateKey"
             :preset-create-time="presetCreateTime"
             :preset-create-key="presetCreateKey"
-            show-close
             @create-todo="createTodo"
-            @update-todo="updateTodo"
-            @update-status="updateTodoStatus"
-            @delete-todo="deleteTodo"
             @dirty-change="isDayPreviewFormDirty = $event"
             @notify="showToast"
             @close="closeDayPreview"
@@ -659,11 +1038,12 @@ defineExpose({
       >
         <DashboardTopBar
           embedded
+          view-mode="simple"
           :portal-target="homeMainPanelRef"
           @calendar-refresh="refreshTodos"
           @open-todo="openTodoFromNotification"
           @start-onboarding="emit('start-onboarding')"
-          @switch-mode="emit('switch-mode', 'detail')"
+          @switch-mode="emit('switch-mode', $event)"
         />
 
         <header class="home-todo-calendar-header">
@@ -764,10 +1144,38 @@ defineExpose({
                 v-for="task in selectedDayPreviewTasks"
                 :key="task.id"
                 class="home-todo-item"
-                :class="{ 'is-done': task.status === 'done' }"
+                :class="{
+                  'is-done': task.status === 'done',
+                  meeting: task.type === 'meeting',
+                  todo: task.type !== 'meeting',
+                }"
               >
+                <div class="home-todo-check-wrap" @click.stop>
+                  <button
+                    type="button"
+                    class="home-todo-check"
+                    :class="{
+                      checked: task.status === 'done',
+                      'is-syncing': isTodoStatusUpdating(task.id),
+                    }"
+                    :aria-label="task.status === 'done' ? '撤销完成' : '标记完成'"
+                    :disabled="task.completable === false || isTodoStatusUpdating(task.id)"
+                    :aria-busy="isTodoStatusUpdating(task.id)"
+                    @click="toggleTodayTaskStatus(task)"
+                  >
+                    <IconCheck v-if="task.status === 'done'" aria-hidden="true" />
+                  </button>
+                </div>
                 <div class="home-todo-item-main">
-                  <time>{{ formatHomeTodoMeta(task) }}</time>
+                  <span
+                    class="home-todo-type-tag"
+                    :class="isMeetingEvent(task) ? 'is-meeting' : 'is-task'"
+                  >
+                    {{ eventTypeLabel(task) }}
+                  </span>
+                  <time class="home-todo-item-time" :class="{ 'is-range': isRangeEvent(task) }">
+                    {{ formatHomeTodoMeta(task) }}
+                  </time>
                   <span class="home-todo-item-title">{{ task.title }}</span>
                   <span v-if="task.status === 'done'" class="home-todo-status-tag">
                     <IconCheck aria-hidden="true" />
@@ -776,31 +1184,19 @@ defineExpose({
                 </div>
                 <div class="home-todo-item-actions">
                   <button
-                    v-if="task.completable !== false"
                     type="button"
-                    class="home-todo-action complete-action"
-                    :class="{
-                      'is-done': task.status === 'done',
-                      'is-syncing': isTodoStatusUpdating(task.id),
-                    }"
-                    :disabled="isTodoStatusUpdating(task.id)"
-                    :aria-busy="isTodoStatusUpdating(task.id)"
-                    @click.stop="toggleTodayTaskStatus(task)"
+                    class="home-todo-action view-action"
+                    @click.stop="openSelectedDayView(task)"
                   >
-                    {{
-                      isTodoStatusUpdating(task.id)
-                        ? '处理中...'
-                        : task.status === 'done'
-                          ? '撤销'
-                          : '完成'
-                    }}
+                    查看
                   </button>
                   <button
+                    v-if="canEditTodoEvent(task)"
                     type="button"
-                    class="home-todo-action detail-action"
-                    @click.stop="openSelectedDayTask(task)"
+                    class="home-todo-action edit-action"
+                    @click.stop="openSelectedDayEdit(task)"
                   >
-                    查看详情
+                    编辑
                   </button>
                 </div>
               </article>
@@ -838,18 +1234,6 @@ defineExpose({
 }
 
 .home-time-mark {
-  --home-glass-text-fill: rgba(248, 252, 255, 0.9);
-  --home-glass-text-gradient: radial-gradient(
-      circle at 22% 20%,
-      rgba(255, 255, 255, 0.96),
-      rgba(255, 255, 255, 0.58) 34%,
-      rgba(236, 246, 255, 0.76) 68%
-    ),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(223, 238, 255, 0.72)),
-    rgba(248, 252, 255, 0.6);
-  --home-glass-text-shadow: 0 1px 0 rgba(255, 255, 255, 0.46),
-    0 14px 34px rgba(15, 23, 42, 0.34),
-    0 2px 8px rgba(15, 23, 42, 0.24);
   position: absolute;
   top: clamp(32px, 4vh, 56px);
   left: clamp(32px, 2.4vw, 48px);
@@ -862,7 +1246,6 @@ defineExpose({
   gap: 12px;
   pointer-events: none;
   user-select: none;
-  filter: drop-shadow(0 18px 30px rgba(15, 23, 42, 0.2));
 }
 
 .home-time-mark__greeting {
@@ -884,9 +1267,9 @@ defineExpose({
 .home-time-mark__greeting strong {
   color: rgba(255, 255, 255, 0.95);
   font-size: clamp(18px, 1.5vw, 22px);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1;
-  letter-spacing: 0;
+  letter-spacing: 0.01em;
 }
 
 .home-time-mark__greeting span {
@@ -894,9 +1277,9 @@ defineExpose({
   color: rgba(255, 255, 255, 0.66);
   padding-left: 12px;
   font-size: clamp(12px, 0.95vw, 14px);
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1;
-  letter-spacing: 0;
+  letter-spacing: 0.04em;
 }
 
 .home-time-mark__time {
@@ -914,9 +1297,9 @@ defineExpose({
   color: rgba(255, 255, 255, 0.94);
   margin: 0;
   font-size: clamp(76px, 7.6vw, 116px);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 0.86;
-  letter-spacing: 0;
+  letter-spacing: -0.015em;
   font-variant-numeric: tabular-nums;
   text-shadow:
     0 1px 0 rgba(255, 255, 255, 0.28),
@@ -953,45 +1336,20 @@ defineExpose({
 
 .home-time-mark__date strong {
   color: rgba(255, 255, 255, 0.95);
-  font-weight: 800;
-  letter-spacing: 0;
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
 .home-time-mark__date em {
   color: rgba(255, 255, 255, 0.78);
   font-style: normal;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .home-time-mark__date span {
   color: rgba(255, 255, 255, 0.55);
-  font-weight: 700;
-  letter-spacing: 0;
-}
-
-.home-time-mark__greeting strong,
-.home-time-mark__greeting span,
-.home-time-mark__time span,
-.home-time-mark__date strong,
-.home-time-mark__date em,
-.home-time-mark__date span {
-  color: var(--home-glass-text-fill);
-  text-shadow: var(--home-glass-text-shadow);
-  -webkit-text-stroke: 0.35px rgba(18, 42, 74, 0.16);
-}
-
-@supports ((-webkit-background-clip: text) or (background-clip: text)) {
-  .home-time-mark__greeting strong,
-  .home-time-mark__greeting span,
-  .home-time-mark__time span,
-  .home-time-mark__date strong,
-  .home-time-mark__date em,
-  .home-time-mark__date span {
-    background: var(--home-glass-text-gradient);
-    background-clip: text;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-  }
+  font-weight: 500;
+  letter-spacing: 0.02em;
 }
 
 .left-column {
@@ -1164,8 +1522,8 @@ defineExpose({
 }
 
 .meeting-stat .home-todo-stat-icon {
-  background: rgba(139, 92, 246, 0.14);
-  color: #8b5cf6;
+  background: rgba(67, 139, 255, 0.14);
+  color: #2f66c9;
 }
 
 .home-todo-stat-copy {
@@ -1218,12 +1576,13 @@ defineExpose({
 .home-todo-item {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
+  gap: 10px;
   flex: 0 0 auto;
   min-height: 50px;
   box-sizing: border-box;
-  padding: 0 14px;
+  padding: 0 14px 0 12px;
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.692);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42);
@@ -1233,6 +1592,52 @@ defineExpose({
     border-color 0.22s ease,
     box-shadow 0.22s ease,
     transform 0.22s ease;
+}
+
+.home-todo-check-wrap {
+  display: grid;
+  place-items: center;
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
+}
+
+.home-todo-check {
+  width: 21px;
+  height: 21px;
+  border: 2px solid #c6d2e2;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  position: relative;
+  box-shadow: 0 2px 7px rgba(62, 91, 128, 0.06);
+  flex-shrink: 0;
+}
+
+.home-todo-check.checked {
+  border-color: #16a34a;
+  background: linear-gradient(180deg, #22c55e, #16a34a);
+  box-shadow:
+    0 0 0 4px rgba(34, 197, 94, 0.12),
+    0 8px 16px -10px rgba(22, 163, 74, 0.72);
+}
+
+.home-todo-check:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.home-todo-check.is-syncing:disabled {
+  opacity: 0.72;
+  cursor: wait;
+}
+
+.home-todo-check svg {
+  width: 14px;
+  height: 14px;
 }
 
 .home-todo-item:hover,
@@ -1249,7 +1654,7 @@ defineExpose({
   padding: 11px 0;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .home-todo-item-actions {
@@ -1299,58 +1704,39 @@ defineExpose({
   color: #1f2f4d;
 }
 
-.home-todo-action:disabled {
-  cursor: wait;
-  opacity: 0.68;
+.home-todo-action.detail-action:hover {
+  background: rgba(67, 139, 255, 0.18);
+  color: #2563eb;
 }
 
-.home-todo-action:disabled:hover {
-  color: #64748b;
-}
-
-.home-todo-action.complete-action {
-  color: #16a34a;
-  background: rgba(34, 197, 94, 0.12);
-}
-
-.home-todo-action.complete-action:hover {
-  background: rgba(34, 197, 94, 0.2);
-  color: #15803d;
-}
-
-.home-todo-action.complete-action.is-done {
-  color: #64748b;
-  background: rgba(148, 163, 184, 0.14);
-}
-
-.home-todo-action.complete-action.is-done:hover {
-  background: rgba(148, 163, 184, 0.22);
-  color: #475569;
-}
-
-.home-todo-action.complete-action.is-syncing,
-.home-todo-action.complete-action.is-syncing:hover {
-  color: #64748b;
-  background: rgba(148, 163, 184, 0.16);
-}
-
-.home-todo-action.detail-action {
+.home-todo-action.view-action {
   color: #438bff;
   background: rgba(67, 139, 255, 0.1);
 }
 
-.home-todo-action.detail-action:hover {
+.home-todo-action.view-action:hover {
   background: rgba(67, 139, 255, 0.18);
   color: #2563eb;
+}
+
+.home-todo-action.edit-action {
+  color: #475569;
+  background: rgba(241, 245, 249, 0.96);
+  border: 1px solid rgba(226, 232, 240, 0.92);
+}
+
+.home-todo-action.edit-action:hover {
+  background: rgba(226, 232, 240, 0.92);
+  color: #1f2f4d;
 }
 
 .home-todo-item-title {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: #1f2f4d;
+  color: #0f172a;
   font-size: 14px;
-  font-weight: 850;
+  font-weight: 720;
   line-height: 1.45;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1359,17 +1745,78 @@ defineExpose({
     opacity 0.22s ease;
 }
 
-.home-todo-item time {
+.home-todo-item-time {
   flex: 0 0 auto;
-  min-width: 42px;
-  color: #8b99ae;
-  font-size: 12px;
+  min-width: 54px;
+  max-width: 124px;
+  padding: 4px 9px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(248, 250, 252, 0.92);
+  color: #475569;
+  font-size: 13px;
   font-weight: 800;
+  letter-spacing: -0.08px;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  text-align: left;
+  line-height: 1.2;
   transition:
-    opacity 0.2s ease,
-    transform 0.2s ease;
+    color 0.22s ease,
+    background 0.22s ease,
+    border-color 0.22s ease,
+    opacity 0.2s ease;
+}
+
+.home-todo-item-time.is-range {
+  min-width: 96px;
+  max-width: 132px;
+  font-size: 12px;
+  letter-spacing: -0.05px;
+}
+
+.home-todo-item.todo .home-todo-item-time {
+  color: #0d6848;
+  background: rgba(236, 253, 245, 0.82);
+  border-color: rgba(34, 197, 94, 0.18);
+}
+
+.home-todo-item.meeting .home-todo-item-time {
+  color: #1d4ed8;
+  background: rgba(239, 246, 255, 0.88);
+  border-color: rgba(59, 130, 246, 0.2);
+}
+
+.home-todo-item.is-done .home-todo-item-time {
+  color: #94a3b8;
+  background: rgba(241, 245, 249, 0.72);
+  border-color: rgba(148, 163, 184, 0.18);
+}
+
+.home-todo-type-tag {
+  flex: 0 0 auto;
+  min-height: 22px;
+  border-radius: 999px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.home-todo-type-tag.is-task {
+  background: rgba(218, 247, 232, 0.86);
+  color: #08724f;
+}
+
+.home-todo-type-tag.is-meeting {
+  background: rgba(219, 234, 254, 0.92);
+  color: #2f66c9;
+}
+
+.home-todo-item.is-done .home-todo-type-tag {
+  opacity: 0.72;
 }
 
 .home-todo-item.is-done {
@@ -1382,7 +1829,7 @@ defineExpose({
 }
 
 .home-todo-item.is-done .home-todo-item-actions {
-  right: 78px;
+  right: 10px;
 }
 
 .home-todo-status-tag {
@@ -1411,14 +1858,20 @@ defineExpose({
   stroke-width: 3px;
 }
 
+.home-todo-item.is-done.meeting .home-todo-status-tag {
+  border-color: rgba(37, 99, 235, 0.22);
+  background: rgba(219, 234, 254, 0.92);
+  color: #1d4ed8;
+}
+
 .home-todo-item:not(.is-done):hover .home-todo-item-title,
 .home-todo-item:not(.is-done):focus-within .home-todo-item-title {
-  padding-right: 132px;
+  padding-right: 120px;
 }
 
 .home-todo-item.is-done:hover .home-todo-item-title,
 .home-todo-item.is-done:focus-within .home-todo-item-title {
-  padding-right: 170px;
+  padding-right: 100px;
 }
 
 .home-week-strip {
@@ -1484,7 +1937,7 @@ defineExpose({
   bottom: clamp(24px, 3.2vh, 40px);
   right: calc(clamp(32px, 2.4vw, 48px) + clamp(520px, 32vw, 660px) + 22px);
   width: min(530px, calc(100vw - 870px));
-  height: min(680px, calc(100% - 96px));
+  height: min(720px, calc(100% - 48px));
   min-width: 460px;
   box-sizing: border-box;
   border: 1px solid rgba(255, 255, 255, var(--glass-border-opacity, 0.64));
@@ -1500,7 +1953,7 @@ defineExpose({
       rgba(238, 246, 255, var(--glass-gradient-end, 0.2))
     ),
     rgba(248, 252, 255, var(--glass-base-opacity, 0.18));
-  padding: 24px;
+  padding: 0;
   overflow: hidden;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.72),
@@ -1510,8 +1963,37 @@ defineExpose({
   transform: none;
 }
 
-.day-preview-popover :deep(.preview-panel) {
+.day-preview-popover.is-detail-view {
+  border: 1px solid rgba(255, 255, 255, 0.88);
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.98), rgba(246, 250, 255, 0.94));
+  box-shadow:
+    0 28px 72px -34px rgba(15, 23, 42, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.day-preview-popover.is-detail-view :deep(.todo-detail-view-panel) {
   height: 100%;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.day-preview-popover.is-detail-view :deep(.detail-panel-head) {
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.day-preview-popover.is-detail-view :deep(.detail-panel-footer) {
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.day-preview-popover :deep(.preview-panel),
+.day-preview-popover :deep(.todo-detail-view-panel) {
+  height: 100%;
+  min-height: 0;
 }
 
 .day-preview-float-enter-active,
@@ -1577,7 +2059,8 @@ defineExpose({
     right: auto;
     width: 100%;
     min-width: 0;
-    height: 580px;
+    height: 720px;
+    max-height: calc(100vh - 32px);
     transform: none;
   }
 }

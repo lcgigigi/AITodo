@@ -164,10 +164,12 @@ async function confirmEmailProvider() {
       <DashboardTopBar
         v-if="homeViewMode === 'detail'"
         show-tool-dock
+        view-mode="detail"
         @calendar-refresh="handleCalendarRefresh"
         @open-todo="handleOpenTodo"
         @start-onboarding="startOnboardingTour"
         @select-tool="handleTopbarToolSelect"
+        @switch-mode="setHomeViewMode"
       />
       <div class="dashboard-content">
         <KeepAlive>

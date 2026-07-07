@@ -63,6 +63,60 @@ export function collectTrendDates(
   return [...dates].sort().slice(-getTokenUsagePeriodDayCount(periodCode))
 }
 
+export function isDateInRange(date: string, range: TokenUsageDateRange) {
+  return date >= range.startDate && date <= range.endDate
+}
+
+export function getMonthDateRange(yearMonth: string): TokenUsageDateRange {
+  const [yearText, monthText] = yearMonth.split('-')
+  const year = Number(yearText)
+  const month = Number(monthText)
+
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+    return resolveTokenUsageDateRange('last30Days')
+  }
+
+  const start = new Date(year, month - 1, 1)
+  const end = new Date(year, month, 0)
+
+  return {
+    startDate: formatTokenUsageDate(start),
+    endDate: formatTokenUsageDate(end),
+  }
+}
+
+export function getYearDateRange(year: number): TokenUsageDateRange {
+  const safeYear = Number.isFinite(year) ? year : new Date().getFullYear()
+
+  return {
+    startDate: `${safeYear}-01-01`,
+    endDate: `${safeYear}-12-31`,
+  }
+}
+
+export function collectDatesInRange(
+  dailyLists: TokenUsageDailyPoint[][],
+  range: TokenUsageDateRange,
+) {
+  const dates = new Set<string>()
+
+  for (const dailyList of dailyLists) {
+    for (const point of dailyList) {
+      if (point.usageDate && isDateInRange(point.usageDate, range)) {
+        dates.add(point.usageDate)
+      }
+    }
+  }
+
+  return [...dates].sort()
+}
+
+export function sumDailyInRange(dailyList: TokenUsageDailyPoint[], range: TokenUsageDateRange) {
+  return dailyList
+    .filter((point) => isDateInRange(point.usageDate, range))
+    .reduce((sum, point) => sum + point.tokenUsage, 0)
+}
+
 export function sumDailyTokenUsage(
   dailyList: TokenUsageDailyPoint[],
   periodCode: TokenUsagePeriodCode,

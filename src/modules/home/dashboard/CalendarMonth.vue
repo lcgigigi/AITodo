@@ -1,26 +1,24 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onUnmounted, ref } from 'vue'
 import IconChevronLeft from '~icons/lucide/chevron-left'
 import IconChevronRight from '~icons/lucide/chevron-right'
 import type { CalendarDay, CalendarEvent } from './types'
 import {
+  compareCalendarRangeBarEvents,
   formatEventTime,
-  formatMonthEventTime,
   getActiveCalendarDisplayEvents,
   getTodoStatusLabel,
   isAllDayEvent,
-  isCompletedTodoEvent,
   isRangeEvent,
   isRejectedTodo,
 } from './todoDisplay'
 
 type CalendarViewMode = 'month' | 'week'
 type MonthRangeDisplayMode = 'daily' | 'bar'
-type TimelineSlot = {
-  key: string
-  label: string
-  hour?: number
-  isGap?: boolean
+type WeekDaySlotKey = 'morning-early' | 'morning-late' | 'afternoon-early' | 'afternoon-late'
+type WeekDaySlot = {
+  key: WeekDaySlotKey
+  events: CalendarEvent[]
 }
 type MonthRangeSegment = {
   key: string
@@ -48,51 +46,36 @@ const emit = defineEmits<{
   nextPeriod: []
   calendarInteraction: []
   quickCreateTodo: [prompt: string, date: string]
-  switchSimpleMode: []
   openAgentCenter: []
   'update:viewMode': [mode: CalendarViewMode]
 }>()
 
 const weekdays = ['一', '二', '三', '四', '五', '六', '日']
 const dateWeekdays = ['日', '一', '二', '三', '四', '五', '六']
-const timelineEventLimit = 1
-const monthEventLimit = 2
+const monthEventLimit = 3
+const weekSlotEventLimit = 2
 const displayLabel = computed(() =>
   props.viewMode === 'week' ? props.weekLabel : props.monthLabel,
 )
 const periodActionLabel = computed(() => (props.viewMode === 'week' ? '周' : '月'))
 const weekTimelineDays = computed(() => props.days)
 const monthRangeDisplayMode = ref<MonthRangeDisplayMode>('daily')
-const timelineSlots = computed<TimelineSlot[]>(() => {
-  const hours = new Set([9, 10, 11, 16])
-
-  for (const day of weekTimelineDays.value) {
-    for (const event of day.events) {
-      if (isAllDayEvent(event)) continue
-      const hour = eventHour(event.time)
-      if (hour >= 0) hours.add(hour)
-    }
-  }
-
-  return [...hours]
-    .sort((a, b) => a - b)
-    .reduce<TimelineSlot[]>((slots, hour, index, sortedHours) => {
-      const previous = sortedHours[index - 1]
-      if (index > 0 && hour - previous > 1) {
-        slots.push({ key: `gap-${previous}-${hour}`, label: '...', isGap: true })
-      }
-
-      slots.push({ key: String(hour), label: `${String(hour).padStart(2, '0')}:00`, hour })
-      return slots
-    }, [])
-})
+const hoveredWeekDay = ref<string | null>(null)
+const weekDayHoverDelayMs = 1000
+let weekDayHoverTimer: ReturnType<typeof setTimeout> | null = null
+const weekDaySlotDefs: WeekDaySlot[] = [
+  { key: 'morning-early', events: [] },
+  { key: 'morning-late', events: [] },
+  { key: 'afternoon-early', events: [] },
+  { key: 'afternoon-late', events: [] },
+]
 
 const monthRangeSegments = computed<MonthRangeSegment[]>(() => {
   const rangeEvents = new Map<string, CalendarEvent>()
 
   for (const day of props.days) {
     for (const event of day.events) {
-      if (isRangeEvent(event) && !isCompletedTodoEvent(event) && !rangeEvents.has(event.id)) {
+      if (isRangeEvent(event) && !rangeEvents.has(event.id)) {
         rangeEvents.set(event.id, event)
       }
     }
@@ -105,7 +88,7 @@ const monthRangeSegments = computed<MonthRangeSegment[]>(() => {
   const segments: MonthRangeSegment[] = []
 
   ;[...rangeEvents.values()]
-    .sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title))
+    .sort(compareCalendarRangeBarEvents)
     .forEach((event) => {
       const eventEndDate = event.endDate ?? event.date
 
@@ -175,29 +158,78 @@ function weekdayText(date: string) {
   return dateWeekdays[new Date(`${date}T12:00:00`).getDay()]
 }
 
-function eventHour(time?: string) {
-  const hour = Number.parseInt(time?.slice(0, 2) ?? '', 10)
-  return Number.isFinite(hour) ? hour : -1
+function eventDaySlot(event: CalendarEvent): WeekDaySlotKey {
+  if (isAllDayEvent(event)) return 'morning-early'
+
+  const hour = Number.parseInt(event.time?.slice(0, 2) ?? '', 10)
+  if (!Number.isFinite(hour)) return 'morning-early'
+  if (hour < 10) return 'morning-early'
+  if (hour < 12) return 'morning-late'
+  if (hour < 15) return 'afternoon-early'
+  return 'afternoon-late'
 }
 
-function timelineEvents(day: CalendarDay, slot: TimelineSlot) {
-  if (slot.isGap || slot.hour === undefined) return []
-
-  return getActiveCalendarDisplayEvents(
-    day.events.filter((event) => !isAllDayEvent(event) && eventHour(event.time) === slot.hour),
-  )
+function weekEventTimeLabel(event: CalendarEvent) {
+  if (isAllDayEvent(event)) return '全天'
+  return event.time?.slice(0, 5) ?? ''
 }
 
-function allDayEvents(day: CalendarDay) {
-  return getActiveCalendarDisplayEvents(day.events.filter(isAllDayEvent))
+function weekDaySlots(day: CalendarDay): WeekDaySlot[] {
+  const grouped = Object.fromEntries(
+    weekDaySlotDefs.map((slot) => [slot.key, [] as CalendarEvent[]]),
+  ) as Record<WeekDaySlotKey, CalendarEvent[]>
+
+  for (const event of getActiveCalendarDisplayEvents(day.events)) {
+    grouped[eventDaySlot(event)].push(event)
+  }
+
+  return weekDaySlotDefs.map((slot) => ({
+    ...slot,
+    events: grouped[slot.key],
+  }))
 }
 
-function visibleTimelineEvents(day: CalendarDay, slot: TimelineSlot) {
-  return timelineEvents(day, slot).slice(0, timelineEventLimit)
+function visibleWeekSlotEvents(slot: WeekDaySlot) {
+  return slot.events.slice(0, weekSlotEventLimit)
 }
 
-function hiddenTimelineEventCount(day: CalendarDay, slot: TimelineSlot) {
-  return Math.max(timelineEvents(day, slot).length - timelineEventLimit, 0)
+function hiddenWeekSlotEventCount(slot: WeekDaySlot) {
+  return Math.max(slot.events.length - weekSlotEventLimit, 0)
+}
+
+function clearWeekDayHoverTimer() {
+  if (!weekDayHoverTimer) return
+  clearTimeout(weekDayHoverTimer)
+  weekDayHoverTimer = null
+}
+
+function scheduleWeekDayHovered(date: string) {
+  if (hoveredWeekDay.value === date) return
+
+  clearWeekDayHoverTimer()
+  weekDayHoverTimer = setTimeout(() => {
+    hoveredWeekDay.value = date
+    weekDayHoverTimer = null
+  }, weekDayHoverDelayMs)
+}
+
+function clearWeekDayHovered() {
+  clearWeekDayHoverTimer()
+  hoveredWeekDay.value = null
+}
+
+function isWeekDayHovered(date: string) {
+  return hoveredWeekDay.value === date
+}
+
+function weekSlotEventsForDisplay(slot: WeekDaySlot, dayDate: string) {
+  if (isWeekDayHovered(dayDate)) return slot.events
+  return visibleWeekSlotEvents(slot)
+}
+
+function shouldShowWeekSlotMore(slot: WeekDaySlot, dayDate: string) {
+  if (isWeekDayHovered(dayDate)) return false
+  return hiddenWeekSlotEventCount(slot) > 0
 }
 
 function monthInlineEvents(day: CalendarDay) {
@@ -206,16 +238,12 @@ function monthInlineEvents(day: CalendarDay) {
   return events.filter((event) => !isRangeEvent(event))
 }
 
-function monthDisplayEventCount(day: CalendarDay) {
-  return monthInlineEvents(day).length
+function monthTotalEventCount(day: CalendarDay) {
+  return day.events.length
 }
 
 function visibleMonthEvents(day: CalendarDay) {
   return monthInlineEvents(day).slice(0, monthEventLimit)
-}
-
-function hiddenMonthEventCount(day: CalendarDay) {
-  return Math.max(monthInlineEvents(day).length - monthEventLimit, 0)
 }
 
 function monthRangeLaneCount(date: string) {
@@ -231,14 +259,28 @@ function selectDay(day: CalendarDay) {
   emit('select', day.date)
 }
 
-function timelineSlotTime(slot: TimelineSlot) {
-  if (slot.hour === undefined || slot.isGap) return undefined
-  return `${String(slot.hour).padStart(2, '0')}:00`
+function selectWeekDaySlot(day: CalendarDay) {
+  emit('select', day.date)
 }
 
-function selectTimelineCell(day: CalendarDay, slot: TimelineSlot) {
-  emit('select', day.date, timelineSlotTime(slot))
+function selectWeekDayEvent(day: CalendarDay, event: CalendarEvent) {
+  const time = event.time?.trim().slice(0, 5)
+  emit('select', day.date, time || undefined)
 }
+
+function timelineEventLabel(event: CalendarEvent) {
+  const title = event.title?.trim()
+  if (title) return title
+
+  const content = event.content?.trim()
+  if (content) return content
+
+  return '未命名待办'
+}
+
+onUnmounted(() => {
+  clearWeekDayHoverTimer()
+})
 </script>
 
 <template>
@@ -252,17 +294,6 @@ function selectTimelineCell(day: CalendarDay, slot: TimelineSlot) {
         <h2>{{ displayLabel }}</h2>
       </div>
       <div class="calendar-controls">
-        <div class="calendar-mode-toggle" role="tablist" aria-label="视图模式">
-          <button
-            type="button"
-            role="tab"
-            aria-selected="false"
-            @click="emit('switchSimpleMode')"
-          >
-            简约模式
-          </button>
-          <button type="button" role="tab" aria-selected="true" class="active">详细模式</button>
-        </div>
         <button
           v-if="viewMode === 'month'"
           type="button"
@@ -311,66 +342,83 @@ function selectTimelineCell(day: CalendarDay, slot: TimelineSlot) {
     </div>
 
     <div v-if="viewMode === 'week'" class="week-timeline">
-      <div class="timeline-grid">
-        <span class="timeline-axis-head"></span>
-        <button
+      <div class="week-day-columns">
+        <section
           v-for="day in weekTimelineDays"
-          :key="`head-${day.date}`"
-          class="timeline-day-head"
-          :class="{ 'is-selected': day.date === selectedDate, 'is-today': day.isToday }"
-          type="button"
-          @click="emit('select', day.date)"
+          :key="day.date"
+          class="week-day-column"
+          :class="{
+            'is-selected': day.date === selectedDate,
+            'is-today': day.isToday,
+            'is-hovered': isWeekDayHovered(day.date),
+          }"
+          @mouseenter="scheduleWeekDayHovered(day.date)"
+          @mouseleave="clearWeekDayHovered()"
         >
-          <span>周{{ weekdayText(day.date) }}</span>
-          <b>{{ day.day }}</b>
-        </button>
-
-        <span class="timeline-time timeline-all-day-label">全天</span>
-        <button
-          v-for="day in weekTimelineDays"
-          :key="`all-day-${day.date}`"
-          class="timeline-cell timeline-all-day-cell"
-          :class="{ 'is-selected': day.date === selectedDate }"
-          type="button"
-          @click="emit('select', day.date)"
-        >
-          <span
-            v-for="event in allDayEvents(day)"
-            :key="event.id"
-            class="timeline-event timeline-all-day-event"
-            :class="[`type-${event.type}`, { 'is-range': isRangeEvent(event) }]"
-          >
-            <i></i>
-            <time>{{ formatEventTime(event) }}</time>
-            <b>{{ event.title }}</b>
-          </span>
-        </button>
-
-        <template v-for="slot in timelineSlots" :key="slot.key">
-          <span class="timeline-time" :class="{ 'is-gap': slot.isGap }">{{ slot.label }}</span>
           <button
-            v-for="day in weekTimelineDays"
-            :key="`${slot.key}-${day.date}`"
-            class="timeline-cell"
-            :class="{ 'is-selected': day.date === selectedDate, 'is-gap': slot.isGap }"
+            class="week-day-head"
             type="button"
-            @click="selectTimelineCell(day, slot)"
+            @click="emit('select', day.date)"
           >
-            <span
-              v-for="event in visibleTimelineEvents(day, slot)"
-              :key="event.id"
-              class="timeline-event"
-              :class="`type-${event.type}`"
-            >
-              <i></i>
-              <time>{{ formatEventTime(event) }}</time>
-              <b>{{ event.title }}</b>
-            </span>
-            <span v-if="hiddenTimelineEventCount(day, slot) > 0" class="timeline-more">
-              +{{ hiddenTimelineEventCount(day, slot) }}
-            </span>
+            <span>周{{ weekdayText(day.date) }}</span>
+            <b>{{ day.day }}</b>
           </button>
-        </template>
+
+          <div class="week-day-stack">
+            <div
+              v-for="slot in weekDaySlots(day)"
+              :key="slot.key"
+              class="week-period-slot"
+              :class="[
+                `slot-${slot.key}`,
+                {
+                  'has-events': slot.events.length > 0,
+                  'is-single-event': slot.events.length === 1,
+                },
+              ]"
+            >
+              <template v-if="slot.events.length > 0">
+                <button
+                  v-for="event in weekSlotEventsForDisplay(slot, day.date)"
+                  :key="event.id"
+                  class="week-event-cell"
+                  :class="[
+                    `type-${event.type}`,
+                    { 'is-selected': day.date === selectedDate },
+                  ]"
+                  type="button"
+                  :aria-label="`${weekEventTimeLabel(event)} ${timelineEventLabel(event)}`"
+                  @click="selectWeekDayEvent(day, event)"
+                >
+                  <span class="week-event-cell-time">{{ weekEventTimeLabel(event) }}</span>
+                  <span class="week-event-cell-body">
+                    <i></i>
+                    <b>{{ timelineEventLabel(event) }}</b>
+                  </span>
+                </button>
+
+                <button
+                  v-if="shouldShowWeekSlotMore(slot, day.date)"
+                  class="week-slot-more"
+                  type="button"
+                  :aria-label="`还有 ${hiddenWeekSlotEventCount(slot)} 项待办，点击查看当天详情`"
+                  @click="selectWeekDaySlot(day)"
+                >
+                  +{{ hiddenWeekSlotEventCount(slot) }} 更多
+                </button>
+              </template>
+
+              <button
+                v-else
+                class="week-empty-slot"
+                :class="{ 'is-selected': day.date === selectedDate }"
+                type="button"
+                aria-label="暂无待办"
+                @click="selectWeekDaySlot(day)"
+              />
+            </div>
+          </div>
+        </section>
       </div>
     </div>
 
@@ -383,7 +431,7 @@ function selectTimelineCell(day: CalendarDay, slot: TimelineSlot) {
           'is-muted': !day.inMonth,
           'is-today': day.isToday,
           'is-selected': day.date === selectedDate,
-          'has-events': monthDisplayEventCount(day) > 0,
+          'has-events': monthTotalEventCount(day) > 0,
           'has-range-events': monthRangeLaneCount(day.date) > 0,
         }"
         :style="{ '--range-lanes': monthRangeLaneCount(day.date) }"
@@ -395,8 +443,8 @@ function selectTimelineCell(day: CalendarDay, slot: TimelineSlot) {
               <span v-if="day.isToday" class="today-label">今天</span>
             </span>
             <span class="special-list">
-              <span v-if="monthDisplayEventCount(day)" class="event-count-dot">{{
-                monthDisplayEventCount(day)
+              <span v-if="monthTotalEventCount(day)" class="event-count-dot">{{
+                monthTotalEventCount(day)
               }}</span>
               <span
                 v-for="item in day.specialDays.slice(0, 2)"
@@ -427,16 +475,7 @@ function selectTimelineCell(day: CalendarDay, slot: TimelineSlot) {
                 getTodoStatusLabel(event)
               }}</em>
               <i></i>
-              <time v-if="!isRangeEvent(event)">{{ formatMonthEventTime(event) }}</time>
               <b>{{ event.title }}</b>
-            </span>
-            <span
-              v-if="hiddenMonthEventCount(day)"
-              class="more-count"
-              :aria-label="`还有 ${hiddenMonthEventCount(day)} 项安排，点击查看当天详情`"
-              :title="`还有 ${hiddenMonthEventCount(day)} 项安排`"
-            >
-              +{{ hiddenMonthEventCount(day) }}
             </span>
           </span>
         </button>
@@ -519,49 +558,6 @@ h2 {
   align-items: center;
   gap: 10px;
   flex: 0 0 auto;
-}
-
-.calendar-mode-toggle {
-  flex: 0 0 auto;
-  border: 1px solid rgba(255, 255, 255, 0.72);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.58);
-  padding: 3px;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
-}
-
-.calendar-mode-toggle button {
-  height: 30px;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: #60708d;
-  padding: 0 14px;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 900;
-  line-height: 1;
-  white-space: nowrap;
-  cursor: pointer;
-  transition:
-    background 0.18s ease,
-    color 0.18s ease,
-    box-shadow 0.18s ease;
-}
-
-.calendar-mode-toggle button.active {
-  background: linear-gradient(180deg, #5a9bff 0%, #438bff 100%);
-  color: #ffffff;
-  box-shadow:
-    0 8px 18px -10px rgba(67, 139, 255, 0.88),
-    inset 0 1px 0 rgba(255, 255, 255, 0.28);
-}
-
-.calendar-mode-toggle button:not(.active):hover {
-  color: #2f7cff;
 }
 
 .range-style-toggle {
@@ -687,43 +683,61 @@ h2 {
   overflow: hidden;
 }
 
-.timeline-grid {
+.week-day-columns {
   height: 100%;
   min-width: 0;
   min-height: 0;
   box-sizing: border-box;
   border-radius: 14px;
   background: rgba(226, 232, 240, 0.5);
-  padding: 3px;
-  display: grid;
-  grid-template-columns: 54px repeat(7, minmax(0, 1fr));
-  grid-auto-rows: minmax(0, 1fr);
-  gap: 3px;
+  padding: 4px;
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
   overflow: hidden;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.82),
     0 18px 34px -34px rgba(15, 23, 42, 0.5);
 }
 
-.timeline-axis-head,
-.timeline-day-head,
-.timeline-time,
-.timeline-cell {
+.week-day-column {
+  position: relative;
+  flex: 1 1 0;
   min-width: 0;
   min-height: 0;
   box-sizing: border-box;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.42);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: hidden;
+  transition:
+    flex 0.22s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
-.timeline-axis-head,
-.timeline-day-head {
-  background: rgba(248, 250, 252, 0.9);
-  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.78);
+.week-day-column.is-hovered {
+  flex: 2.35 1 0;
+  z-index: 2;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow:
+    0 16px 28px -22px rgba(37, 99, 235, 0.34),
+    inset 0 0 0 1px rgba(147, 197, 253, 0.42);
 }
 
-.timeline-day-head {
+.week-day-column.is-selected {
+  background: rgba(239, 246, 255, 0.62);
+  box-shadow: inset 0 0 0 1px rgba(147, 197, 253, 0.34);
+}
+
+.week-day-head {
+  flex: 0 0 auto;
   border: 0;
-  border-radius: 10px;
-  background: rgba(248, 250, 252, 0.86);
+  border-radius: 9px;
+  background: rgba(248, 250, 252, 0.9);
   color: #64748b;
   padding: 6px 5px;
   display: inline-flex;
@@ -732,16 +746,19 @@ h2 {
   gap: 5px;
   font: inherit;
   cursor: pointer;
+  transition:
+    background 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
-.timeline-day-head span {
+.week-day-head span {
   font-size: 11px;
   font-weight: 900;
   line-height: 1;
   white-space: nowrap;
 }
 
-.timeline-day-head b {
+.week-day-head b {
   width: 21px;
   height: 21px;
   border-radius: 8px;
@@ -754,112 +771,142 @@ h2 {
   line-height: 1;
 }
 
-.timeline-day-head.is-today b,
-.timeline-day-head.is-selected b {
+.week-day-column.is-today .week-day-head b,
+.week-day-column.is-selected .week-day-head b {
   background: #111827;
   color: #ffffff;
 }
 
-.timeline-day-head.is-selected {
+.week-day-column.is-selected .week-day-head {
   background: rgba(239, 246, 255, 0.92);
-  box-shadow:
-    inset 0 0 0 1px rgba(147, 197, 253, 0.45),
-    0 10px 20px -20px rgba(37, 99, 235, 0.56);
+  box-shadow: inset 0 0 0 1px rgba(147, 197, 253, 0.35);
 }
 
-.timeline-time {
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.62);
-  color: #64748b;
-  padding: 8px 6px 0 0;
-  text-align: right;
-  font-size: 11px;
-  font-weight: 900;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-
-.timeline-time.is-gap {
-  color: #94a3b8;
-  font-size: 16px;
-  letter-spacing: 0;
-}
-
-.timeline-cell {
-  position: relative;
-  border: 0;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.62);
-  padding: 5px;
+.week-day-stack {
+  flex: 1;
+  min-height: 0;
   display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  flex-direction: row;
-  gap: 4px;
+  flex-direction: column;
+  gap: 3px;
   overflow: hidden;
+  padding: 1px;
+}
+
+.week-day-column.is-hovered .week-day-stack {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+}
+
+.week-day-column.is-hovered .week-day-stack::-webkit-scrollbar {
+  width: 4px;
+}
+
+.week-day-column.is-hovered .week-day-stack::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.45);
+}
+
+.week-period-slot {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow: hidden;
+}
+
+.week-period-slot.has-events {
+  justify-content: stretch;
+}
+
+.week-day-column.is-hovered .week-period-slot.has-events {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.week-day-column.is-hovered .week-period-slot:not(.has-events) {
+  flex: 0.55 1 0;
+  min-height: 24px;
+}
+
+.week-event-cell {
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.88);
+  padding: 6px 7px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  text-align: left;
+  font: inherit;
   cursor: pointer;
+  box-shadow: 0 10px 18px -18px rgba(15, 23, 42, 0.22);
   transition:
     background 0.18s ease,
-    box-shadow 0.18s ease;
+    box-shadow 0.18s ease,
+    min-height 0.22s ease,
+    padding 0.22s ease,
+    gap 0.22s ease;
+  overflow: hidden;
 }
 
-.timeline-cell:hover {
-  background: rgba(239, 246, 255, 0.56);
-  box-shadow: inset 0 0 0 1px rgba(147, 197, 253, 0.28);
+.week-day-column.is-hovered .week-event-cell {
+  flex: 0 0 auto;
+  min-height: 58px;
+  padding: 9px 10px;
+  gap: 6px;
 }
 
-.timeline-cell.is-selected {
-  background: rgba(239, 246, 255, 0.5);
-  box-shadow: inset 0 0 0 1px rgba(147, 197, 253, 0.3);
+.week-event-cell:hover,
+.week-empty-slot:hover {
+  background: rgba(239, 246, 255, 0.72);
+  box-shadow:
+    inset 0 0 0 1px rgba(147, 197, 253, 0.28),
+    0 12px 20px -18px rgba(37, 99, 235, 0.28);
 }
 
-.timeline-cell.is-gap {
-  background: rgba(248, 250, 252, 0.42);
+.week-event-cell.is-selected,
+.week-empty-slot.is-selected {
+  box-shadow:
+    inset 0 0 0 1px rgba(147, 197, 253, 0.34),
+    0 12px 20px -18px rgba(37, 99, 235, 0.24);
 }
 
-.timeline-all-day-label {
-  padding-top: 9px;
-  color: #2563eb;
+.week-event-cell-time {
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 950;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-.timeline-all-day-cell {
-  align-items: flex-start;
-  flex-direction: column;
-}
-
-.timeline-event {
-  flex: 1 1 auto;
-  max-width: 100%;
-  min-width: 0;
-  min-height: 22px;
-  box-sizing: border-box;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.88);
-  padding: 0 6px;
-  color: #334155;
-  display: inline-flex;
-  align-items: center;
+.week-event-cell-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
   gap: 5px;
-  box-shadow: 0 10px 18px -18px rgba(15, 23, 42, 0.24);
+  color: #334155;
 }
 
-.timeline-event i {
+.week-event-cell-body i {
   width: 5px;
   height: 5px;
+  margin-top: 4px;
   border-radius: 999px;
   background: currentColor;
   flex: 0 0 auto;
 }
 
-.timeline-event time {
-  color: currentColor;
-  font-size: 10px;
-  font-weight: 950;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.timeline-event b {
+.week-event-cell-body b {
   min-width: 0;
   overflow: hidden;
   color: #334155;
@@ -867,42 +914,104 @@ h2 {
   white-space: nowrap;
   font-size: 10px;
   font-weight: 850;
-  line-height: 1;
+  line-height: 1.2;
 }
 
-.timeline-event.is-range,
-.timeline-all-day-event {
+.week-period-slot.is-single-event .week-event-cell-body b {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  white-space: normal;
+}
+
+.week-day-column.is-hovered .week-event-cell-time {
+  font-size: 11px;
+}
+
+.week-day-column.is-hovered .week-event-cell-body b {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  white-space: normal;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.week-slot-more {
+  flex: 0 0 auto;
+  align-self: stretch;
+  min-height: 22px;
+  border: 0;
   border-radius: 9px;
-  background: rgba(239, 246, 255, 0.94);
-}
-
-.timeline-more {
-  width: fit-content;
-  min-height: 20px;
-  border-radius: 999px;
   background: rgba(238, 242, 255, 0.92);
   color: #4338ca;
-  padding: 0 6px;
+  padding: 0 7px;
   display: inline-flex;
   align-items: center;
-  font-size: 10px;
+  justify-content: center;
+  font: inherit;
+  font-size: 9px;
   font-weight: 950;
   line-height: 1;
-  box-shadow: 0 8px 16px -16px rgba(67, 56, 202, 0.55);
-  flex: 0 0 auto;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(199, 210, 254, 0.72);
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
 }
 
-.timeline-event.type-meeting {
+.week-slot-more:hover {
+  background: rgba(224, 231, 255, 0.98);
+  color: #3730a3;
+}
+
+.week-empty-slot {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  border-radius: 9px;
+  background: rgba(248, 250, 252, 0.5);
+  padding: 0;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(226, 232, 240, 0.6);
+  transition:
+    background 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.week-period-slot.slot-morning-early .week-event-cell-time {
   color: #2563eb;
 }
-.timeline-event.type-todo,
-.timeline-event.type-task {
-  color: #059669;
+
+.week-period-slot.slot-morning-late .week-event-cell-time {
+  color: #1d4ed8;
 }
-.timeline-event.type-approval {
+
+.week-period-slot.slot-afternoon-early .week-event-cell-time {
   color: #d97706;
 }
-.timeline-event.type-ai {
+
+.week-period-slot.slot-afternoon-late .week-event-cell-time {
+  color: #b45309;
+}
+
+.week-event-cell.type-meeting,
+.week-event-cell.type-meeting .week-event-cell-body {
+  color: #2563eb;
+}
+.week-event-cell.type-todo,
+.week-event-cell.type-task,
+.week-event-cell.type-todo .week-event-cell-body,
+.week-event-cell.type-task .week-event-cell-body {
+  color: #059669;
+}
+.week-event-cell.type-approval,
+.week-event-cell.type-approval .week-event-cell-body {
+  color: #d97706;
+}
+.week-event-cell.type-ai,
+.week-event-cell.type-ai .week-event-cell-body {
   color: #7c3aed;
 }
 
@@ -1000,8 +1109,7 @@ h2 {
   color: #94a3b8;
 }
 
-.day-cell.is-muted .month-event b,
-.day-cell.is-muted .month-event time {
+.day-cell.is-muted .month-event b {
   color: #94a3b8;
 }
 
@@ -1159,11 +1267,10 @@ h2 {
   width: 100%;
   box-sizing: border-box;
   background: transparent;
-  padding: 4px 4px 4px 12px;
+  padding: 3px 4px 3px 12px;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
+  align-items: center;
+  min-height: 20px;
   min-width: 0;
   transition: background 0.15s ease;
 }
@@ -1174,26 +1281,14 @@ h2 {
 
 .month-event i {
   position: absolute;
-  top: 7px;
+  top: 50%;
   left: 2px;
   width: 6px;
   height: 6px;
-  margin-top: 0;
   border-radius: 50%;
   background: currentColor;
-  transform: none;
+  transform: translateY(-50%);
   flex: 0 0 auto;
-}
-
-.month-event time {
-  color: currentColor;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1.1;
-  opacity: 0.85;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-  order: 1;
 }
 
 .month-event b {
@@ -1206,21 +1301,17 @@ h2 {
   font-size: 11px;
   font-weight: 600;
   line-height: 1.2;
-  order: 2;
 }
 
 .month-event.is-range {
-  min-height: 24px;
+  min-height: 20px;
   background: rgba(239, 246, 255, 0.6);
   color: #64748b;
-  padding: 4px 4px 4px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  padding: 3px 4px 3px 12px;
 }
 
 .month-event.is-range i {
-  top: 7px;
+  top: 50%;
 }
 
 .month-event.is-range b {
@@ -1412,39 +1503,23 @@ h2 {
     gap: 6px;
   }
 
-  .timeline-grid {
-    grid-template-columns: 42px repeat(7, minmax(0, 1fr));
-    gap: 2px;
-    padding: 2px;
+  .week-day-columns {
+    gap: 3px;
+    padding: 3px;
   }
 
-  .timeline-day-head {
+  .week-day-head {
     flex-direction: column;
     gap: 3px;
     padding: 4px 2px;
   }
 
-  .timeline-time {
-    padding-right: 3px;
-    font-size: 9px;
+  .week-event-cell {
+    padding: 5px 6px;
   }
 
-  .timeline-cell {
-    padding: 3px;
-  }
-
-  .timeline-event {
-    min-height: 19px;
-    padding: 0 4px;
-  }
-
-  .timeline-event time {
-    display: none;
-  }
-
-  .timeline-more {
-    min-height: 18px;
-    padding: 0 5px;
+  .week-period-slot.is-single-event .week-event-cell-body b {
+    -webkit-line-clamp: 2;
   }
 
   .day-cell {

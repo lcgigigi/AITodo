@@ -1,39 +1,34 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import IconCheck from '~icons/lucide/check'
-import IconClock3 from '~icons/lucide/clock-3'
-import IconTag from '~icons/lucide/tag'
-import IconUser from '~icons/lucide/user'
-import IconUserCheck from '~icons/lucide/user-check'
-import IconX from '~icons/lucide/x'
 import { routeConfig } from '@/config/route.config'
 import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
 import { useFeedbackStore } from '@/stores/feedback.store'
 import { useRouter } from 'vue-router'
 import CalendarMonth from './CalendarMonth.vue'
 import TodoQuickCreateBar from './components/TodoQuickCreateBar.vue'
+import TodoDetailViewPanel from './components/TodoDetailViewPanel.vue'
 import DayPreviewPanel from './DayPreviewPanel.vue'
-import type { CalendarDay, CalendarEvent, CalendarTodoDraft } from './types'
+import type { CalendarDay, CalendarEvent, CalendarTodoDraft, CalendarTodoUpdate } from './types'
 import {
   compareEvents,
   formatEventTime,
-  formatTodoDetailTimeField,
-  getBackendTodoStatusLabel,
   getEventScheduleDisplay,
-  getSmartTodoKindLabel,
-  getTodoAssigneeDisplayName,
-  getTodoContentDisplay,
-  getTodoCreatorDisplayName,
   isCompletedTodoEvent,
   matchesDetailCategoryFilter,
   matchesDetailStatusFilter,
-  shouldShowTodoAssignerField,
   isAllDayEvent,
   isRangeEvent,
   ymd,
   type DetailCategoryFilter,
   type DetailStatusFilter,
 } from './todoDisplay'
+import {
+  buildTodoDetailPanelViewModel,
+  canEditTodoEvent,
+  getTaskTypeLabel,
+  isPendingAcceptanceTask,
+} from './todoDetailPanel.helpers'
 import {
   acceptTodos,
   createTodo as serviceCreateTodo,
@@ -42,15 +37,17 @@ import {
   getTodoWeekRange,
   loadTodoDetail,
   rejectTodo,
+  updateTodo as serviceUpdateTodo,
 } from './todo.service'
 import { useDashboardTodos } from './useDashboardTodos'
 
 type DayPreviewPanelExpose = {
   openCreateForm: () => void
+  openEditFormById: (id: string) => boolean
   showDiscardWarning: (onConfirm?: () => void) => void
 }
 
-type LeftPanelMode = 'tools' | 'create' | 'detail'
+type LeftPanelMode = 'tools' | 'create' | 'detail' | 'edit'
 
 type DetailMode = 'simple' | 'detail'
 
@@ -93,6 +90,8 @@ const isCreateFormDirty = ref(false)
 const quickCreatePrompt = ref('')
 const quickCreateKey = ref(0)
 const dayPreviewPanelRef = ref<DayPreviewPanelExpose | null>(null)
+const dayPreviewEditPanelRef = ref<DayPreviewPanelExpose | null>(null)
+const isEditFormDirty = ref(false)
 const pendingActionProcessing = ref(false)
 const pendingInboxDetailActive = ref(false)
 const pendingDeleteTaskId = ref('')
@@ -277,48 +276,20 @@ const activeTask = computed(() => {
 const showPendingInboxActions = computed(() => {
   if (!activeTask.value) return false
   if (pendingInboxDetailActive.value) return true
-  return isPendingAcceptanceTask(getTaskDetail(activeTask.value))
+  return isPendingAcceptanceTask(getTaskDetail(activeTask.value), currentUser.value)
 })
-
-type DetailStatusTone = 'accepted' | 'done' | 'rejected' | 'pending' | 'waiting'
 
 const taskDetailPanel = computed(() => {
   const task = activeTask.value
   if (!task) return null
 
-  const detail = getTaskDetail(task)
-  const meta: Array<{ key: string; label: string; value: string }> = [
-    {
-      key: 'type',
-      label: '类型',
-      value: getSmartTodoKindLabel(detail),
-    },
-  ]
+  return buildTodoDetailPanelViewModel(getTaskDetail(task), currentUser.value)
+})
 
-  if (shouldShowTodoAssignerField(detail)) {
-    meta.push({
-      key: 'assigner',
-      label: '指派人',
-      value: getTodoCreatorDisplayName(detail),
-    })
-  }
-
-  meta.push({
-    key: 'receiver',
-    label: '接受人',
-    value: getTodoAssigneeDisplayName(detail),
-  })
-
-  return {
-    title: detail.title || '未命名待办',
-    typeLabel: getTaskTypeLabel(detail),
-    typeTone: detail.type === 'meeting' ? 'meeting' : 'todo',
-    statusLabel: getBackendTodoStatusLabel(detail),
-    statusTone: getDetailStatusTone(detail),
-    time: formatTodoDetailTimeField(detail),
-    content: getTodoContentDisplay(detail),
-    meta,
-  }
+const showDetailEditAction = computed(() => {
+  const task = activeTask.value
+  if (!task) return false
+  return canEditTodoEvent(getTaskDetail(task))
 })
 
 const isActiveDetailLoading = computed(
@@ -353,6 +324,10 @@ function onDetailWorkspaceKeydown(event: KeyboardEvent) {
   if (event.key !== 'Escape') return
   if (leftPanelMode.value === 'create') {
     requestCloseCreateModal()
+    return
+  }
+  if (leftPanelMode.value === 'edit') {
+    requestCloseTaskEdit()
     return
   }
   if (leftPanelMode.value === 'detail') {
@@ -551,10 +526,6 @@ function openAgentCenter() {
   void router.push({ name: 'AgentCenter' })
 }
 
-function switchToSimpleMode() {
-  emit('switch-mode', 'simple')
-}
-
 function resetTaskFilters() {
   categoryFilter.value = DEFAULT_CATEGORY_FILTER
   statusFilter.value = 'all'
@@ -611,6 +582,13 @@ async function openTaskDetail(task: CalendarEvent) {
     closeCreateModal()
   }
 
+  if (leftPanelMode.value === 'edit') {
+    requestCloseTaskEdit(() => {
+      void openTaskDetail(task)
+    })
+    return
+  }
+
   pendingInboxDetailActive.value = false
   leftPanelMode.value = 'detail'
   activeTaskId.value = task.id
@@ -618,11 +596,61 @@ async function openTaskDetail(task: CalendarEvent) {
   await loadTaskDetail(task)
 }
 
+function openTaskEdit() {
+  const task = activeTask.value
+  if (!task || !showDetailEditAction.value) return
+
+  leftPanelMode.value = 'edit'
+  void nextTick(() => {
+    dayPreviewEditPanelRef.value?.openEditFormById(task.id)
+  })
+}
+
+function closeTaskEdit() {
+  isEditFormDirty.value = false
+  if (leftPanelMode.value === 'edit') {
+    leftPanelMode.value = activeTaskId.value ? 'detail' : 'tools'
+  }
+}
+
+function requestCloseTaskEdit(onConfirm?: () => void) {
+  const close = () => {
+    closeTaskEdit()
+    onConfirm?.()
+  }
+
+  if (!isEditFormDirty.value) {
+    close()
+    return
+  }
+
+  dayPreviewEditPanelRef.value?.showDiscardWarning(close)
+}
+
+async function handleUpdateTodo(payload: CalendarTodoUpdate) {
+  try {
+    await serviceUpdateTodo(payload)
+    await refreshTodos()
+    closeTaskEdit()
+    if (activeTaskId.value) {
+      const task =
+        selectedDateEvents.value.find((event) => event.id === activeTaskId.value) ??
+        findEventById(activeTaskId.value)
+      if (task) {
+        await loadTaskDetail(task, true)
+      }
+    }
+    feedbackStore.success('待办已保存')
+  } catch {
+    // 全局拦截器已统一提示错误。
+  }
+}
+
 function closeTaskDetail() {
   activeTaskId.value = ''
   pendingInboxDetailActive.value = false
   pendingDeleteTaskId.value = ''
-  if (leftPanelMode.value === 'detail') {
+  if (leftPanelMode.value === 'detail' || leftPanelMode.value === 'edit') {
     leftPanelMode.value = 'tools'
   }
 }
@@ -759,38 +787,8 @@ function getTaskStatusLabel(task: CalendarEvent) {
   if (task.backendStatus === 6 || task.status === 'done') return '已完成'
   if (task.backendStatus === 9) return '已拒绝'
   if (task.backendStatus === 3) return '已接受'
-  if (isPendingAcceptanceTask(task)) return '待接受'
+  if (isPendingAcceptanceTask(task, currentUser.value)) return '待接受'
   return '待处理'
-}
-
-function getDetailStatusTone(event: CalendarEvent): DetailStatusTone {
-  const label = getBackendTodoStatusLabel(event)
-  if (label === '已完成') return 'done'
-  if (label === '已拒绝') return 'rejected'
-  if (label === '待接受') return 'pending'
-  if (label === '已接受') return 'accepted'
-  return 'waiting'
-}
-
-function isPendingAcceptanceTask(task: CalendarEvent) {
-  if (task.backendStatus === 3 || task.backendStatus === 6 || task.backendStatus === 9) {
-    return false
-  }
-
-  if (task.scope === 'assigned_to_me') return true
-
-  const assigneeIds =
-    task.assigneeId
-      ?.split(',')
-      .map((item) => item.trim())
-      .filter(Boolean) ?? []
-
-  return Boolean(
-    currentUser.value.id &&
-      assigneeIds.includes(currentUser.value.id) &&
-      task.creatorId &&
-      task.creatorId !== currentUser.value.id,
-  )
 }
 
 async function handleAcceptPendingTodo() {
@@ -935,13 +933,6 @@ function getTaskDetail(task: CalendarEvent) {
   return taskDetails.value[task.id] ?? task
 }
 
-function getTaskTypeLabel(event: CalendarEvent) {
-  if (event.type === 'meeting') return '会议'
-  if (event.type === 'approval') return '审批'
-  if (event.type === 'ai') return 'AI'
-  return '待办'
-}
-
 function getProjectText(event: CalendarEvent) {
   const detail = getTaskDetail(event)
   return detail.source || detail.remark || detail.content || '暂无来源说明'
@@ -1000,7 +991,6 @@ function weekRangeLabel(anchorDate: string) {
           @previous-period="changeCalendarPeriod(-1)"
           @next-period="changeCalendarPeriod(1)"
           @quick-create-todo="quickCreateFromCalendar"
-          @switch-simple-mode="switchToSimpleMode"
           @open-agent-center="openAgentCenter"
           @update:view-mode="setCalendarViewMode"
         />
@@ -1193,7 +1183,13 @@ function weekRangeLabel(anchorDate: string) {
         <aside
           v-if="leftPanelMode !== 'tools'"
           class="detail-drawer-panel"
-          :aria-label="leftPanelMode === 'create' ? '完整创建' : '任务详情'"
+          :aria-label="
+            leftPanelMode === 'create'
+              ? '完整创建'
+              : leftPanelMode === 'edit'
+                ? '编辑待办'
+                : '任务详情'
+          "
         >
           <div v-if="leftPanelMode === 'create'" class="left-panel-create-card">
             <DayPreviewPanel
@@ -1216,188 +1212,120 @@ function weekRangeLabel(anchorDate: string) {
             />
           </div>
 
-          <section v-else-if="leftPanelMode === 'detail' && activeTaskId" class="left-panel-detail">
-            <template v-if="activeTask && taskDetailPanel">
-              <header class="detail-panel-head">
-                <div class="detail-panel-head-main">
-                  <span class="detail-panel-kicker">任务详情</span>
-                  <div class="detail-panel-badges">
-                    <span class="detail-type-badge" :class="taskDetailPanel.typeTone">
-                      {{ taskDetailPanel.typeLabel }}
-                    </span>
-                    <span class="detail-status-badge" :class="taskDetailPanel.statusTone">
-                      {{ taskDetailPanel.statusLabel }}
-                    </span>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  class="detail-panel-close"
-                  aria-label="关闭详情"
-                  @click="closeTaskDetail"
-                >
-                  <IconX aria-hidden="true" />
-                </button>
-              </header>
+          <div v-else-if="leftPanelMode === 'edit' && activeTask" class="left-panel-create-card">
+            <DayPreviewPanel
+              ref="dayPreviewEditPanelRef"
+              form-only
+              show-close
+              :date="props.selectedDate"
+              :date-label="selectedDateLabel"
+              :events="[activeTask]"
+              :special-days="[]"
+              :current-user="currentUser"
+              :assignable-users="assignableUsers"
+              @update-todo="handleUpdateTodo"
+              @dirty-change="isEditFormDirty = $event"
+              @notify="notifyFromPreview"
+              @close="requestCloseTaskEdit()"
+            />
+          </div>
 
+          <TodoDetailViewPanel
+            v-else-if="leftPanelMode === 'detail' && activeTaskId"
+            :panel="taskDetailPanel"
+            :loading="isActiveDetailLoading"
+            @close="closeTaskDetail"
+          >
+            <template v-if="activeTask" #footer>
               <div
-                class="detail-panel-body"
-                :class="{ 'is-loading': isActiveDetailLoading }"
-                :aria-busy="isActiveDetailLoading"
+                class="detail-panel-actions"
+                :class="{
+                  'is-pending-inbox': showPendingInboxActions,
+                  'is-completed-detail':
+                    (showDetailDeleteAction || showDetailEditAction) && !isDetailDeleteConfirming,
+                  'is-delete-confirm': isDetailDeleteConfirming,
+                }"
               >
-                <div v-if="isActiveDetailLoading" class="detail-panel-skeleton" aria-hidden="true">
-                  <div class="detail-skeleton-title detail-skeleton-block"></div>
-                  <div class="detail-skeleton-desc detail-skeleton-block"></div>
-                  <div class="detail-skeleton-desc detail-skeleton-block is-short"></div>
-
-                  <div class="detail-skeleton-time-card">
-                    <div class="detail-skeleton-icon detail-skeleton-block"></div>
-                    <div class="detail-skeleton-time-copy">
-                      <div class="detail-skeleton-label detail-skeleton-block"></div>
-                      <div class="detail-skeleton-line detail-skeleton-block"></div>
-                    </div>
-                  </div>
-
-                  <div class="detail-skeleton-meta-grid">
-                    <div class="detail-skeleton-meta-item">
-                      <div class="detail-skeleton-icon detail-skeleton-block"></div>
-                      <div class="detail-skeleton-meta-copy">
-                        <div class="detail-skeleton-label detail-skeleton-block"></div>
-                        <div class="detail-skeleton-line detail-skeleton-block"></div>
-                      </div>
-                    </div>
-                    <div class="detail-skeleton-meta-item">
-                      <div class="detail-skeleton-icon detail-skeleton-block"></div>
-                      <div class="detail-skeleton-meta-copy">
-                        <div class="detail-skeleton-label detail-skeleton-block"></div>
-                        <div class="detail-skeleton-line detail-skeleton-block"></div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
+                <template v-if="showPendingInboxActions">
+                  <button
+                    type="button"
+                    class="detail-action accept"
+                    :disabled="pendingActionProcessing || isActiveDetailLoading"
+                    @click="handleAcceptPendingTodo"
+                  >
+                    {{ pendingActionProcessing ? '处理中…' : '接受' }}
+                  </button>
+                  <button
+                    type="button"
+                    class="detail-action reject"
+                    :disabled="pendingActionProcessing || isActiveDetailLoading"
+                    @click="handleRejectPendingTodo"
+                  >
+                    拒绝
+                  </button>
+                </template>
+                <template v-else-if="isDetailDeleteConfirming">
+                  <span class="detail-delete-confirm">确定删除？</span>
+                  <button
+                    type="button"
+                    class="detail-action secondary"
+                    :disabled="deleteActionProcessing"
+                    @click="cancelDeleteActiveTask"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    class="detail-action delete"
+                    :disabled="deleteActionProcessing"
+                    @click="confirmDeleteActiveTask"
+                  >
+                    {{ deleteActionProcessing ? '删除中…' : '确认删除' }}
+                  </button>
+                </template>
                 <template v-else>
-                  <h2 class="detail-panel-title">{{ taskDetailPanel.title }}</h2>
-                  <p class="detail-panel-desc">{{ taskDetailPanel.content }}</p>
-
-                  <section class="detail-time-card" aria-label="时间安排">
-                    <span class="detail-time-icon" aria-hidden="true">
-                      <IconClock3 />
-                    </span>
-                    <div class="detail-time-main">
-                      <span class="detail-field-label">时间安排</span>
-                      <div class="detail-time-lines">
-                        <template v-if="Array.isArray(taskDetailPanel.time)">
-                          <span class="detail-time-line">{{ taskDetailPanel.time[0] }}</span>
-                          <span class="detail-time-separator" aria-hidden="true">→</span>
-                          <span class="detail-time-line">{{ taskDetailPanel.time[1] }}</span>
-                        </template>
-                        <span v-else class="detail-time-line">{{ taskDetailPanel.time }}</span>
-                      </div>
-                    </div>
-                  </section>
-
-                  <section class="detail-meta-grid" aria-label="任务信息">
-                    <article
-                      v-for="item in taskDetailPanel.meta"
-                      :key="item.key"
-                      class="detail-meta-item"
-                    >
-                      <span class="detail-meta-icon" aria-hidden="true">
-                        <IconTag v-if="item.key === 'type'" />
-                        <IconUser v-else-if="item.key === 'assigner'" />
-                        <IconUserCheck v-else />
-                      </span>
-                      <div class="detail-meta-copy">
-                        <span class="detail-field-label">{{ item.label }}</span>
-                        <strong>{{ item.value }}</strong>
-                      </div>
-                    </article>
-                  </section>
+                  <button
+                    type="button"
+                    class="detail-action primary"
+                    :class="{ 'is-syncing': isTodoStatusUpdating(activeTask.id) }"
+                    :disabled="
+                      activeTask.completable === false ||
+                      isActiveDetailLoading ||
+                      isTodoStatusUpdating(activeTask.id)
+                    "
+                    :aria-busy="isTodoStatusUpdating(activeTask.id)"
+                    @click="toggleDetailTaskStatus"
+                  >
+                    {{
+                      isTodoStatusUpdating(activeTask.id)
+                        ? '处理中...'
+                        : activeTask.status === 'done'
+                          ? '恢复待处理'
+                          : '标记完成'
+                    }}
+                  </button>
+                  <button
+                    v-if="showDetailEditAction"
+                    type="button"
+                    class="detail-action secondary"
+                    :disabled="isActiveDetailLoading"
+                    @click="openTaskEdit"
+                  >
+                    编辑
+                  </button>
+                  <button
+                    v-if="showDetailDeleteAction"
+                    type="button"
+                    class="detail-action delete"
+                    :disabled="isActiveDetailLoading"
+                    @click="requestDeleteActiveTask"
+                  >
+                    删除
+                  </button>
                 </template>
               </div>
-
-              <footer class="detail-panel-footer">
-                <div
-                  class="detail-panel-actions"
-                  :class="{
-                    'is-pending-inbox': showPendingInboxActions,
-                    'is-completed-detail': showDetailDeleteAction && !isDetailDeleteConfirming,
-                    'is-delete-confirm': isDetailDeleteConfirming,
-                  }"
-                >
-                  <template v-if="showPendingInboxActions">
-                    <button
-                      type="button"
-                      class="detail-action accept"
-                      :disabled="pendingActionProcessing || isActiveDetailLoading"
-                      @click="handleAcceptPendingTodo"
-                    >
-                      {{ pendingActionProcessing ? '处理中…' : '接受' }}
-                    </button>
-                    <button
-                      type="button"
-                      class="detail-action reject"
-                      :disabled="pendingActionProcessing || isActiveDetailLoading"
-                      @click="handleRejectPendingTodo"
-                    >
-                      拒绝
-                    </button>
-                  </template>
-                  <template v-else-if="isDetailDeleteConfirming">
-                    <span class="detail-delete-confirm">确定删除？</span>
-                    <button
-                      type="button"
-                      class="detail-action secondary"
-                      :disabled="deleteActionProcessing"
-                      @click="cancelDeleteActiveTask"
-                    >
-                      取消
-                    </button>
-                    <button
-                      type="button"
-                      class="detail-action delete"
-                      :disabled="deleteActionProcessing"
-                      @click="confirmDeleteActiveTask"
-                    >
-                      {{ deleteActionProcessing ? '删除中…' : '确认删除' }}
-                    </button>
-                  </template>
-                  <template v-else>
-                    <button
-                      type="button"
-                      class="detail-action primary"
-                      :class="{ 'is-syncing': isTodoStatusUpdating(activeTask.id) }"
-                      :disabled="
-                        activeTask.completable === false ||
-                        isActiveDetailLoading ||
-                        isTodoStatusUpdating(activeTask.id)
-                      "
-                      :aria-busy="isTodoStatusUpdating(activeTask.id)"
-                      @click="toggleDetailTaskStatus"
-                    >
-                      {{
-                        isTodoStatusUpdating(activeTask.id)
-                          ? '处理中...'
-                          : activeTask.status === 'done'
-                            ? '恢复待处理'
-                            : '标记完成'
-                      }}
-                    </button>
-                    <button
-                      v-if="showDetailDeleteAction"
-                      type="button"
-                      class="detail-action delete"
-                      :disabled="isActiveDetailLoading"
-                      @click="requestDeleteActiveTask"
-                    >
-                      删除
-                    </button>
-                  </template>
-                </div>
-              </footer>
             </template>
-          </section>
+          </TodoDetailViewPanel>
         </aside>
       </Transition>
     </section>
@@ -1549,10 +1477,10 @@ function weekRangeLabel(anchorDate: string) {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.44);
-  border: 1px solid rgba(255, 255, 255, 0.64);
-  padding: 16px;
+  border-radius: 22px;
+  background: transparent;
+  border: 0;
+  padding: 0;
   overflow: hidden;
   box-sizing: border-box;
 }
@@ -1636,8 +1564,15 @@ function weekRangeLabel(anchorDate: string) {
 }
 
 .detail-status-badge.done {
-  color: #047857;
-  background: rgba(220, 252, 231, 0.92);
+  color: #166534;
+  background: rgba(220, 252, 231, 0.94);
+  border: 1px solid rgba(22, 163, 74, 0.22);
+}
+
+.detail-status-badge.done::before {
+  content: '✓';
+  margin-right: 5px;
+  font-weight: 900;
 }
 
 .detail-status-badge.rejected {
@@ -2438,7 +2373,7 @@ function weekRangeLabel(anchorDate: string) {
 }
 
 .task-card + .task-card {
-  margin-top: 2px;
+  margin-top: 6px;
 }
 
 .task-card.todo {
@@ -2576,8 +2511,11 @@ function weekRangeLabel(anchorDate: string) {
 }
 
 .task-check.checked {
-  border-color: #3478f6;
-  background: #3478f6;
+  border-color: #16a34a;
+  background: linear-gradient(180deg, #22c55e, #16a34a);
+  box-shadow:
+    0 0 0 4px rgba(34, 197, 94, 0.12),
+    0 8px 16px -10px rgba(22, 163, 74, 0.72);
 }
 
 .task-check:disabled {
@@ -2778,8 +2716,16 @@ function weekRangeLabel(anchorDate: string) {
 }
 
 .task-status.done {
-  color: #526f7f;
-  background: rgba(217, 226, 235, 0.74);
+  color: #166534;
+  background: rgba(220, 252, 231, 0.9);
+  border: 1px solid rgba(22, 163, 74, 0.22);
+}
+
+.task-status.done::before {
+  content: '✓';
+  margin-right: 5px;
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .task-arrow {
@@ -2796,15 +2742,96 @@ function weekRangeLabel(anchorDate: string) {
 }
 
 .task-card.completed .task-name {
-  color: #75839a;
+  color: #64748b;
   text-decoration: line-through;
-  text-decoration-thickness: 1px;
+  text-decoration-color: rgba(22, 101, 52, 0.36);
+  text-decoration-thickness: 1.5px;
+}
+
+.task-card.completed,
+.task-card.completed.todo,
+.task-card.completed.selected,
+.task-card.completed.todo.selected {
+  background: linear-gradient(
+    90deg,
+    rgba(220, 252, 231, 0.52),
+    rgba(248, 250, 252, 0.76) 44%,
+    rgba(255, 255, 255, 0.34) 100%
+  );
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.08);
+}
+
+.task-card.completed.meeting,
+.task-card.completed.meeting.selected {
+  background: linear-gradient(
+    90deg,
+    rgba(219, 234, 254, 0.56),
+    rgba(248, 250, 252, 0.76) 44%,
+    rgba(255, 255, 255, 0.34) 100%
+  );
+  box-shadow: inset 0 0 0 1px rgba(52, 120, 246, 0.1);
+}
+
+.task-card.completed:hover,
+.task-card.completed.todo:hover {
+  transform: translateX(2px);
+  background: linear-gradient(
+    90deg,
+    rgba(187, 247, 208, 0.6),
+    rgba(248, 250, 252, 0.86) 44%,
+    rgba(255, 255, 255, 0.42) 100%
+  );
+  box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.1);
+}
+
+.task-card.completed.meeting:hover {
+  transform: translateX(2px);
+  background: linear-gradient(
+    90deg,
+    rgba(191, 219, 254, 0.64),
+    rgba(248, 250, 252, 0.86) 44%,
+    rgba(255, 255, 255, 0.42) 100%
+  );
+  box-shadow: inset 0 0 0 1px rgba(52, 120, 246, 0.14);
+}
+
+.task-card.completed .task-time,
+.task-card.completed .task-time-sub,
+.task-card.completed .task-sub {
+  color: #94a3b8;
+}
+
+.task-card.completed .task-tag {
+  color: #64748b;
+  background: rgba(226, 232, 240, 0.78);
+}
+
+.task-card.completed .task-arrow {
+  color: #94a3b8;
 }
 
 .task-card.completed .task-time-wrap::before {
-  border-color: #9fb1c5;
-  background: #fff;
-  box-shadow: none;
+  border-color: #16a34a;
+  background: #dcfce7;
+  box-shadow: 0 0 0 5px rgba(34, 197, 94, 0.1);
+}
+
+.task-card.completed.meeting .task-time-wrap::before {
+  border-color: #3478f6;
+  background: #dbeafe;
+  box-shadow: 0 0 0 5px rgba(52, 120, 246, 0.1);
+}
+
+.task-card.completed.meeting .task-tag.meeting {
+  color: #1d4ed8;
+  background: rgba(219, 234, 254, 0.92);
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.22);
+}
+
+.task-card.completed.meeting .task-status.done {
+  color: #1d4ed8;
+  background: rgba(219, 234, 254, 0.92);
+  border: 1px solid rgba(37, 99, 235, 0.22);
 }
 
 .side-content-card {

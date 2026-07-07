@@ -2,11 +2,15 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import IconChevronDown from '~icons/lucide/chevron-down'
+import IconLayoutDashboard from '~icons/lucide/layout-dashboard'
 import IconLogOut from '~icons/lucide/log-out'
 import IconRefreshCw from '~icons/lucide/refresh-cw'
 import IconSettings from '~icons/lucide/settings'
 import IconSparkles from '~icons/lucide/sparkles'
 import DashboardNotificationCenter from '@/modules/home/dashboard/components/DashboardNotificationCenter.vue'
+import DashboardViewModeSwitch, {
+  type DashboardViewMode,
+} from '@/modules/home/dashboard/components/DashboardViewModeSwitch.vue'
 import TopbarToolDock from '@/modules/home/dashboard/components/TopbarToolDock.vue'
 import homeCardLogoImage from '@/assets/logo.png'
 import { routeConfig } from '@/config/route.config'
@@ -31,12 +35,14 @@ const props = withDefaults(
     hideNotifications?: boolean
     showToolDock?: boolean
     portalTarget?: HTMLElement | null
+    viewMode?: DashboardViewMode | null
   }>(),
   {
     embedded: false,
     hideNotifications: false,
     showToolDock: false,
     portalTarget: null,
+    viewMode: null,
   },
 )
 
@@ -140,6 +146,13 @@ function openOnboardingTour() {
   emit('start-onboarding')
 }
 
+function openLeaderBoard() {
+  closeNotificationPanel()
+  closeUserMenu()
+  closeSettingsMenu()
+  void router.push({ name: 'LeaderBoard' })
+}
+
 async function handleLogout() {
   if (isLoggingOut.value) {
     return
@@ -210,11 +223,7 @@ onBeforeUnmount(() => {
     aria-label="顶部导航"
     data-tour-target="dashboard-topbar"
   >
-    <div
-      class="brand-block"
-      :class="{ 'is-embedded': props.embedded }"
-      aria-label="AI办公平台"
-    >
+    <div class="brand-block" :class="{ 'is-embedded': props.embedded }" aria-label="AI办公平台">
       <img class="brand-logo" :src="homeCardLogoImage" alt="" />
       <span class="brand-title">AI办公平台</span>
     </div>
@@ -225,20 +234,12 @@ onBeforeUnmount(() => {
       @select="(payload) => emit('select-tool', payload)"
     />
 
-    <div
-      v-if="props.embedded"
-      class="embedded-mode-toggle"
-      role="tablist"
-      aria-label="视图模式"
-      data-tour-target="detail-mode"
-    >
-      <button type="button" role="tab" aria-selected="true" class="active">简约模式</button>
-      <button type="button" role="tab" aria-selected="false" @click="emit('switch-mode', 'detail')">
-        详细模式
-      </button>
-    </div>
-
     <div class="topbar-actions" :class="{ 'is-embedded-actions': props.embedded }">
+      <DashboardViewModeSwitch
+        v-if="props.viewMode"
+        :model-value="props.viewMode"
+        @update:model-value="(mode) => emit('switch-mode', mode)"
+      />
       <DashboardNotificationCenter
         v-if="!props.hideNotifications"
         v-model:open="isNotificationPanelOpen"
@@ -292,6 +293,10 @@ onBeforeUnmount(() => {
               >
                 <IconRefreshCw aria-hidden="true" :class="{ 'is-spinning': isSyncingCalendar }" />
                 <span>{{ isSyncingCalendar ? '同步中…' : '同步邮箱日程' }}</span>
+              </button>
+              <button type="button" class="settings-menu-item" @click="openLeaderBoard">
+                <IconLayoutDashboard aria-hidden="true" />
+                <span>领导者看板</span>
               </button>
             </section>
           </Transition>
@@ -737,7 +742,11 @@ onBeforeUnmount(() => {
 }
 
 .dashboard-topbar.has-tool-dock {
-  grid-template-columns: minmax(230px, 0.72fr) minmax(0, 1.28fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+}
+
+.dashboard-topbar.is-embedded {
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .dashboard-topbar.is-embedded.notification-open {
@@ -759,7 +768,6 @@ onBeforeUnmount(() => {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   overflow: visible;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 10px;
 }
@@ -770,60 +778,29 @@ onBeforeUnmount(() => {
   padding-left: 2px;
 }
 
-.embedded-mode-toggle {
-  grid-column: 2;
-  justify-self: center;
-  flex: 0 0 auto;
-  border: 1px solid rgba(255, 255, 255, 0.72);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.58);
-  padding: 3px;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
-}
-
-.embedded-mode-toggle button {
-  height: 30px;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: #60708d;
-  padding: 0 14px;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 900;
-  line-height: 1;
-  white-space: nowrap;
-  cursor: pointer;
-  transition:
-    background 0.18s ease,
-    color 0.18s ease,
-    box-shadow 0.18s ease;
-}
-
-.embedded-mode-toggle button.active {
-  background: linear-gradient(180deg, #5a9bff 0%, #438bff 100%);
-  color: #ffffff;
-  box-shadow:
-    0 8px 18px -10px rgba(67, 139, 255, 0.88),
-    inset 0 1px 0 rgba(255, 255, 255, 0.28);
-}
-
-.embedded-mode-toggle button:not(.active):hover {
-  color: #2f7cff;
-}
-
 .topbar-actions.is-embedded-actions {
-  grid-column: 3;
+  grid-column: 2;
   justify-self: end;
   gap: 8px;
   padding-right: 0;
 }
 
+.dashboard-topbar.has-tool-dock .topbar-tool-dock {
+  grid-column: 2;
+  justify-self: center;
+}
+
+.dashboard-topbar.has-tool-dock .brand-block {
+  justify-self: start;
+}
+
+.dashboard-topbar.has-tool-dock .topbar-actions {
+  justify-self: end;
+}
+
 .topbar-tool-dock {
   min-width: 0;
+  max-width: 100%;
 }
 
 .brand-block {
@@ -927,7 +904,7 @@ onBeforeUnmount(() => {
 
 @media (max-width: 760px) {
   .dashboard-topbar.is-embedded {
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
   }
 
@@ -945,13 +922,8 @@ onBeforeUnmount(() => {
     font-size: 15px;
   }
 
-  .embedded-mode-toggle {
-    grid-column: 2;
-    justify-self: center;
-  }
-
   .topbar-actions.is-embedded-actions {
-    grid-column: 3;
+    grid-column: 2;
   }
 }
 
@@ -961,7 +933,7 @@ onBeforeUnmount(() => {
   }
 
   .dashboard-topbar.has-tool-dock {
-    grid-template-columns: minmax(190px, 0.68fr) minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     gap: 12px;
   }
 

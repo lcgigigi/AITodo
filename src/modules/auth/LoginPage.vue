@@ -13,6 +13,7 @@ import { routeConfig } from '@/config/route.config'
 import { APP_TITLE } from '@/shared/constants/app'
 import { useUserStore } from '@/stores/user.store'
 import { loadCurrentUser, loginSmartTodo } from '@/modules/home/dashboard/todo.service'
+import { getDesktopAuthRequest, redirectDesktopAuthCallback } from './desktop-auth'
 
 const route = useRoute()
 const router = useRouter()
@@ -129,6 +130,17 @@ async function submitLogin() {
 
     const profile = await loadCurrentUser({ silent: true })
     userStore.setProfile(profile)
+
+    const desktopAuthRequest = getDesktopAuthRequest(route.query)
+    if (desktopAuthRequest) {
+      redirectDesktopAuthCallback({
+        callback: desktopAuthRequest.callback,
+        state: desktopAuthRequest.state,
+        token,
+        profile,
+      })
+      return
+    }
 
     isExiting.value = true
     lockPageScroll()

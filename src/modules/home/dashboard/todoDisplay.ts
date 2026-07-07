@@ -36,6 +36,14 @@ export function isRangeEvent(event: CalendarEvent) {
   return Boolean(event.endDate)
 }
 
+export function isSameDayRangeEvent(event: CalendarEvent) {
+  return isRangeEvent(event) && (event.endDate ?? event.date) === event.date
+}
+
+export function isTimedRangeEvent(event: CalendarEvent) {
+  return isRangeEvent(event) && Boolean(event.time || event.endTime)
+}
+
 export function isAllDayEvent(event: CalendarEvent) {
   return !event.time || isRangeEvent(event)
 }
@@ -91,6 +99,35 @@ export function formatEventTime(event: CalendarEvent, allDayText = '全天') {
   return `${start} ~ ${end}`
 }
 
+export function formatEventTimeForDayList(
+  event: CalendarEvent,
+  selectedDate: string,
+  options?: { isToday?: boolean; todayText?: string; allDayText?: string },
+) {
+  const allDayText = options?.allDayText ?? '全天'
+  const display = getEventScheduleDisplay(event, allDayText)
+
+  if (display.kind === 'range') {
+    if (isSameDayRangeEvent(event) && event.date === selectedDate) {
+      const start = display.start.time || display.start.date
+      const end = display.end.time || ''
+      return end ? `${start} ~ ${end}` : start
+    }
+    return formatEventTime(event, allDayText)
+  }
+
+  if (display.kind === 'time') return display.time
+
+  if (display.kind === 'allDay') {
+    if (options?.isToday && event.date === selectedDate && options.todayText) {
+      return options.todayText
+    }
+    return display.label
+  }
+
+  return formatEventTime(event, allDayText)
+}
+
 export function formatMonthEventTime(event: CalendarEvent) {
   if (isRangeEvent(event))
     return `${formatShortDate(event.date)}-${formatShortDate(event.endDate ?? event.date)}`
@@ -134,11 +171,24 @@ export function getRejectedTodoMessage(event: CalendarEvent) {
   return ''
 }
 
+export function getEventStartSortMinutes(event: CalendarEvent) {
+  if (!event.time) return 0
+
+  const [hourPart, minutePart = '0'] = event.time.split(':')
+  const hours = Number(hourPart)
+  const minutes = Number(minutePart)
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return 0
+
+  return hours * 60 + minutes
+}
+
 export function compareEvents(a: CalendarEvent, b: CalendarEvent) {
-  const aRank = isRangeEvent(a) ? 0 : a.time ? 2 : 1
-  const bRank = isRangeEvent(b) ? 0 : b.time ? 2 : 1
-  if (aRank !== bRank) return aRank - bRank
-  if ((a.time || '') !== (b.time || '')) return (a.time || '').localeCompare(b.time || '')
+  const dateCompare = a.date.localeCompare(b.date)
+  if (dateCompare !== 0) return dateCompare
+
+  const timeCompare = getEventStartSortMinutes(a) - getEventStartSortMinutes(b)
+  if (timeCompare !== 0) return timeCompare
+
   return a.title.localeCompare(b.title, 'zh-CN')
 }
 
@@ -146,16 +196,43 @@ export function isMeetingTodoEvent(event: CalendarEvent) {
   return event.type === 'meeting'
 }
 
-export function compareCalendarDisplayEvents(a: CalendarEvent, b: CalendarEvent) {
-  if (isMeetingTodoEvent(a) !== isMeetingTodoEvent(b)) {
-    return isMeetingTodoEvent(a) ? -1 : 1
-  }
+function getCalendarDisplayStatusRank(event: CalendarEvent) {
+  if (isCompletedTodoEvent(event)) return 1
+  if (isRejectedTodo(event)) return 2
+  return 0
+}
 
+function getCalendarInlineSortRank(event: CalendarEvent) {
+  if (isRangeEvent(event)) return 4
+  if (isMeetingTodoEvent(event)) return event.time ? 0 : 1
+  if (event.time) return 2
+  return 3
+}
+
+export function compareCalendarStartTime(a: CalendarEvent, b: CalendarEvent) {
   return compareEvents(a, b)
 }
 
+export function compareCalendarDisplayEvents(a: CalendarEvent, b: CalendarEvent) {
+  const statusCompare = getCalendarDisplayStatusRank(a) - getCalendarDisplayStatusRank(b)
+  if (statusCompare !== 0) return statusCompare
+
+  const aRank = getCalendarInlineSortRank(a)
+  const bRank = getCalendarInlineSortRank(b)
+  if (aRank !== bRank) return aRank - bRank
+
+  return compareCalendarStartTime(a, b)
+}
+
+export function compareCalendarRangeBarEvents(a: CalendarEvent, b: CalendarEvent) {
+  const statusCompare = getCalendarDisplayStatusRank(a) - getCalendarDisplayStatusRank(b)
+  if (statusCompare !== 0) return statusCompare
+
+  return compareCalendarStartTime(a, b)
+}
+
 export function getActiveCalendarDisplayEvents(events: CalendarEvent[]) {
-  return events.filter((event) => !isCompletedTodoEvent(event)).sort(compareCalendarDisplayEvents)
+  return [...events].sort(compareCalendarDisplayEvents)
 }
 
 function normalizeShowDateTime(value?: string) {

@@ -1,0 +1,164 @@
+站内消息 WebSocket 接口说明
+
+1. 接口地址
+
+接口路径：
+
+  /websocket/{userId}
+
+完整地址示例：
+
+  ws://127.0.0.1:5173/websocket/10002
+  wss://your-domain.com/websocket/10002
+
+规则：
+
+  - HTTP 页面使用 ws://
+  - HTTPS 页面使用 wss://
+  - userId 需要使用 encodeURIComponent 处理
+  - 当前项目本地开发时通过 Vite 代理转发：
+      前端连接：ws://127.0.0.1:5173/websocket/{userId}
+      实际后端：http://192.168.0.210:8066/websocket/{userId}
+
+当前项目代理配置位置：
+
+  vite.config.ts
+
+相关配置：
+
+  '/websocket': {
+    target: 'http://192.168.0.210:8066',
+    changeOrigin: true,
+    ws: true,
+  }
+
+
+2. 前端连接示例
+
+基础写法：
+
+  const userId = '10002'
+  const socket = new WebSocket(
+    `ws://127.0.0.1:5173/websocket/${encodeURIComponent(userId)}`
+  )
+
+HTTPS 部署写法：
+
+  const userId = '10002'
+  const socket = new WebSocket(
+    `wss://your-domain.com/websocket/${encodeURIComponent(userId)}`
+  )
+
+
+3. 服务端推送消息格式
+
+服务端需要推送 JSON 字符串。当前前端只处理 type 为 sys_message 的消息。
+
+示例：
+
+  {
+    "type": "sys_message",
+    "id": 9,
+    "msgSubject": "会议提醒",
+    "msgContent": "标题：周会",
+    "msgStatus": 0,
+    "msgType": 1,
+    "bizType": 2,
+    "bizId": 88,
+    "createTime": "2026-06-17T10:00:00"
+  }
+
+字段说明：
+
+  type        固定 sys_message，否则前端会忽略
+  id          消息 ID
+  msgSubject  消息标题
+  msgContent  消息内容
+  msgStatus   消息状态，0 表示未读，1 表示已读
+  msgType     消息类型，当前默认按 1 处理
+  bizType     业务类型，1 表示智能待办，2 表示会议，其他按系统消息处理
+  bizId       关联业务 ID，例如待办 ID
+  createTime  创建时间
+
+
+4. 当前项目前端处理逻辑
+
+收到 WebSocket 消息后，前端会执行：
+
+  1. JSON.parse(event.data)
+  2. 校验 type 是否为 sys_message
+  3. 归一化消息字段
+  4. 插入消息通知列表
+  5. 如果 bizType === 1 且 bizId 存在，则重新请求 GET /smart-todo/pending-list
+  6. 弹出一条站内消息提示
+
+相关代码位置：
+
+  src/modules/home/dashboard/useDashboardNotifications.ts
+  src/modules/home/dashboard/sys-message.service.ts
+
+
+5. 鉴权说明
+
+当前项目 WebSocket 连接没有额外传 token，也没有设置 Authorization header。
+
+原因：
+
+  浏览器原生 WebSocket 不支持像 axios 一样直接设置请求头。
+
+当前项目实际只通过 URL 里的 userId 建立连接：
+
+  /websocket/{userId}
+
+如果其他项目需要鉴权，可以和后端约定下面任意一种方式：
+
+  方案一：通过 query 传 token
+
+    /websocket/{userId}?token=xxx
+
+  方案二：通过 Cookie 鉴权
+
+    服务端从浏览器 Cookie 中识别登录态。
+
+  方案三：连接建立后发送鉴权消息
+
+    socket.onopen = () => {
+      socket.send(JSON.stringify({
+        type: 'auth',
+        token: 'xxx'
+      }))
+    }
+
+
+6. 建议的重连逻辑
+
+当前项目断开后会自动重连，延迟逐步增加，最大 30 秒：
+
+  delay = Math.min(30000, 3000 + reconnectAttempts * 2000)
+
+可以在其他项目中复用这个策略，避免 WebSocket 断开后消息通知失效。
+
+
+7. 最小可用封装示例
+
+  function connectSysMessageSocket(userId, onMessage) {
+    if (!userId || typeof WebSocket === 'undefined') return null
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const url = `${protocol}//${window.location.host}/websocket/${encodeURIComponent(userId)}`
+    const socket = new WebSocket(url)
+
+    socket.onmessage = (event) => {
+      if (typeof event.data !== 'string') return
+
+      try {
+        const payload = JSON.parse(event.data)
+        if (payload.type !== 'sys_message') return
+        onMessage(payload)
+      } catch {
+        // 忽略非 JSON 消息
+      }
+    }
+
+    return socket
+  }

@@ -690,9 +690,20 @@ function openEventDetailById(id: string) {
   return true
 }
 
+function openEditFormById(id: string) {
+  const event = props.events.find((item) => item.id === id)
+  if (!event) return false
+
+  if (!confirmDiscardChanges(() => void beginEditForm(event))) return false
+
+  void beginEditForm(event)
+  return true
+}
+
 defineExpose({
   openCreateForm,
   openEventDetailById,
+  openEditFormById,
   showDiscardWarning,
   applyStatusFilter,
   applyTypeFilter,
@@ -719,7 +730,7 @@ defineExpose({
           :aria-label="isFormMode && !formOnly ? '返回待办列表' : '关闭'"
           @click="isFormMode ? requestCancelForm() : requestClosePanel()"
         >
-          <IconArrowLeft v-if="isFormMode" aria-hidden="true" />
+          <IconArrowLeft v-if="isFormMode && !formOnly" aria-hidden="true" />
           <IconX v-else aria-hidden="true" />
         </button>
       </div>
@@ -1018,7 +1029,7 @@ defineExpose({
       >
         <div class="basic-info-layout" :inert="isFormReadonly">
           <div class="basic-info-columns">
-            <div class="basic-info-column">
+            <div class="basic-info-column type-info-column">
               <label class="mode-switch-field">
                 <span>事项类型</span>
                 <div class="mode-switch" role="group" aria-label="事项类型">
@@ -1046,32 +1057,9 @@ defineExpose({
                   </button>
                 </div>
               </label>
-              <label v-if="!isDeadlineMode" class="field">
-                <span>日期</span>
-                <TodoDatePicker
-                  v-model="todoForm.date"
-                  class="soft-picker"
-                  :disabled="isFormReadonly"
-                  :highlighted="isAiHighlighted('date')"
-                  aria-label="选择待办日期"
-                  @change="syncDateRange"
-                />
-              </label>
-              <div v-if="!isDeadlineMode" class="quick-time-row" aria-label="快捷时间">
-                <button
-                  v-for="preset in scheduledTimePresets"
-                  :key="preset.value"
-                  type="button"
-                  :class="{ active: todoForm.time === preset.value }"
-                  :disabled="isFormReadonly"
-                  @click="applyScheduledTime(preset.value)"
-                >
-                  {{ preset.label }}
-                </button>
-              </div>
             </div>
 
-            <div class="basic-info-column">
+            <div class="basic-info-column schedule-info-column">
               <label class="mode-switch-field">
                 <span>时间模式</span>
                 <div class="mode-switch" role="group" aria-label="时间模式">
@@ -1093,44 +1081,78 @@ defineExpose({
                   </button>
                 </div>
               </label>
-              <label v-if="!isDeadlineMode" class="field">
-                <span>时间</span>
-                <TodoTimePicker
-                  v-model="todoForm.time"
-                  class="soft-picker"
-                  :disabled="isFormReadonly"
-                  :highlighted="isAiHighlighted('time')"
-                  aria-label="选择待办时间"
-                />
-              </label>
             </div>
           </div>
 
-          <TodoDeadlineDateTimeRange
-            v-if="isDeadlineMode"
-            v-model:start-date="todoForm.date"
-            v-model:start-time="todoForm.time"
-            v-model:end-date="todoForm.endDate"
-            v-model:end-time="todoForm.endTime"
-            class="field-full"
-            :disabled="isFormReadonly"
-            :start-highlighted="isAiHighlighted('date') || isAiHighlighted('time')"
-            :end-highlighted="isAiHighlighted('endDate') || isAiHighlighted('endTime')"
-            @change="syncDateRange"
-          />
-          <div v-if="isDeadlineMode" class="quick-range-row field-full" aria-label="快捷时间">
-            <button type="button" :disabled="isFormReadonly" @click="applyQuickRange('today')">
-              今天
-            </button>
-            <button type="button" :disabled="isFormReadonly" @click="applyQuickRange('week')">
-              本周内
-            </button>
-            <button type="button" :disabled="isFormReadonly" @click="applyQuickRange('nextWeek')">
-              下周前
-            </button>
-            <button type="button" :disabled="isFormReadonly" @click="applyQuickRange('month')">
-              本月内
-            </button>
+          <div class="schedule-field-panel">
+            <template v-if="!isDeadlineMode">
+              <div class="scheduled-time-fields">
+                <label class="field">
+                  <span>日期</span>
+                  <TodoDatePicker
+                    v-model="todoForm.date"
+                    class="soft-picker"
+                    :disabled="isFormReadonly"
+                    :highlighted="isAiHighlighted('date')"
+                    aria-label="选择待办日期"
+                    @change="syncDateRange"
+                  />
+                </label>
+                <label class="field">
+                  <span>时间</span>
+                  <TodoTimePicker
+                    v-model="todoForm.time"
+                    class="soft-picker"
+                    :disabled="isFormReadonly"
+                    :highlighted="isAiHighlighted('time')"
+                    aria-label="选择待办时间"
+                  />
+                </label>
+              </div>
+              <div class="quick-time-row" aria-label="快捷时间">
+                <button
+                  v-for="preset in scheduledTimePresets"
+                  :key="preset.value"
+                  type="button"
+                  :class="{ active: todoForm.time === preset.value }"
+                  :disabled="isFormReadonly"
+                  @click="applyScheduledTime(preset.value)"
+                >
+                  {{ preset.label }}
+                </button>
+              </div>
+            </template>
+            <template v-else>
+              <TodoDeadlineDateTimeRange
+                v-model:start-date="todoForm.date"
+                v-model:start-time="todoForm.time"
+                v-model:end-date="todoForm.endDate"
+                v-model:end-time="todoForm.endTime"
+                class="field-full"
+                :disabled="isFormReadonly"
+                :start-highlighted="isAiHighlighted('date') || isAiHighlighted('time')"
+                :end-highlighted="isAiHighlighted('endDate') || isAiHighlighted('endTime')"
+                @change="syncDateRange"
+              />
+              <div class="quick-range-row field-full" aria-label="快捷时间">
+                <button type="button" :disabled="isFormReadonly" @click="applyQuickRange('today')">
+                  今天
+                </button>
+                <button type="button" :disabled="isFormReadonly" @click="applyQuickRange('week')">
+                  本周内
+                </button>
+                <button
+                  type="button"
+                  :disabled="isFormReadonly"
+                  @click="applyQuickRange('nextWeek')"
+                >
+                  下周前
+                </button>
+                <button type="button" :disabled="isFormReadonly" @click="applyQuickRange('month')">
+                  本月内
+                </button>
+              </div>
+            </template>
           </div>
 
           <div class="form-grid">
@@ -1171,7 +1193,11 @@ defineExpose({
         </div>
       </section>
 
-      <div class="form-actions" data-tour-target="todo-save-actions">
+      <div
+        class="form-actions"
+        :class="{ 'is-single-action': isViewMode }"
+        data-tour-target="todo-save-actions"
+      >
         <template v-if="isViewMode">
           <Button type="button" @click="requestCancelForm">返回</Button>
         </template>
@@ -1189,6 +1215,12 @@ defineExpose({
   --todo-primary: #3b82f6;
   --todo-primary-hover: #2563eb;
   --todo-primary-rgb: 59, 130, 246;
+  --todo-surface: rgba(255, 255, 255, 0.84);
+  --todo-surface-strong: rgba(255, 255, 255, 0.94);
+  --todo-surface-soft: rgba(248, 250, 252, 0.66);
+  --todo-line: rgba(226, 232, 240, 0.76);
+  --todo-text: #101936;
+  --todo-muted: #8795aa;
   position: relative;
   height: 100%;
   width: 100%;
@@ -1202,6 +1234,18 @@ defineExpose({
   overflow-x: clip;
 }
 
+.preview-panel.is-form-mode {
+  gap: 0;
+  padding: 0;
+  border-radius: 22px;
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.8), rgba(246, 250, 255, 0.58));
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 18px 36px -28px rgba(38, 67, 109, 0.22);
+  overflow: hidden;
+}
+
 .preview-head {
   min-width: 0;
   padding: 0 0 12px;
@@ -1210,6 +1254,14 @@ defineExpose({
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
+}
+
+.preview-panel.is-form-mode .preview-head {
+  flex: 0 0 auto;
+  align-items: flex-start;
+  padding: 18px 20px 16px;
+  border-bottom: 1px solid var(--todo-line);
+  background: rgba(255, 255, 255, 0.42);
 }
 
 .preview-head > div:first-child {
@@ -1231,6 +1283,14 @@ defineExpose({
   color: #8a6a35;
 }
 
+.preview-panel.is-form-mode .preview-head p {
+  margin: 0 0 6px;
+  color: var(--todo-muted);
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 0.4px;
+}
+
 .preview-head h2 {
   margin: 0;
   color: #1f2937;
@@ -1238,6 +1298,14 @@ defineExpose({
   font-weight: 850;
   line-height: 1.08;
   overflow-wrap: anywhere;
+}
+
+.preview-panel.is-form-mode .preview-head h2 {
+  color: var(--todo-primary);
+  font-size: 17px;
+  font-weight: 850;
+  line-height: 1.2;
+  letter-spacing: 0;
 }
 
 .summary-grid {
@@ -1443,13 +1511,13 @@ defineExpose({
 }
 
 .event-kind.is-task {
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: rgba(218, 247, 232, 0.86);
+  color: #08724f;
 }
 
 .event-kind.is-meeting {
-  background: #f5f3ff;
-  color: #6d28d9;
+  background: rgba(219, 234, 254, 0.92);
+  color: #2f66c9;
 }
 
 .empty-filtered .empty-copy {
@@ -1548,6 +1616,15 @@ defineExpose({
   justify-content: center;
   line-height: 1;
   flex: 0 0 auto;
+}
+
+.preview-panel.is-form-mode .close-btn {
+  width: 36px;
+  height: 36px;
+  border-color: rgba(226, 232, 240, 0.9);
+  border-radius: 12px;
+  color: #60708d;
+  background: rgba(255, 255, 255, 0.82);
 }
 
 .close-btn svg {
@@ -1663,8 +1740,9 @@ defineExpose({
   z-index: 0;
   min-width: 0;
   box-sizing: border-box;
-  border: 1px solid transparent;
+  border: 1px solid rgba(226, 232, 240, 0.82);
   border-radius: 14px;
+  background: #ffffff;
   padding: 11px 8px;
   display: grid;
   grid-template-columns: 72px minmax(0, 1fr);
@@ -1680,7 +1758,7 @@ defineExpose({
 .timeline-item.is-deleting {
   z-index: 1;
   border: 1px solid rgba(191, 219, 254, 0.68);
-  background: rgba(248, 250, 252, 0.52);
+  background: #ffffff;
   box-shadow: 0 14px 26px -28px rgba(15, 23, 42, 0.34);
 }
 
@@ -1732,24 +1810,68 @@ defineExpose({
 .timeline-item.scope-assigned_by_me {
   margin: 2px 0;
   border-radius: 14px;
-  background: linear-gradient(90deg, rgba(236, 254, 255, 0.72), rgba(255, 255, 255, 0));
+  background: linear-gradient(90deg, rgba(236, 254, 255, 0.72), rgba(255, 255, 255, 0)), #ffffff;
 }
 
 .timeline-item.status-done .event-body::before {
-  opacity: 0.34;
+  background: #16a34a;
+  box-shadow: 0 0 0 5px rgba(34, 197, 94, 0.12);
+  opacity: 0.86;
 }
 
 .timeline-item.status-done h3 {
-  color: #475569;
+  color: #64748b;
+  text-decoration: line-through;
+  text-decoration-color: rgba(22, 101, 52, 0.36);
+  text-decoration-thickness: 1.5px;
 }
 
 .timeline-item.status-done p {
-  opacity: 0.72;
+  color: #94a3b8;
+  opacity: 0.78;
 }
 
 .timeline-item.status-done {
-  color: #94a3b8;
-  filter: grayscale(0.28);
+  color: #64748b;
+  border-radius: 14px;
+  background: linear-gradient(
+      90deg,
+      rgba(220, 252, 231, 0.46),
+      rgba(248, 250, 252, 0.68) 48%,
+      rgba(255, 255, 255, 0) 100%
+    ),
+    #ffffff;
+}
+
+.timeline-item.status-done.type-meeting {
+  background: linear-gradient(
+      90deg,
+      rgba(219, 234, 254, 0.52),
+      rgba(248, 250, 252, 0.68) 48%,
+      rgba(255, 255, 255, 0) 100%
+    ),
+    #ffffff;
+}
+
+.timeline-item.status-done.type-meeting .event-body::before {
+  background: #3478f6;
+  box-shadow: 0 0 0 5px rgba(52, 120, 246, 0.12);
+}
+
+.timeline-item.status-done.type-meeting h3 {
+  text-decoration-color: rgba(29, 78, 216, 0.32);
+}
+
+.timeline-item.status-done.type-meeting .event-kind.is-meeting {
+  background: rgba(219, 234, 254, 0.92);
+  color: #1d4ed8;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.22);
+}
+
+.timeline-item.status-done.type-meeting .event-status.is-done {
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  background: rgba(219, 234, 254, 0.92);
+  color: #1d4ed8;
 }
 
 .timeline-item.status-done:hover .item-actions,
@@ -1764,7 +1886,7 @@ defineExpose({
 }
 
 .timeline-item.is-rejected {
-  background: linear-gradient(90deg, rgba(254, 242, 242, 0.82), rgba(255, 255, 255, 0));
+  background: linear-gradient(90deg, rgba(254, 242, 242, 0.82), rgba(255, 255, 255, 0)), #ffffff;
 }
 
 .timeline-item.is-rejected:hover .item-actions,
@@ -1853,7 +1975,8 @@ p {
 }
 
 .event-status.is-done {
-  background: #dcfce7;
+  border: 1px solid rgba(22, 163, 74, 0.24);
+  background: rgba(220, 252, 231, 0.9);
   color: #166534;
 }
 
@@ -2015,11 +2138,11 @@ p {
   position: relative;
   min-height: 0;
   flex: 1 1 auto;
-  overflow-y: visible;
+  overflow-y: hidden;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding-right: 0;
+  gap: 10px;
+  padding: 14px 18px 0;
 }
 
 .inline-section {
@@ -2027,7 +2150,7 @@ p {
   gap: 10px;
 }
 
-.inline-section + .inline-section {
+.preview-panel:not(.is-form-mode) .inline-section + .inline-section {
   padding-top: 12px;
   border-top: 1px solid rgba(226, 232, 240, 0.72);
 }
@@ -2040,10 +2163,11 @@ p {
   position: relative;
   z-index: 4;
   overflow: visible;
-  padding: 10px;
-  border: 1px solid transparent;
-  border-radius: 14px;
-  background: rgba(248, 250, 252, 0.72);
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  border-radius: 16px;
+  background: var(--todo-surface-soft);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
   transition:
     border-color 0.18s ease,
     background 0.18s ease,
@@ -2051,9 +2175,13 @@ p {
 }
 
 .ai-inline-section.is-parsing {
-  border-color: transparent;
-  background: rgba(248, 250, 252, 0.72);
-  box-shadow: none;
+  border-color: rgba(var(--todo-primary-rgb), 0.16);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--todo-primary-rgb), 0.08),
+    rgba(248, 250, 252, 0.78)
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
 }
 
 .ai-inline-section.is-parsing::before {
@@ -2069,13 +2197,14 @@ p {
 
 .ai-inline-row button {
   min-width: 96px;
-  min-height: 38px;
+  min-height: 40px;
   padding: 0 14px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  font-size: 13px;
+  border-radius: 14px;
+  font-size: 14px;
 }
 
 .ai-inline-row button.is-parsing:disabled {
@@ -2119,34 +2248,91 @@ p {
 .basic-info-layout {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .basic-info-columns {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-  align-items: start;
+  gap: 10px;
+  align-items: stretch;
 }
 
 .basic-info-column {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 9px;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.scheduled-time-fields {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(132px, 0.7fr);
+  gap: 10px;
+  align-items: end;
+}
+
+.schedule-field-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, rgba(var(--todo-primary-rgb), 0.055), rgba(255, 255, 255, 0.42)),
+    rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.schedule-field-panel :deep(.deadline-datetime-grid) {
+  gap: 10px;
+}
+
+.schedule-field-panel :deep(.deadline-datetime-field) {
+  gap: 5px;
+}
+
+.schedule-field-panel :deep(.deadline-datetime-field > span) {
+  color: var(--todo-muted);
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 0.4px;
+}
+
+.schedule-field-panel :deep(.todo-datetime-trigger) {
+  height: 42px;
+  border-color: rgba(203, 213, 225, 0.82);
+  border-radius: 14px;
+  background: var(--todo-surface-strong);
+  color: var(--todo-text);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.schedule-field-panel :deep(.todo-datetime-trigger:hover),
+.schedule-field-panel :deep(.todo-datetime-trigger.is-active) {
+  border-color: rgba(var(--todo-primary-rgb), 0.42);
+  box-shadow: 0 0 0 3px rgba(var(--todo-primary-rgb), 0.1);
 }
 
 .mode-switch-field {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .mode-switch-field > span {
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 600;
+  color: var(--todo-muted);
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 0.4px;
   line-height: 1.3;
 }
 
@@ -2165,8 +2351,8 @@ p {
   width: 100%;
   padding: 3px;
   border: 0;
-  border-radius: 10px;
-  background: #eceff3;
+  border-radius: 14px;
+  background: rgba(226, 232, 240, 0.68);
 }
 
 .mode-switch button,
@@ -2174,13 +2360,13 @@ p {
 .quick-time-row button {
   min-height: 34px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 11px;
   background: transparent;
   color: #64748b;
-  padding: 0 10px;
+  padding: 0 12px;
   font: inherit;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 760;
   cursor: pointer;
   transition:
     background 0.18s ease,
@@ -2191,7 +2377,7 @@ p {
 
 .mode-switch button.active {
   background: #ffffff;
-  color: #111827;
+  color: var(--todo-text);
   border-color: rgba(226, 232, 240, 0.9);
   box-shadow:
     0 1px 1px rgba(15, 23, 42, 0.04),
@@ -2200,7 +2386,7 @@ p {
 
 .quick-range-row button,
 .quick-time-row button {
-  min-height: 30px;
+  min-height: 28px;
   border: 1px solid #dbe4ee;
   border-radius: 999px;
   background: #ffffff;
@@ -2209,7 +2395,7 @@ p {
 }
 
 .basic-info-column .quick-time-row {
-  margin-top: -4px;
+  margin-top: 0;
 }
 
 .quick-range-row button:hover,
@@ -2249,14 +2435,14 @@ p {
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px 14px;
+  gap: 10px;
 }
 
 .field {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
 }
 
 .field-full {
@@ -2264,15 +2450,16 @@ p {
 }
 
 .field span {
-  color: #475569;
-  font-size: 13px;
-  font-weight: 820;
+  color: var(--todo-muted);
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 0.4px;
 }
 
 .basic-info-column .field span {
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 600;
+  color: var(--todo-muted);
+  font-size: 11px;
+  font-weight: 760;
 }
 
 .field input,
@@ -2280,13 +2467,14 @@ p {
 .field textarea {
   min-width: 0;
   box-sizing: border-box;
-  border: 1px solid #dfe8f3;
-  border-radius: 10px;
-  background: #ffffff;
-  color: #111827;
-  padding: 0 12px;
+  border: 1px solid rgba(203, 213, 225, 0.82);
+  border-radius: 14px;
+  background: var(--todo-surface-strong);
+  color: var(--todo-text);
+  padding: 0 14px;
   font: inherit;
-  font-size: 14px;
+  font-size: 15px;
+  font-weight: 650;
   outline: none;
   transition:
     border-color 0.18s ease,
@@ -2296,18 +2484,18 @@ p {
 
 .field input,
 .field select {
-  height: 40px;
+  height: 42px;
 }
 
 .soft-picker {
-  height: 40px;
+  height: 42px;
   width: 100%;
-  border: 1px solid #dfe8f3;
-  border-radius: 10px;
-  background: #ffffff;
-  color: #111827;
-  font-size: 14px;
-  font-weight: 500;
+  border: 1px solid rgba(203, 213, 225, 0.82);
+  border-radius: 14px;
+  background: var(--todo-surface-strong);
+  color: var(--todo-text);
+  font-size: 15px;
+  font-weight: 650;
   outline: none;
   transition:
     border-color 0.18s ease,
@@ -2315,8 +2503,8 @@ p {
 }
 
 .soft-picker:focus {
-  border-color: #111827;
-  box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.07);
+  border-color: rgba(var(--todo-primary-rgb), 0.42);
+  box-shadow: 0 0 0 3px rgba(var(--todo-primary-rgb), 0.1);
 }
 
 .field textarea {
@@ -2329,8 +2517,8 @@ p {
 .field input:focus,
 .field select:focus,
 .field textarea:focus {
-  border-color: #111827;
-  box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.07);
+  border-color: rgba(var(--todo-primary-rgb), 0.42);
+  box-shadow: 0 0 0 3px rgba(var(--todo-primary-rgb), 0.1);
 }
 
 .field input.is-ai-highlighted,
@@ -2448,16 +2636,26 @@ p {
 }
 
 .form-actions {
-  padding-top: 0;
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
+  flex: 0 0 auto;
+  margin: auto -18px 0;
+  padding: 12px 18px 14px;
+  border-top: 1px solid var(--todo-line);
+  background: rgba(255, 255, 255, 0.48);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.form-actions.is-single-action {
+  grid-template-columns: 1fr;
 }
 
 .form-actions button {
-  min-height: 32px;
-  padding: 0 14px;
-  font-size: 13px;
+  min-height: 42px;
+  border-radius: 14px;
+  padding: 0 18px;
+  font-size: 15px;
+  font-weight: 850;
 }
 
 @media (max-width: 760px) {
@@ -2478,8 +2676,13 @@ p {
   .empty,
   .form-grid,
   .basic-info-columns,
+  .scheduled-time-fields,
   .ai-inline-row,
   .inline-discard-warning {
+    grid-template-columns: 1fr;
+  }
+
+  .form-actions {
     grid-template-columns: 1fr;
   }
 
