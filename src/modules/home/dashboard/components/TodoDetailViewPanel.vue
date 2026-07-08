@@ -58,6 +58,13 @@ const emit = defineEmits<{
             </div>
           </div>
         </div>
+
+        <div class="detail-skeleton-progress">
+          <div class="detail-skeleton-label detail-skeleton-block is-short"></div>
+          <div v-for="index in 2" :key="`progress-${index}`" class="detail-skeleton-progress-item">
+            <div class="detail-skeleton-line detail-skeleton-block"></div>
+          </div>
+        </div>
       </div>
 
       <template v-else-if="panel">
@@ -93,6 +100,32 @@ const emit = defineEmits<{
               <strong>{{ item.value }}</strong>
             </div>
           </article>
+        </section>
+
+        <section
+          v-if="panel.assigneeProgress?.length"
+          class="detail-assignee-progress"
+          aria-label="接受人进度"
+        >
+          <div class="detail-assignee-progress-head">
+            <span class="detail-field-label">接受人进度</span>
+            <span class="detail-assignee-progress-count">{{ panel.assigneeProgress.length }} 人</span>
+          </div>
+          <ul class="detail-assignee-progress-list">
+            <li
+              v-for="item in panel.assigneeProgress"
+              :key="item.id"
+              class="detail-assignee-progress-item"
+            >
+              <div class="detail-assignee-progress-main">
+                <strong>{{ item.name }}</strong>
+                <span class="detail-status-badge is-compact" :class="item.statusTone">
+                  {{ item.statusLabel }}
+                </span>
+              </div>
+              <p v-if="item.note" class="detail-assignee-progress-note">{{ item.note }}</p>
+            </li>
+          </ul>
         </section>
       </template>
     </div>
@@ -372,6 +405,77 @@ const emit = defineEmits<{
   word-break: break-word;
 }
 
+.detail-assignee-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(226, 232, 240, 0.92);
+}
+
+.detail-assignee-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.detail-assignee-progress-head .detail-field-label {
+  margin-bottom: 0;
+}
+
+.detail-assignee-progress-count {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.detail-assignee-progress-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-assignee-progress-item {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.92);
+  border: 1px solid rgba(226, 232, 240, 0.88);
+}
+
+.detail-assignee-progress-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.detail-assignee-progress-main strong {
+  min-width: 0;
+  color: #101936;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.detail-status-badge.is-compact {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.detail-assignee-progress-note {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .detail-panel-footer {
   flex: 0 0 auto;
   padding: 14px 20px 18px;
@@ -542,6 +646,26 @@ const emit = defineEmits<{
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.detail-skeleton-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.56);
+  border: 1px solid rgba(226, 232, 240, 0.88);
+}
+
+.detail-skeleton-progress-item {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.92);
+}
+
+.detail-skeleton-label.is-short {
+  width: 36%;
 }
 
 .detail-skeleton-meta-item {

@@ -37,6 +37,8 @@ export interface CalendarEvent {
   handlerIds?: string
   content?: string
   remark?: string
+  /** 详情接口返回的子待办，用于展示各接受人的执行状态 */
+  childTodos?: CalendarEvent[]
 }
 
 export interface CalendarTodoDraft {

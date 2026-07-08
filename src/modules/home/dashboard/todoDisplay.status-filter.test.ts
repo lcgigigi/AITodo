@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest'
 import type { CalendarEvent } from './types'
 import {
   getBackendTodoStatusLabel,
+  getTodoScopeBadge,
   isCompletedTodoEvent,
   isOtherStatusTodoEvent,
   isPendingDetailStatusEvent,
   isPendingProcessTodoEvent,
   matchesDetailStatusFilter,
+  matchesTodoScopeFilter,
+  countTodoScopeEvents,
 } from './todoDisplay'
 
 function event(partial: Partial<CalendarEvent>): CalendarEvent {
@@ -58,5 +61,35 @@ describe('detail status filters', () => {
     expect(isCompletedTodoEvent(done)).toBe(true)
     expect(matchesDetailStatusFilter(rejected, 'rejected')).toBe(true)
     expect(matchesDetailStatusFilter(pending, 'all')).toBe(true)
+  })
+})
+
+describe('todo scope filters', () => {
+  it('matches assigned_by_me and assigned_to_me scopes', () => {
+    const outgoing = event({ scope: 'assigned_by_me', assigneeName: '张三' })
+    const incoming = event({ scope: 'assigned_to_me', creatorName: '李四' })
+    const self = event({ scope: 'self' })
+
+    expect(matchesTodoScopeFilter(outgoing, 'assigned_by_me')).toBe(true)
+    expect(matchesTodoScopeFilter(incoming, 'assigned_to_me')).toBe(true)
+    expect(matchesTodoScopeFilter(self, 'assigned_by_me')).toBe(false)
+    expect(countTodoScopeEvents([outgoing, incoming, self], 'assigned_by_me')).toBe(1)
+    expect(countTodoScopeEvents([outgoing, incoming, self], 'assigned_to_me')).toBe(1)
+  })
+
+  it('builds readable scope badges', () => {
+    expect(
+      getTodoScopeBadge(
+        event({ scope: 'assigned_by_me', assigneeName: '张三', owner: '张三' }),
+      ),
+    ).toEqual({
+      label: '我派发',
+      tone: 'outgoing',
+    })
+    expect(getTodoScopeBadge(event({ scope: 'assigned_to_me', creatorName: '李四' }))).toEqual({
+      label: '来自：李四',
+      tone: 'incoming',
+    })
+    expect(getTodoScopeBadge(event({ scope: 'self' }))).toBeNull()
   })
 })

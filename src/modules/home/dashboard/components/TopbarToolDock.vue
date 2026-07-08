@@ -33,8 +33,13 @@ function selectTool(tool: DashboardTool) {
       type="button"
       @click="selectTool(tool)"
     >
-      <span class="tool-dock-icon" aria-hidden="true">
-        <component :is="tool.icon" />
+      <span
+        class="tool-dock-icon"
+        :class="{ 'has-image': tool.iconSrc }"
+        aria-hidden="true"
+      >
+        <img v-if="tool.iconSrc" :src="tool.iconSrc" alt="" class="tool-dock-icon-image" />
+        <component v-else-if="tool.icon" :is="tool.icon" />
       </span>
       <span>{{ tool.name }}</span>
     </button>
@@ -97,6 +102,18 @@ function selectTool(tool: DashboardTool) {
   justify-content: center;
   flex: 0 0 auto;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34);
+}
+
+.tool-dock-icon.has-image {
+  background: transparent;
+  box-shadow: none;
+}
+
+.tool-dock-icon-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: inherit;
 }
 
 .tool-dock-icon svg {

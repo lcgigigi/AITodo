@@ -4,8 +4,10 @@ import { useRoute, useRouter } from 'vue-router'
 import IconCheck from '~icons/lucide/check'
 import IconChevronLeft from '~icons/lucide/chevron-left'
 import IconChevronRight from '~icons/lucide/chevron-right'
+import IconInbox from '~icons/lucide/inbox'
 import IconLayoutList from '~icons/lucide/layout-list'
 import IconPresentation from '~icons/lucide/presentation'
+import IconSend from '~icons/lucide/send'
 import IconSquareCheck from '~icons/lucide/square-check'
 import { routeConfig } from '@/config/route.config'
 import { isDesktopUserMismatch } from '@/modules/auth/desktop-auth'
@@ -18,8 +20,10 @@ import DashboardTopBar from './DashboardTopBar.vue'
 import DayPreviewPanel from './DayPreviewPanel.vue'
 import {
   eventTypeLabel,
+  filterEventsByScope,
   filterEventsByType,
   isMeetingEvent,
+  type TodoScopeFilter,
   type TodoTypeFilter,
 } from './dayPreviewPanel.helpers'
 import {
@@ -38,8 +42,11 @@ import type {
 } from './types'
 import {
   compareEvents,
+  countTodoScopeEvents,
   formatEventTime,
   formatEventTimeForDayList,
+  getTodoListDisplayText,
+  getTodoScopeBadge,
   isRejectedTodo,
   isRangeEvent,
   isSameDayRangeEvent,
@@ -49,6 +56,9 @@ import {
   canDeleteTodoEvent,
   canEditTodoEvent,
   isPendingAcceptanceTask,
+  mergeCalendarEventWithDetail,
+  resolveCalendarEventDetail,
+  storeCalendarEventDetail,
 } from './todoDetailPanel.helpers'
 import {
   acceptTodos,
@@ -104,6 +114,7 @@ const dayPreviewEditPanelRef = ref<DayPreviewPanelExpose | null>(null)
 const homeMainPanelRef = ref<HTMLElement | null>(null)
 const calendarViewMode = ref<'month' | 'week'>('month')
 const homeTodoCategoryFilter = ref<TodoTypeFilter>('all')
+const homeTodoScopeFilter = ref<TodoScopeFilter>('all')
 const route = useRoute()
 const router = useRouter()
 const feedbackStore = useFeedbackStore()
@@ -239,7 +250,7 @@ const activePanelTask = computed(() => {
   const cached = taskDetails.value[activePanelTaskId.value]
 
   if (cached && fromList) {
-    return { ...cached, ...fromList }
+    return mergeCalendarEventWithDetail(fromList, cached)
   }
 
   return fromList ?? cached ?? null
@@ -248,8 +259,10 @@ const panelTaskDetail = computed(() => {
   const task = activePanelTask.value
   if (!task) return null
 
-  const detail = taskDetails.value[task.id] ?? task
-  return buildTodoDetailPanelViewModel(detail, currentUser.value)
+  return buildTodoDetailPanelViewModel(
+    resolveCalendarEventDetail(taskDetails.value, task),
+    currentUser.value,
+  )
 })
 const isPanelDetailLoading = computed(() =>
   Boolean(activePanelTaskId.value && detailLoadingId.value === activePanelTaskId.value),
@@ -274,8 +287,23 @@ const isPanelDeleteConfirming = computed(() =>
 )
 const selectedSpecialDays = computed(() => specialDayMap.value.get(props.selectedDate) ?? [])
 const selectedDayPreviewTasks = computed(() =>
-  filterEventsByType([...selectedEvents.value].sort(compareEvents), homeTodoCategoryFilter.value),
+  filterEventsByScope(
+    filterEventsByType([...selectedEvents.value].sort(compareEvents), homeTodoCategoryFilter.value),
+    homeTodoScopeFilter.value,
+  ),
 )
+const assignedByMeCount = computed(() =>
+  countTodoScopeEvents(selectedEvents.value, 'assigned_by_me'),
+)
+const assignedToMeCount = computed(() =>
+  countTodoScopeEvents(selectedEvents.value, 'assigned_to_me'),
+)
+const homeTodoFilterColumns = computed(() => {
+  let count = 3
+  if (assignedByMeCount.value > 0) count += 1
+  if (assignedToMeCount.value > 0) count += 1
+  return count
+})
 const selectedDayAllCount = computed(() => selectedEvents.value.length)
 const selectedDayTodoCount = computed(
   () => selectedEvents.value.filter((event) => !isMeetingEvent(event)).length,
@@ -288,6 +316,7 @@ watch(
   () => props.selectedDate,
   () => {
     homeTodoCategoryFilter.value = 'all'
+    homeTodoScopeFilter.value = 'all'
   },
 )
 const currentWeekDates = computed(() => {
@@ -422,13 +451,17 @@ function selectHomeWeekDay(date: string) {
   if (props.selectedDate === date) return
 
   const switchDay = () => {
-    isDayPreviewFormDirty.value = false
-    quickCreatePrompt.value = ''
-    presetCreateTime.value = ''
     selectDate(date, calendarViewMode.value === 'week')
   }
 
-  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges(switchDay)) return
+  if (
+    isDayPreviewOpen.value &&
+    homePanelMode.value !== 'create' &&
+    homePanelMode.value !== 'edit' &&
+    !confirmDiscardPreviewChanges(switchDay)
+  ) {
+    return
+  }
 
   switchDay()
 }
@@ -437,13 +470,17 @@ function shiftHomeWeek(dayOffset: number) {
   const shiftWeek = () => {
     const nextDate = new Date(`${props.selectedDate}T12:00:00`)
     nextDate.setDate(nextDate.getDate() + dayOffset)
-    isDayPreviewFormDirty.value = false
-    quickCreatePrompt.value = ''
-    presetCreateTime.value = ''
     selectDate(ymd(nextDate), calendarViewMode.value === 'week')
   }
 
-  if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges(shiftWeek)) return
+  if (
+    isDayPreviewOpen.value &&
+    homePanelMode.value !== 'create' &&
+    homePanelMode.value !== 'edit' &&
+    !confirmDiscardPreviewChanges(shiftWeek)
+  ) {
+    return
+  }
 
   shiftWeek()
 }
@@ -467,19 +504,49 @@ function openSelectedDayAddTodo() {
   openCreate()
 }
 
-async function loadPanelTaskDetail(task: CalendarEvent) {
-  detailLoadingId.value = task.id
+async function loadPanelTaskDetail(task: CalendarEvent, options?: { silent?: boolean }) {
+  if (!options?.silent) {
+    detailLoadingId.value = task.id
+  }
 
   try {
     const detail = await loadTodoDetail(task.id, currentUser.value, assignableUsers.value)
-    taskDetails.value = {
-      ...taskDetails.value,
-      [task.id]: detail,
-    }
+    taskDetails.value = storeCalendarEventDetail(taskDetails.value, detail, task.id)
   } catch {
-    showToast('查询待办详情失败', 'error')
+    if (!options?.silent) {
+      showToast('查询待办详情失败', 'error')
+    }
   } finally {
-    detailLoadingId.value = ''
+    if (!options?.silent) {
+      detailLoadingId.value = ''
+    }
+  }
+}
+
+async function refreshCalendarTodos() {
+  const preserveTaskId =
+    isDayPreviewOpen.value && homePanelMode.value === 'view' && activePanelTaskId.value
+      ? activePanelTaskId.value
+      : ''
+  const preservedDetail = preserveTaskId ? taskDetails.value[preserveTaskId] : null
+
+  await refreshTodos()
+
+  if (!preserveTaskId) return
+
+  const updatedTask = selectedEvents.value.find((event) => event.id === preserveTaskId)
+  if (updatedTask) {
+    taskDetails.value = storeCalendarEventDetail(
+      taskDetails.value,
+      mergeCalendarEventWithDetail(updatedTask, preservedDetail),
+      preserveTaskId,
+    )
+    await loadPanelTaskDetail(updatedTask, { silent: Boolean(preservedDetail?.childTodos?.length) })
+    return
+  }
+
+  if (preservedDetail) {
+    await loadPanelTaskDetail(preservedDetail, { silent: true })
   }
 }
 
@@ -503,6 +570,11 @@ function openSelectedDayView(event: CalendarEvent) {
   if (isDayPreviewOpen.value && !confirmDiscardPreviewChanges(openView)) return
 
   openView()
+}
+
+function handleHomeTodoItemClick(task: CalendarEvent) {
+  if (pendingDeleteListTaskId.value === task.id) return
+  openSelectedDayView(task)
 }
 
 function openSelectedDayEdit(event: CalendarEvent) {
@@ -658,6 +730,14 @@ async function toggleTodayTaskStatus(event: CalendarEvent) {
 
 function selectHomeTodoCategoryFilter(filter: TodoTypeFilter) {
   homeTodoCategoryFilter.value = filter
+  homeTodoScopeFilter.value = 'all'
+}
+
+function selectHomeTodoScopeFilter(filter: Exclude<TodoScopeFilter, 'all'>) {
+  homeTodoScopeFilter.value = homeTodoScopeFilter.value === filter ? 'all' : filter
+  if (homeTodoScopeFilter.value !== 'all') {
+    homeTodoCategoryFilter.value = 'all'
+  }
 }
 
 function closeDayPreview() {
@@ -777,7 +857,7 @@ function getActiveTodoLoadRange() {
 
 watch(todoLoadRangeKey, () => {
   if (!hasInitializedTodoRange) return
-  void refreshTodos()
+  void refreshCalendarTodos()
 })
 
 watch(
@@ -928,14 +1008,11 @@ async function openTodoFromNotification(payload: { id: string; date?: string }) 
     }
   }
 
-  taskDetails.value = {
-    ...taskDetails.value,
-    [payload.id]: cachedDetail,
-  }
+  taskDetails.value = storeCalendarEventDetail(taskDetails.value, cachedDetail, payload.id)
 }
 
 defineExpose({
-  refreshTodos,
+  refreshTodos: refreshCalendarTodos,
   openTodoFromNotification,
 })
 </script>
@@ -1177,59 +1254,103 @@ defineExpose({
         </header>
 
         <div class="home-todo-body">
-          <div class="home-todo-stats" :aria-label="homeTodoStatsAriaLabel">
-            <button
-              type="button"
-              class="home-todo-stat all-stat"
-              :class="{ active: homeTodoCategoryFilter === 'all' }"
-              :aria-pressed="homeTodoCategoryFilter === 'all'"
-              :aria-label="`${isSelectedToday ? '今日' : homeFooterDateLabel}全部待办`"
-              @click.stop="selectHomeTodoCategoryFilter('all')"
-            >
-              <span class="home-todo-stat-icon" aria-hidden="true">
-                <IconLayoutList />
-              </span>
-              <span class="home-todo-stat-copy">
-                <span>全部</span>
-                <strong>{{ selectedDayAllCount }}</strong>
-              </span>
-            </button>
-            <button
-              type="button"
-              class="home-todo-stat task-stat"
-              :class="{ active: homeTodoCategoryFilter === 'task' }"
-              :aria-pressed="homeTodoCategoryFilter === 'task'"
-              :aria-label="`${isSelectedToday ? '今日' : homeFooterDateLabel}待办事项`"
-              @click.stop="selectHomeTodoCategoryFilter('task')"
-            >
-              <span class="home-todo-stat-icon" aria-hidden="true">
-                <IconSquareCheck />
-              </span>
-              <span class="home-todo-stat-copy">
-                <span>待办事项</span>
-                <strong>{{ selectedDayTodoCount }}</strong>
-              </span>
-            </button>
-            <button
-              type="button"
-              class="home-todo-stat meeting-stat"
-              :class="{ active: homeTodoCategoryFilter === 'meeting' }"
-              :aria-pressed="homeTodoCategoryFilter === 'meeting'"
-              :aria-label="`${isSelectedToday ? '今日' : homeFooterDateLabel}会议信息`"
-              @click.stop="selectHomeTodoCategoryFilter('meeting')"
-            >
-              <span class="home-todo-stat-icon" aria-hidden="true">
-                <IconPresentation />
-              </span>
-              <span class="home-todo-stat-copy">
-                <span>会议信息</span>
-                <strong>{{ selectedDayMeetingCount }}</strong>
-              </span>
-            </button>
+          <div
+            class="home-todo-filter-row"
+            :style="{ '--home-todo-filter-columns': homeTodoFilterColumns }"
+            :aria-label="homeTodoStatsAriaLabel"
+          >
+            <div class="home-todo-stats">
+              <button
+                type="button"
+                class="home-todo-stat all-stat"
+                :class="{ active: homeTodoCategoryFilter === 'all' && homeTodoScopeFilter === 'all' }"
+                :aria-pressed="homeTodoCategoryFilter === 'all' && homeTodoScopeFilter === 'all'"
+                :aria-label="`${isSelectedToday ? '今日' : homeFooterDateLabel}全部待办`"
+                @click.stop="selectHomeTodoCategoryFilter('all')"
+              >
+                <span class="home-todo-stat-icon" aria-hidden="true">
+                  <IconLayoutList />
+                </span>
+                <span class="home-todo-stat-copy">
+                  <span>全部</span>
+                  <strong>{{ selectedDayAllCount }}</strong>
+                </span>
+              </button>
+              <button
+                type="button"
+                class="home-todo-stat task-stat"
+                :class="{
+                  active: homeTodoCategoryFilter === 'task' && homeTodoScopeFilter === 'all',
+                }"
+                :aria-pressed="homeTodoCategoryFilter === 'task' && homeTodoScopeFilter === 'all'"
+                :aria-label="`${isSelectedToday ? '今日' : homeFooterDateLabel}待办事项`"
+                @click.stop="selectHomeTodoCategoryFilter('task')"
+              >
+                <span class="home-todo-stat-icon" aria-hidden="true">
+                  <IconSquareCheck />
+                </span>
+                <span class="home-todo-stat-copy">
+                  <span>待办</span>
+                  <strong>{{ selectedDayTodoCount }}</strong>
+                </span>
+              </button>
+              <button
+                type="button"
+                class="home-todo-stat meeting-stat"
+                :class="{
+                  active: homeTodoCategoryFilter === 'meeting' && homeTodoScopeFilter === 'all',
+                }"
+                :aria-pressed="homeTodoCategoryFilter === 'meeting' && homeTodoScopeFilter === 'all'"
+                :aria-label="`${isSelectedToday ? '今日' : homeFooterDateLabel}会议信息`"
+                @click.stop="selectHomeTodoCategoryFilter('meeting')"
+              >
+                <span class="home-todo-stat-icon" aria-hidden="true">
+                  <IconPresentation />
+                </span>
+                <span class="home-todo-stat-copy">
+                  <span>会议</span>
+                  <strong>{{ selectedDayMeetingCount }}</strong>
+                </span>
+              </button>
+              <button
+                v-if="assignedByMeCount > 0"
+                type="button"
+                class="home-todo-stat outgoing-stat"
+                :class="{ active: homeTodoScopeFilter === 'assigned_by_me' }"
+                :aria-pressed="homeTodoScopeFilter === 'assigned_by_me'"
+                :aria-label="`${isSelectedToday ? '今日' : homeFooterDateLabel}我派发的待办`"
+                @click.stop="selectHomeTodoScopeFilter('assigned_by_me')"
+              >
+                <span class="home-todo-stat-icon" aria-hidden="true">
+                  <IconSend />
+                </span>
+                <span class="home-todo-stat-copy">
+                  <span>我派发</span>
+                  <strong>{{ assignedByMeCount }}</strong>
+                </span>
+              </button>
+              <button
+                v-if="assignedToMeCount > 0"
+                type="button"
+                class="home-todo-stat incoming-stat"
+                :class="{ active: homeTodoScopeFilter === 'assigned_to_me' }"
+                :aria-pressed="homeTodoScopeFilter === 'assigned_to_me'"
+                :aria-label="`${isSelectedToday ? '今日' : homeFooterDateLabel}别人派发的待办`"
+                @click.stop="selectHomeTodoScopeFilter('assigned_to_me')"
+              >
+                <span class="home-todo-stat-icon" aria-hidden="true">
+                  <IconInbox />
+                </span>
+                <span class="home-todo-stat-copy">
+                  <span>派给我</span>
+                  <strong>{{ assignedToMeCount }}</strong>
+                </span>
+              </button>
+            </div>
           </div>
 
-          <div class="home-todo-list-shell">
-            <div class="home-todo-list" :aria-label="homeTodoListAriaLabel">
+          <section class="home-todo-panel">
+            <div class="home-todo-scroll" :aria-label="homeTodoListAriaLabel">
               <AppStateBlock
                 v-if="isLoading"
                 class="home-todo-empty-state"
@@ -1253,36 +1374,34 @@ defineExpose({
                 :key="task.id"
                 class="home-todo-item"
                 :class="{
+                  selected: activePanelTaskId === task.id && isDayPreviewOpen,
                   'is-done': task.status === 'done',
                   'is-rejected': isRejectedTodo(task),
                   'is-delete-confirm': pendingDeleteListTaskId === task.id,
                   meeting: task.type === 'meeting',
                   todo: task.type !== 'meeting',
+                  'scope-assigned_by_me': task.scope === 'assigned_by_me',
+                  'scope-assigned_to_me': task.scope === 'assigned_to_me',
                 }"
+                @click="handleHomeTodoItemClick(task)"
               >
-                <div v-if="!isRejectedTodo(task)" class="home-todo-check-wrap" @click.stop>
-                  <button
-                    type="button"
-                    class="home-todo-check"
-                    :class="{
-                      checked: task.status === 'done',
-                      'is-syncing': isTodoStatusUpdating(task.id),
-                    }"
-                    :aria-label="task.status === 'done' ? '撤销完成' : '标记完成'"
-                    :disabled="task.completable === false || isTodoStatusUpdating(task.id)"
-                    :aria-busy="isTodoStatusUpdating(task.id)"
-                    @click="toggleTodayTaskStatus(task)"
-                  >
-                    <IconCheck v-if="task.status === 'done'" aria-hidden="true" />
-                  </button>
-                </div>
-                <div class="home-todo-item-main">
-                  <span
-                    class="home-todo-type-tag"
-                    :class="isMeetingEvent(task) ? 'is-meeting' : 'is-task'"
-                  >
-                    {{ eventTypeLabel(task) }}
-                  </span>
+                <div class="home-todo-item-leading">
+                  <div v-if="!isRejectedTodo(task)" class="home-todo-check-wrap" @click.stop>
+                    <button
+                      type="button"
+                      class="home-todo-check"
+                      :class="{
+                        checked: task.status === 'done',
+                        'is-syncing': isTodoStatusUpdating(task.id),
+                      }"
+                      :aria-label="task.status === 'done' ? '撤销完成' : '标记完成'"
+                      :disabled="task.completable === false || isTodoStatusUpdating(task.id)"
+                      :aria-busy="isTodoStatusUpdating(task.id)"
+                      @click="toggleTodayTaskStatus(task)"
+                    >
+                      <IconCheck v-if="task.status === 'done'" aria-hidden="true" />
+                    </button>
+                  </div>
                   <time
                     class="home-todo-item-time"
                     :class="{
@@ -1293,10 +1412,25 @@ defineExpose({
                   >
                     {{ formatHomeTodoMeta(task) }}
                   </time>
-                  <span class="home-todo-item-title">{{ task.title }}</span>
+                </div>
+                <div class="home-todo-item-main">
+                  <span
+                    class="home-todo-type-tag"
+                    :class="isMeetingEvent(task) ? 'is-meeting' : 'is-task'"
+                  >
+                    {{ eventTypeLabel(task) }}
+                  </span>
+                  <span
+                    v-if="getTodoScopeBadge(task)"
+                    class="home-todo-scope-badge"
+                    :class="`tone-${getTodoScopeBadge(task)!.tone}`"
+                  >
+                    {{ getTodoScopeBadge(task)!.label }}
+                  </span>
+                  <span class="home-todo-item-title">{{ getTodoListDisplayText(task) }}</span>
                 </div>
                 <div class="home-todo-item-aside">
-                  <div class="home-todo-item-actions">
+                  <div class="home-todo-item-actions" @click.stop>
                     <template v-if="pendingDeleteListTaskId === task.id">
                       <span class="home-todo-delete-confirm">确定删除？</span>
                       <button
@@ -1317,13 +1451,6 @@ defineExpose({
                       </button>
                     </template>
                     <template v-else>
-                      <button
-                        type="button"
-                        class="home-todo-action view-action"
-                        @click.stop="openSelectedDayView(task)"
-                      >
-                        查看
-                      </button>
                       <button
                         v-if="canEditTodoEvent(task)"
                         type="button"
@@ -1356,11 +1483,12 @@ defineExpose({
             <TodoQuickCreateBar
               v-model="homeQuickTodoText"
               variant="simple"
+              embedded
               input-id="home-quick-todo"
               @full-create="openSelectedDayAddTodo"
               @submit="submitHomeQuickTodo"
             />
-          </div>
+          </section>
         </div>
 
         <HomePanelToolDock data-tour-target="tool-dock" @select="openHomePanelTool" />
@@ -1371,7 +1499,7 @@ defineExpose({
 
 <style scoped>
 .calendar-workspace {
-  --home-module-height: clamp(560px, 62vh, 680px);
+  --home-module-height: min(720px, calc(100% - 48px));
   --home-ink: #13203a;
   --home-muted: #6d7c93;
   position: relative;
@@ -1665,22 +1793,29 @@ defineExpose({
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
 }
 
-.home-todo-stats {
+.home-todo-filter-row {
   flex: 0 0 auto;
+  min-width: 0;
+}
+
+.home-todo-stats {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--home-todo-filter-columns, 3), minmax(0, 1fr));
   gap: 10px;
+  align-items: stretch;
+  min-width: 0;
 }
 
 .home-todo-stat {
   min-width: 0;
+  height: 100%;
   border: 0;
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.72);
-  padding: 10px 12px;
+  padding: 10px 10px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -1700,9 +1835,9 @@ defineExpose({
 }
 
 .home-todo-stat-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1729,6 +1864,24 @@ defineExpose({
   color: #2f66c9;
 }
 
+.outgoing-stat .home-todo-stat-icon {
+  background: rgba(14, 116, 144, 0.14);
+  color: #0e7490;
+}
+
+.incoming-stat .home-todo-stat-icon {
+  background: rgba(217, 119, 6, 0.14);
+  color: #b45309;
+}
+
+.outgoing-stat.active {
+  box-shadow: inset 0 0 0 1px rgba(14, 116, 144, 0.18);
+}
+
+.incoming-stat.active {
+  box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.18);
+}
+
 .home-todo-stat-copy {
   min-width: 0;
   display: flex;
@@ -1739,33 +1892,38 @@ defineExpose({
 .home-todo-stat-copy > span {
   color: #6d7c93;
   font-size: 11px;
-  line-height: 1;
+  line-height: 1.2;
   font-weight: 850;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .home-todo-stat-copy strong {
   color: var(--home-ink);
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1;
   font-weight: 950;
 }
 
-.home-todo-list-shell {
+.home-todo-panel {
   flex: 1 1 0;
   min-height: 0;
-  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.34);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  overflow: hidden;
 }
 
-.home-todo-list {
+.home-todo-scroll {
   flex: 1 1 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 2px 0;
+  padding: 8px 8px 6px;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
@@ -1774,6 +1932,12 @@ defineExpose({
 .home-todo-empty-state {
   flex: 1 1 auto;
   min-height: 0;
+  align-content: center;
+  gap: 6px;
+}
+
+.home-todo-empty-state :deep(.app-state-block__copy) {
+  gap: 4px;
 }
 
 .home-todo-item {
@@ -1790,11 +1954,50 @@ defineExpose({
   background: rgba(255, 255, 255, 0.692);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42);
   overflow: hidden;
+  cursor: pointer;
   transition:
     background 0.22s ease,
     border-color 0.22s ease,
     box-shadow 0.22s ease,
     transform 0.22s ease;
+}
+
+.home-todo-item.scope-assigned_by_me {
+  background: linear-gradient(90deg, rgba(236, 254, 255, 0.72), rgba(255, 255, 255, 0)), #ffffff;
+}
+
+.home-todo-item.scope-assigned_to_me {
+  background: linear-gradient(90deg, rgba(255, 251, 235, 0.82), rgba(255, 255, 255, 0)), #ffffff;
+}
+
+.home-todo-scope-badge {
+  flex: 0 0 auto;
+  max-width: 100%;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.home-todo-scope-badge.tone-outgoing {
+  color: #0e7490;
+  background: rgba(207, 250, 254, 0.92);
+  box-shadow: inset 0 0 0 1px rgba(14, 116, 144, 0.16);
+}
+
+.home-todo-scope-badge.tone-incoming {
+  color: #b45309;
+  background: rgba(254, 243, 199, 0.96);
+  box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.18);
+}
+
+.home-todo-item-leading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .home-todo-check-wrap {
@@ -1852,6 +2055,45 @@ defineExpose({
     0 8px 18px -16px rgba(67, 139, 255, 0.28);
 }
 
+.home-todo-item.selected {
+  transform: translateX(2px);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow:
+    inset 0 0 0 1px rgba(67, 139, 255, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 8px 18px -16px rgba(67, 139, 255, 0.34);
+}
+
+.home-todo-item.selected.scope-assigned_by_me {
+  background: linear-gradient(90deg, rgba(207, 250, 254, 0.92), rgba(255, 255, 255, 0.24)), #ffffff;
+  box-shadow:
+    inset 0 0 0 1px rgba(14, 116, 144, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 8px 18px -16px rgba(14, 116, 144, 0.22);
+}
+
+.home-todo-item.selected.scope-assigned_to_me {
+  background: linear-gradient(90deg, rgba(254, 243, 199, 0.96), rgba(255, 255, 255, 0.24)), #ffffff;
+  box-shadow:
+    inset 0 0 0 1px rgba(217, 119, 6, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 8px 18px -16px rgba(217, 119, 6, 0.18);
+}
+
+.home-todo-item.todo.selected {
+  box-shadow:
+    inset 0 0 0 1px rgba(30, 174, 118, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 8px 18px -16px rgba(30, 174, 118, 0.22);
+}
+
+.home-todo-item.meeting.selected {
+  box-shadow:
+    inset 0 0 0 1px rgba(52, 120, 246, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 8px 18px -16px rgba(52, 120, 246, 0.22);
+}
+
 .home-todo-item-main {
   min-width: 0;
   padding: 11px 0;
@@ -1886,8 +2128,9 @@ defineExpose({
 
 .home-todo-item:hover .home-todo-item-actions,
 .home-todo-item:focus-within .home-todo-item-actions,
+.home-todo-item.selected .home-todo-item-actions,
 .home-todo-item.is-delete-confirm .home-todo-item-actions {
-  max-width: 220px;
+  max-width: 160px;
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
@@ -1899,8 +2142,9 @@ defineExpose({
 
 .home-todo-item.is-done:hover .home-todo-item-actions,
 .home-todo-item.is-done:focus-within .home-todo-item-actions,
+.home-todo-item.is-done.selected .home-todo-item-actions,
 .home-todo-item.is-done.is-delete-confirm .home-todo-item-actions {
-  max-width: 220px;
+  max-width: 160px;
 }
 
 .home-todo-item.is-done.is-delete-confirm .home-todo-item-actions {
@@ -1927,21 +2171,6 @@ defineExpose({
 .home-todo-action:hover {
   background: rgba(255, 255, 255, 0.72);
   color: #1f2f4d;
-}
-
-.home-todo-action.detail-action:hover {
-  background: rgba(67, 139, 255, 0.18);
-  color: #2563eb;
-}
-
-.home-todo-action.view-action {
-  color: #438bff;
-  background: rgba(67, 139, 255, 0.1);
-}
-
-.home-todo-action.view-action:hover {
-  background: rgba(67, 139, 255, 0.18);
-  color: #2563eb;
 }
 
 .home-todo-action.edit-action {
@@ -1989,57 +2218,38 @@ defineExpose({
 }
 
 .home-todo-item-time {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: min(38%, 7.5rem);
-  padding: 4px 9px;
-  border-radius: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(248, 250, 252, 0.92);
-  color: #475569;
-  font-size: 13px;
+  flex: 0 0 auto;
+  min-width: 3.1rem;
+  color: #64748b;
+  font-size: 14px;
   font-weight: 800;
-  letter-spacing: -0.08px;
+  letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   line-height: 1.2;
-  transition:
-    color 0.22s ease,
-    background 0.22s ease,
-    border-color 0.22s ease,
-    opacity 0.2s ease;
+  transition: color 0.22s ease, opacity 0.2s ease;
 }
 
 .home-todo-item-time.is-range {
-  max-width: min(42%, 8.5rem);
-  font-size: 12px;
-  letter-spacing: -0.05px;
+  min-width: 3.6rem;
+  font-size: 13px;
 }
 
 .home-todo-item-time.is-cross-range {
-  max-width: min(46%, 9.25rem);
-  font-size: 11px;
-  letter-spacing: 0;
+  min-width: 4.1rem;
+  font-size: 13px;
 }
 
 .home-todo-item.todo .home-todo-item-time {
-  color: #0d6848;
-  background: rgba(236, 253, 245, 0.82);
-  border-color: rgba(34, 197, 94, 0.18);
+  color: #059669;
 }
 
 .home-todo-item.meeting .home-todo-item-time {
-  color: #1d4ed8;
-  background: rgba(239, 246, 255, 0.88);
-  border-color: rgba(59, 130, 246, 0.2);
+  color: #2563eb;
 }
 
 .home-todo-item.is-done .home-todo-item-time {
   color: #94a3b8;
-  background: rgba(241, 245, 249, 0.72);
-  border-color: rgba(148, 163, 184, 0.18);
 }
 
 .home-todo-type-tag {
@@ -2070,7 +2280,7 @@ defineExpose({
 }
 
 .home-todo-item.is-rejected {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   padding-left: 14px;
   background: linear-gradient(90deg, rgba(254, 242, 242, 0.92), rgba(255, 255, 255, 0.72));
   box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.08);
@@ -2224,7 +2434,8 @@ defineExpose({
   bottom: clamp(24px, 3.2vh, 40px);
   right: calc(clamp(32px, 2.4vw, 48px) + clamp(520px, 32vw, 660px) + 22px);
   width: min(530px, calc(100vw - 870px));
-  height: min(720px, calc(100% - 48px));
+  height: var(--home-module-height);
+  max-height: var(--home-module-height);
   min-width: 460px;
   box-sizing: border-box;
   border: 1px solid rgba(255, 255, 255, var(--glass-border-opacity, 0.64));

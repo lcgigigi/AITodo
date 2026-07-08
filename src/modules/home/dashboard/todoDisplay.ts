@@ -209,7 +209,7 @@ export function compareEvents(a: CalendarEvent, b: CalendarEvent) {
   const timeCompare = getEventStartSortMinutes(a) - getEventStartSortMinutes(b)
   if (timeCompare !== 0) return timeCompare
 
-  return a.title.localeCompare(b.title, 'zh-CN')
+  return getTodoListDisplayText(a).localeCompare(getTodoListDisplayText(b), 'zh-CN')
 }
 
 export function isMeetingTodoEvent(event: CalendarEvent) {
@@ -306,6 +306,12 @@ export function getBackendTodoStatusLabel(event: CalendarEvent) {
 
 export type DetailCategoryFilter = 'all' | 'task' | 'meeting'
 export type DetailStatusFilter = 'all' | 'pending' | 'done' | 'rejected'
+export type TodoScopeFilter = 'all' | 'assigned_by_me' | 'assigned_to_me'
+
+export type TodoScopeBadge = {
+  label: string
+  tone: 'outgoing' | 'incoming'
+}
 
 export function isCompletedTodoEvent(event: CalendarEvent) {
   return event.backendStatus === 6 || event.status === 'done'
@@ -343,6 +349,31 @@ export function matchesDetailStatusFilter(event: CalendarEvent, filter: DetailSt
   return isPendingDetailStatusEvent(event)
 }
 
+export function matchesTodoScopeFilter(event: CalendarEvent, filter: TodoScopeFilter) {
+  if (filter === 'all') return true
+  return event.scope === filter
+}
+
+export function countTodoScopeEvents(
+  events: CalendarEvent[],
+  scope: Exclude<TodoScopeFilter, 'all'>,
+) {
+  return events.filter((event) => event.scope === scope).length
+}
+
+export function getTodoScopeBadge(event: CalendarEvent): TodoScopeBadge | null {
+  if (event.scope === 'assigned_by_me') {
+    return { label: '我派发', tone: 'outgoing' }
+  }
+
+  if (event.scope === 'assigned_to_me') {
+    const creator = event.creatorName ?? '未指定'
+    return { label: `来自：${creator}`, tone: 'incoming' }
+  }
+
+  return null
+}
+
 export function getTodoCreatorDisplayName(event: CalendarEvent) {
   return event.creatorName || event.creatorId || '未指定'
 }
@@ -376,6 +407,13 @@ export function getTodoHandlerDisplayName(event: CalendarEvent) {
 
 export function getTodoContentDisplay(event: CalendarEvent) {
   return event.content?.trim() || '暂无内容'
+}
+
+export function getTodoListDisplayText(event: CalendarEvent) {
+  const content = event.content?.trim()
+  if (content) return content
+
+  return event.title?.trim() || '未命名待办'
 }
 
 export function isWeakTodoTitle(title: string) {

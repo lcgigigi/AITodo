@@ -8,11 +8,13 @@ const props = withDefaults(
     variant?: 'simple' | 'detail'
     inputId?: string
     disabled?: boolean
+    embedded?: boolean
   }>(),
   {
     variant: 'simple',
     inputId: undefined,
     disabled: false,
+    embedded: false,
   },
 )
 
@@ -34,7 +36,13 @@ function handleSubmit() {
 <template>
   <form
     class="todo-quick-create-bar"
-    :class="[`is-${variant}`, { 'is-detail-card': variant === 'detail' }]"
+    :class="[
+      `is-${variant}`,
+      {
+        'is-detail-card': variant === 'detail',
+        'is-embedded': embedded,
+      },
+    ]"
     data-tour-target="quick-create"
     @submit.prevent="handleSubmit"
   >
@@ -92,6 +100,21 @@ function handleSubmit() {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.82),
     0 8px 18px -16px rgba(67, 139, 255, 0.22);
+}
+
+.todo-quick-create-bar.is-simple.is-embedded {
+  border: 0;
+  border-radius: 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(255, 255, 255, 0.34);
+  padding: 8px 8px;
+  box-shadow: none;
+}
+
+.todo-quick-create-bar.is-simple.is-embedded:focus-within {
+  background: rgba(255, 255, 255, 0.48);
+  border-top-color: rgba(148, 163, 184, 0.28);
+  box-shadow: none;
 }
 
 .todo-quick-create-bar.is-detail.is-detail-card {

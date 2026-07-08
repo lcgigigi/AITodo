@@ -1,13 +1,13 @@
 import type { Router } from 'vue-router'
 import type { Component } from 'vue'
-import IconBox from '~icons/lucide/box'
-import IconCode from '~icons/lucide/code'
 import IconCompass from '~icons/lucide/compass'
-import IconFileText from '~icons/lucide/file-text'
-import IconImage from '~icons/lucide/image'
-import IconMessageCircle from '~icons/lucide/message-circle'
-import IconPresentation from '~icons/lucide/presentation'
-import IconUsers from '~icons/lucide/users'
+import dmfzIcon from '@/assets/dmfz.png'
+import hyjyIcon from '@/assets/hyjy.png'
+import lbbwIcon from '@/assets/lbbw.png'
+import mszxIcon from '@/assets/mszx.png'
+import pptIcon from '@/assets/ppt.png'
+import twfxIcon from '@/assets/twfx.png'
+import ztgfIcon from '@/assets/ztgf.png'
 import { agentLaunchUrls, openUrlInNewTab } from '@/modules/agent-center/links'
 
 export type DashboardToolId =
@@ -23,7 +23,8 @@ export type DashboardToolId =
 export type DashboardTool = {
   id: DashboardToolId
   name: string
-  icon: Component
+  icon?: Component
+  iconSrc?: string
   tone: string
   routeName?: string
   agentKey?: string
@@ -40,49 +41,49 @@ const dashboardToolCatalog: Record<DashboardToolId, DashboardTool> = {
   'image-analysis': {
     id: 'image-analysis',
     name: '图文分析',
-    icon: IconImage,
+    iconSrc: twfxIcon,
     tone: 'orange',
     externalUrl: agentLaunchUrls['image-analysis'],
   },
   'policy-qa': {
     id: 'policy-qa',
     name: '力宝百问',
-    icon: IconMessageCircle,
+    iconSrc: lbbwIcon,
     tone: 'blue',
     externalUrl: agentLaunchUrls['policy-qa'],
   },
   'meeting-notes': {
     id: 'meeting-notes',
     name: '会议纪要',
-    icon: IconFileText,
+    iconSrc: hyjyIcon,
     tone: 'green',
     externalUrl: agentLaunchUrls['meeting-notes'],
   },
   'ppt-creator': {
     id: 'ppt-creator',
     name: '智能PPT',
-    icon: IconPresentation,
+    iconSrc: pptIcon,
     tone: 'violet',
     externalUrl: agentLaunchUrls['ppt-creator'],
   },
   'agent-workshop': {
     id: 'agent-workshop',
     name: '智体工坊',
-    icon: IconBox,
+    iconSrc: ztgfIcon,
     tone: 'purple',
     externalUrl: agentLaunchUrls['agent-workshop'],
   },
   'code-assistant': {
     id: 'code-assistant',
     name: '代码辅助',
-    icon: IconCode,
+    iconSrc: dmfzIcon,
     tone: 'cyan',
     externalUrl: agentLaunchUrls['code-assistant'],
   },
   'interview-center': {
     id: 'interview-center',
     name: '面试中心',
-    icon: IconUsers,
+    iconSrc: mszxIcon,
     tone: 'sky',
     externalUrl: agentLaunchUrls['interview-center'],
   },

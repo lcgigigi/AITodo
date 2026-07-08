@@ -18,11 +18,16 @@ import {
   isRejectedTodo,
   matchesDetailCategoryFilter,
   matchesDetailStatusFilter,
+  matchesTodoScopeFilter,
   isAllDayEvent,
   isRangeEvent,
   ymd,
+  getTodoScopeBadge,
+  countTodoScopeEvents,
+  getTodoListDisplayText,
   type DetailCategoryFilter,
   type DetailStatusFilter,
+  type TodoScopeFilter,
 } from './todoDisplay'
 import {
   buildTodoDetailPanelViewModel,
@@ -30,6 +35,9 @@ import {
   canEditTodoEvent,
   getTaskTypeLabel,
   isPendingAcceptanceTask,
+  mergeCalendarEventWithDetail,
+  resolveCalendarEventDetail,
+  storeCalendarEventDetail,
 } from './todoDetailPanel.helpers'
 import {
   acceptTodos,
@@ -84,6 +92,7 @@ const calendarViewMode = ref<'month' | 'week'>('month')
 const taskDetails = ref<Record<string, CalendarEvent>>({})
 const categoryFilter = ref<DetailCategoryFilter>(DEFAULT_CATEGORY_FILTER)
 const statusFilter = ref<DetailStatusFilter>('all')
+const scopeFilter = ref<TodoScopeFilter>('all')
 const activeTaskId = ref('')
 const detailLoadingId = ref('')
 const quickCreateText = ref('')
@@ -125,8 +134,8 @@ let hasInitializedTodoRange = false
 
 const categoryFilters: CategoryFilterItem[] = [
   { value: 'all', label: '全部' },
-  { value: 'task', label: '待办事项' },
-  { value: 'meeting', label: '会议信息' },
+  { value: 'task', label: '待办' },
+  { value: 'meeting', label: '会议' },
 ]
 
 const statusSubFilters: StatusFilterItem[] = [
@@ -145,11 +154,20 @@ const categoryFilterCounts = computed<Record<DetailCategoryFilter, number>>(() =
   meeting: selectedDateEvents.value.filter((event) => event.type === 'meeting').length,
 }))
 
+const assignedByMeCount = computed(() =>
+  countTodoScopeEvents(selectedDateEvents.value, 'assigned_by_me'),
+)
+const assignedToMeCount = computed(() =>
+  countTodoScopeEvents(selectedDateEvents.value, 'assigned_to_me'),
+)
+const hasScopeFilters = computed(() => assignedByMeCount.value > 0 || assignedToMeCount.value > 0)
+
 const filteredTasks = computed(() =>
   selectedDateEvents.value.filter(
     (event) =>
       matchesDetailCategoryFilter(event, categoryFilter.value) &&
-      matchesDetailStatusFilter(event, statusFilter.value),
+      matchesDetailStatusFilter(event, statusFilter.value) &&
+      matchesTodoScopeFilter(event, scopeFilter.value),
   ),
 )
 
@@ -176,7 +194,10 @@ const taskListSections = computed(() => {
 })
 
 const hasActiveTaskFilters = computed(
-  () => categoryFilter.value !== DEFAULT_CATEGORY_FILTER || statusFilter.value !== 'all',
+  () =>
+    categoryFilter.value !== DEFAULT_CATEGORY_FILTER ||
+    statusFilter.value !== 'all' ||
+    scopeFilter.value !== 'all',
 )
 
 const isFilterEmpty = computed(
@@ -238,6 +259,18 @@ const emptyStateCopy = computed(() => {
       desc: '当前日期没有待办安排，可切换筛选或创建新待办。',
     }
   }
+  if (scopeFilter.value === 'assigned_by_me') {
+    return {
+      title: '暂无我派发的待办',
+      desc: '你派发给别人的待办会在这里展示，便于跟进进度。',
+    }
+  }
+  if (scopeFilter.value === 'assigned_to_me') {
+    return {
+      title: '暂无别人派发的待办',
+      desc: '别人派发给你的待办会在这里展示。',
+    }
+  }
   return {
     title: '当前筛选下暂无待办',
     desc: '试试切换类型或状态筛选，或清除筛选查看全部安排。',
@@ -246,7 +279,13 @@ const emptyStateCopy = computed(() => {
 const taskEmptyActionLabel = computed(() => {
   if (isLoading.value || filteredTasks.value.length) return ''
   if (!selectedDateEvents.value.length) return ''
-  if (categoryFilter.value === 'all' && statusFilter.value === 'all') return ''
+  if (
+    categoryFilter.value === 'all' &&
+    statusFilter.value === 'all' &&
+    scopeFilter.value === 'all'
+  ) {
+    return ''
+  }
   return '查看全部'
 })
 
@@ -269,7 +308,7 @@ const activeTask = computed(() => {
     findEventById(activeTaskId.value)
 
   if (cached && fromList) {
-    return { ...cached, ...fromList }
+    return mergeCalendarEventWithDetail(fromList, cached)
   }
 
   return fromList ?? cached ?? null
@@ -375,14 +414,13 @@ async function refreshTodos() {
   const updatedTask = findEventById(preserveDetailId)
   if (updatedTask) {
     if (preservedDetail) {
-      taskDetails.value = {
-        [preserveDetailId]: {
-          ...preservedDetail,
-          ...updatedTask,
-        },
-      }
+      taskDetails.value = storeCalendarEventDetail(
+        taskDetails.value,
+        mergeCalendarEventWithDetail(updatedTask, preservedDetail),
+        preserveDetailId,
+      )
     }
-    await loadTaskDetail(updatedTask, true, { silent: Boolean(preservedDetail) })
+    await loadTaskDetail(updatedTask, true, { silent: Boolean(preservedDetail?.childTodos?.length) })
     return
   }
 
@@ -398,9 +436,7 @@ async function refreshTodos() {
       currentUser.value,
       assignableUsers.value,
     )
-    taskDetails.value = {
-      [preserveDetailId]: detail,
-    }
+    taskDetails.value = storeCalendarEventDetail(taskDetails.value, detail, preserveDetailId)
   } catch {
     closeTaskDetail()
   } finally {
@@ -435,10 +471,7 @@ async function openTodoFromNotification(payload: {
 
   try {
     const detailEvent = await loadTodoDetail(payload.id, currentUser.value, assignableUsers.value)
-    taskDetails.value = {
-      ...taskDetails.value,
-      [detailEvent.id]: detailEvent,
-    }
+    taskDetails.value = storeCalendarEventDetail(taskDetails.value, detailEvent, payload.id)
     pendingInboxDetailActive.value = payload.source === 'pending-inbox'
     leftPanelMode.value = 'detail'
     activeTaskId.value = detailEvent.id
@@ -489,7 +522,9 @@ async function changeCalendarPeriod(delta: number) {
     const next = new Date(`${props.selectedDate}T12:00:00`)
     next.setDate(next.getDate() + delta * 7)
     updateSelectedDate(ymd(next))
-    closeTaskDetail()
+    if (leftPanelMode.value === 'detail') {
+      closeTaskDetail()
+    }
     resetTaskFilters()
     return
   }
@@ -514,7 +549,9 @@ function setCalendarViewMode(mode: 'month' | 'week') {
 
 function selectCalendarDate(date: string) {
   updateSelectedDate(date)
-  closeTaskDetail()
+  if (leftPanelMode.value === 'detail') {
+    closeTaskDetail()
+  }
   resetTaskFilters()
 }
 
@@ -531,21 +568,35 @@ function openAgentCenter() {
 function resetTaskFilters() {
   categoryFilter.value = DEFAULT_CATEGORY_FILTER
   statusFilter.value = 'all'
+  scopeFilter.value = 'all'
 }
 
 function showAllTasks() {
   categoryFilter.value = 'all'
   statusFilter.value = 'all'
+  scopeFilter.value = 'all'
+}
+
+function handleScopeFilterClick(nextFilter: Exclude<TodoScopeFilter, 'all'>) {
+  scopeFilter.value = scopeFilter.value === nextFilter ? 'all' : nextFilter
 }
 
 function handleCategoryFilterClick(nextFilter: DetailCategoryFilter) {
   if (categoryFilter.value === nextFilter && statusFilter.value !== 'all') {
     statusFilter.value = 'all'
+    scopeFilter.value = 'all'
     return
   }
 
   categoryFilter.value = nextFilter
   statusFilter.value = 'all'
+  scopeFilter.value = 'all'
+}
+
+function isCategoryFilterActive(filter: DetailCategoryFilter) {
+  if (categoryFilter.value !== filter) return false
+  if (filter === 'all') return scopeFilter.value === 'all'
+  return true
 }
 
 function handleStatusFilterClick(
@@ -671,10 +722,7 @@ async function loadTaskDetail(
 
   try {
     const detail = await loadTodoDetail(task.id, currentUser.value, assignableUsers.value)
-    taskDetails.value = {
-      ...taskDetails.value,
-      [task.id]: detail,
-    }
+    taskDetails.value = storeCalendarEventDetail(taskDetails.value, detail, task.id)
   } catch {
     if (!silent) {
       feedbackStore.error('查询待办详情失败')
@@ -875,7 +923,7 @@ function compareTaskListEvents(a: CalendarEvent, b: CalendarEvent) {
 function getTaskTimeSub(task: CalendarEvent) {
   if (isTimedRangeEvent(task)) return ''
   if (isAllDayEvent(task)) return isMeetingEvent(task) ? '全天会议' : '全天事项'
-  return isMeetingEvent(task) ? '' : '时间节点'
+  return ''
 }
 
 function isTimedRangeEvent(event: CalendarEvent) {
@@ -932,12 +980,12 @@ function buildMonthCalendarDays(): CalendarDay[] {
 }
 
 function getTaskDetail(task: CalendarEvent) {
-  return taskDetails.value[task.id] ?? task
+  return resolveCalendarEventDetail(taskDetails.value, task)
 }
 
-function getProjectText(event: CalendarEvent) {
+function getTaskRemarkText(event: CalendarEvent) {
   const detail = getTaskDetail(event)
-  return detail.source || detail.remark || detail.content || '暂无来源说明'
+  return detail.remark?.trim() || ''
 }
 
 function formatDateTitle(date: string) {
@@ -1007,55 +1055,81 @@ function weekRangeLabel(anchorDate: string) {
             </div>
           </header>
 
-          <div class="filter-stack" aria-label="待办筛选">
-            <div class="filter-flow" role="tablist" aria-label="类型与状态筛选">
-              <div
-                v-for="filter in categoryFilters"
-                :key="filter.value"
-                class="primary-filter-item"
-                :class="{ active: categoryFilter === filter.value }"
-              >
-                <button
-                  type="button"
-                  class="filter"
-                  role="tab"
-                  :class="{ active: categoryFilter === filter.value }"
-                  :aria-selected="categoryFilter === filter.value"
-                  @click="handleCategoryFilterClick(filter.value)"
-                >
-                  {{ filter.label }}
-                  <span class="filter-count">{{ categoryFilterCounts[filter.value] }}</span>
-                </button>
+          <div class="filter-stack" :class="{ 'has-scope-filters': hasScopeFilters }" aria-label="待办筛选">
+            <div class="filter-primary">
+              <div class="filter-flow" role="tablist" aria-label="类型与状态筛选">
                 <div
-                  v-if="filter.value !== 'all' && categoryFilter === filter.value"
-                  class="inline-type-filters"
-                  role="group"
-                  aria-label="状态筛选"
+                  v-for="filter in categoryFilters"
+                  :key="filter.value"
+                  class="primary-filter-item"
+                  :class="{ active: isCategoryFilterActive(filter.value) }"
                 >
-                  <span class="inline-type-divider" aria-hidden="true"></span>
                   <button
-                    v-for="statusItem in statusSubFilters"
-                    :key="statusItem.value"
                     type="button"
-                    class="type-filter"
-                    :class="{ active: statusFilter === statusItem.value }"
-                    :aria-pressed="statusFilter === statusItem.value"
-                    @click="handleStatusFilterClick(filter.value, statusItem.value)"
+                    class="filter"
+                    role="tab"
+                    :class="{ active: isCategoryFilterActive(filter.value) }"
+                    :aria-selected="isCategoryFilterActive(filter.value)"
+                    @click="handleCategoryFilterClick(filter.value)"
                   >
-                    {{ statusItem.label }}
-                    <span class="type-count">{{
-                      getStatusCountForCategory(filter.value, statusItem.value)
-                    }}</span>
+                    {{ filter.label }}
+                    <span class="filter-count">{{ categoryFilterCounts[filter.value] }}</span>
                   </button>
+                  <div
+                    v-if="filter.value !== 'all' && categoryFilter === filter.value"
+                    class="inline-type-filters"
+                    role="group"
+                    aria-label="状态筛选"
+                  >
+                    <span class="inline-type-divider" aria-hidden="true"></span>
+                    <button
+                      v-for="statusItem in statusSubFilters"
+                      :key="statusItem.value"
+                      type="button"
+                      class="type-filter"
+                      :class="{ active: statusFilter === statusItem.value }"
+                      :aria-pressed="statusFilter === statusItem.value"
+                      @click="handleStatusFilterClick(filter.value, statusItem.value)"
+                    >
+                      {{ statusItem.label }}
+                      <span class="type-count">{{
+                        getStatusCountForCategory(filter.value, statusItem.value)
+                      }}</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div class="filter-result">
-              <span class="filter-result-text">
-                当前显示 <strong>{{ filteredTasks.length }}</strong> 项
-              </span>
-            </div>
+            <template v-if="hasScopeFilters">
+              <span class="filter-stack-divider" aria-hidden="true"></span>
+              <div class="filter-secondary" role="group" aria-label="派发来源筛选">
+                <div class="filter-secondary-flow">
+                  <button
+                    v-if="assignedByMeCount > 0"
+                    type="button"
+                    class="filter scope-filter scope-outgoing"
+                    :class="{ active: scopeFilter === 'assigned_by_me' }"
+                    :aria-pressed="scopeFilter === 'assigned_by_me'"
+                    @click="handleScopeFilterClick('assigned_by_me')"
+                  >
+                    我派发
+                    <span class="filter-count">{{ assignedByMeCount }}</span>
+                  </button>
+                  <button
+                    v-if="assignedToMeCount > 0"
+                    type="button"
+                    class="filter scope-filter scope-incoming"
+                    :class="{ active: scopeFilter === 'assigned_to_me' }"
+                    :aria-pressed="scopeFilter === 'assigned_to_me'"
+                    @click="handleScopeFilterClick('assigned_to_me')"
+                  >
+                    派给我
+                    <span class="filter-count">{{ assignedToMeCount }}</span>
+                  </button>
+                </div>
+              </div>
+            </template>
           </div>
 
           <AppStateBlock
@@ -1107,6 +1181,8 @@ function weekRangeLabel(anchorDate: string) {
                       allday: isAllDayEvent(task),
                       meeting: task.type === 'meeting',
                       todo: task.type !== 'meeting',
+                      'scope-assigned_by_me': task.scope === 'assigned_by_me',
+                      'scope-assigned_to_me': task.scope === 'assigned_to_me',
                     }"
                     @click="openTaskDetail(task)"
                   >
@@ -1153,15 +1229,24 @@ function weekRangeLabel(anchorDate: string) {
 
                     <div class="task-main">
                       <div class="task-line">
-                        <div class="task-name">{{ task.title }}</div>
+                        <div class="task-name">{{ getTodoListDisplayText(task) }}</div>
                         <span
                           class="task-tag"
                           :class="task.type === 'meeting' ? 'meeting' : 'todo'"
                         >
                           {{ getTaskTypeLabel(task) }}
                         </span>
+                        <span
+                          v-if="getTodoScopeBadge(task)"
+                          class="task-scope-badge"
+                          :class="`tone-${getTodoScopeBadge(task)!.tone}`"
+                        >
+                          {{ getTodoScopeBadge(task)!.label }}
+                        </span>
                       </div>
-                      <div class="task-sub">来源：{{ getProjectText(task) }}</div>
+                      <div v-if="getTaskRemarkText(task)" class="task-sub">
+                        备注：{{ getTaskRemarkText(task) }}
+                      </div>
                     </div>
 
                     <div class="task-aside">
@@ -2169,6 +2254,47 @@ function weekRangeLabel(anchorDate: string) {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
 }
 
+.filter-stack.has-scope-filters {
+  align-items: stretch;
+  gap: 10px;
+  min-height: 0;
+}
+
+.filter-stack.has-scope-filters .filter-primary {
+  flex: 3 1 0;
+  min-width: 0;
+}
+
+.filter-stack-divider {
+  flex: 0 0 1px;
+  align-self: stretch;
+  margin: 6px 0;
+  background: rgba(148, 163, 184, 0.28);
+}
+
+.filter-primary {
+  min-width: 0;
+}
+
+.filter-secondary {
+  flex: 2 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+}
+
+
+
+.filter-secondary-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .filter-flow {
   flex: 1;
   min-width: 0;
@@ -2181,6 +2307,14 @@ function weekRangeLabel(anchorDate: string) {
 
 .filter-flow::-webkit-scrollbar {
   display: none;
+}
+
+.filter.scope-filter.active.scope-outgoing {
+  color: #0e7490;
+}
+
+.filter.scope-filter.active.scope-incoming {
+  color: #b45309;
 }
 
 .primary-filter-item {
@@ -2284,26 +2418,8 @@ function weekRangeLabel(anchorDate: string) {
   box-shadow: none;
 }
 
-.filter-result {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  padding: 0 5px 0 10px;
-  border-left: 1px solid rgba(125, 151, 188, 0.14);
-}
 
-.filter-result-text {
-  color: #8795aa;
-  font-size: 12px;
-  white-space: nowrap;
-}
 
-.filter-result-text strong {
-  margin: 0 2px;
-  color: #14213d;
-  font-size: 13px;
-  font-weight: 750;
-}
 
 .filter:focus-visible,
 .type-filter:focus-visible {
@@ -2423,6 +2539,37 @@ function weekRangeLabel(anchorDate: string) {
 
 .task-card + .task-card {
   margin-top: 6px;
+}
+
+.task-card.scope-assigned_by_me {
+  background: linear-gradient(90deg, rgba(236, 254, 255, 0.72), rgba(255, 255, 255, 0)), #ffffff;
+}
+
+.task-card.scope-assigned_to_me {
+  background: linear-gradient(90deg, rgba(255, 251, 235, 0.82), rgba(255, 255, 255, 0)), #ffffff;
+}
+
+.task-scope-badge {
+  flex: 0 0 auto;
+  max-width: 100%;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.task-scope-badge.tone-outgoing {
+  color: #0e7490;
+  background: rgba(207, 250, 254, 0.92);
+  box-shadow: inset 0 0 0 1px rgba(14, 116, 144, 0.16);
+}
+
+.task-scope-badge.tone-incoming {
+  color: #b45309;
+  background: rgba(254, 243, 199, 0.96);
+  box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.18);
 }
 
 .task-card.todo {
@@ -3003,9 +3150,7 @@ function weekRangeLabel(anchorDate: string) {
     padding: 0 10px;
   }
 
-  .filter-result-text {
-    display: none;
-  }
+ 
 }
 
 @media (max-width: 1180px) {

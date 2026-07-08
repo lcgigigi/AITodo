@@ -7,6 +7,7 @@ import {
   compareCalendarRangeBarEvents,
   formatEventTime,
   getActiveCalendarDisplayEvents,
+  getTodoListDisplayText,
   getTodoStatusLabel,
   isAllDayEvent,
   isRangeEvent,
@@ -268,16 +269,6 @@ function selectWeekDayEvent(day: CalendarDay, event: CalendarEvent) {
   emit('select', day.date, time || undefined)
 }
 
-function timelineEventLabel(event: CalendarEvent) {
-  const title = event.title?.trim()
-  if (title) return title
-
-  const content = event.content?.trim()
-  if (content) return content
-
-  return '未命名待办'
-}
-
 onUnmounted(() => {
   clearWeekDayHoverTimer()
 })
@@ -387,13 +378,13 @@ onUnmounted(() => {
                     { 'is-selected': day.date === selectedDate },
                   ]"
                   type="button"
-                  :aria-label="`${weekEventTimeLabel(event)} ${timelineEventLabel(event)}`"
+                  :aria-label="`${weekEventTimeLabel(event)} ${getTodoListDisplayText(event)}`"
                   @click="selectWeekDayEvent(day, event)"
                 >
                   <span class="week-event-cell-time">{{ weekEventTimeLabel(event) }}</span>
                   <span class="week-event-cell-body">
                     <i></i>
-                    <b>{{ timelineEventLabel(event) }}</b>
+                    <b>{{ getTodoListDisplayText(event) }}</b>
                   </span>
                 </button>
 
@@ -469,13 +460,13 @@ onUnmounted(() => {
                   'is-rejected': isRejectedTodo(event),
                 },
               ]"
-              :aria-label="`${formatEventTime(event)} ${event.title}${isRejectedTodo(event) ? ' 已拒绝' : ''}`"
+              :aria-label="`${formatEventTime(event)} ${getTodoListDisplayText(event)}${isRejectedTodo(event) ? ' 已拒绝' : ''}`"
             >
               <em v-if="isRejectedTodo(event)" class="month-event-reject">{{
                 getTodoStatusLabel(event)
               }}</em>
               <i></i>
-              <b>{{ event.title }}</b>
+              <b>{{ getTodoListDisplayText(event) }}</b>
             </span>
           </span>
         </button>
@@ -502,7 +493,7 @@ onUnmounted(() => {
           }"
         >
           <i v-if="segment.showTitle"></i>
-          <b v-if="segment.showTitle">{{ segment.event.title }}</b>
+          <b v-if="segment.showTitle">{{ getTodoListDisplayText(segment.event) }}</b>
         </span>
       </div>
     </div>

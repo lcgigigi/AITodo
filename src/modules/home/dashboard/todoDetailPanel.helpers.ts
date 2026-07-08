@@ -2,16 +2,26 @@ import type { CalendarEvent, CalendarUser } from './types'
 import {
   formatTodoDetailTimeField,
   getBackendTodoStatusLabel,
+  getRejectedTodoMessage,
   getSmartTodoKindLabel,
   getTodoAssigneeDisplayName,
   getTodoContentDisplay,
   getTodoCreatorDisplayName,
+  getTodoHandlerDisplayName,
   isCompletedTodoEvent,
   isRejectedTodo,
   shouldShowTodoAssignerField,
 } from './todoDisplay'
 
 export type DetailStatusTone = 'accepted' | 'done' | 'rejected' | 'pending' | 'waiting'
+
+export type AssigneeProgressItem = {
+  id: string
+  name: string
+  statusLabel: string
+  statusTone: DetailStatusTone
+  note?: string
+}
 
 export type TodoDetailPanelViewModel = {
   title: string
@@ -22,6 +32,7 @@ export type TodoDetailPanelViewModel = {
   time: string | string[]
   content: string
   meta: Array<{ key: string; label: string; value: string }>
+  assigneeProgress?: AssigneeProgressItem[]
 }
 
 export function getTaskTypeLabel(event: CalendarEvent) {
@@ -87,10 +98,148 @@ export function canDeleteTodoEvent(event: CalendarEvent, currentUser: CalendarUs
   return false
 }
 
+export function getAssigneeProgressStatusLabel(event: CalendarEvent) {
+  if (isRejectedTodo(event)) return '已拒绝'
+  if (isCompletedTodoEvent(event)) return '已完成'
+  if (event.backendStatus === 3) return '已接受'
+  if (event.receiveStatus === 2) return '待接受'
+  return getBackendTodoStatusLabel(event)
+}
+
+export function getAssigneeProgressStatusTone(event: CalendarEvent): DetailStatusTone {
+  const label = getAssigneeProgressStatusLabel(event)
+  if (label === '已完成') return 'done'
+  if (label === '已拒绝') return 'rejected'
+  if (label === '已接受') return 'accepted'
+  if (label === '待接受') return 'pending'
+  return 'waiting'
+}
+
+export function getAssigneeProgressDisplayName(event: CalendarEvent) {
+  const handlerName = getTodoHandlerDisplayName(event)
+  if (handlerName !== '未指定') return handlerName
+
+  const assigneeName = getTodoAssigneeDisplayName(event)
+  return assigneeName !== '未指定' ? assigneeName : handlerName
+}
+
+export function buildDispatchProgressSummary(childTodos: CalendarEvent[]): {
+  label: string
+  tone: DetailStatusTone
+} {
+  const total = childTodos.length
+  const doneCount = childTodos.filter(isCompletedTodoEvent).length
+  const rejectedCount = childTodos.filter(isRejectedTodo).length
+  const pendingAcceptCount = childTodos.filter(
+    (child) => getAssigneeProgressStatusLabel(child) === '待接受',
+  ).length
+
+  if (doneCount === total) {
+    return { label: '已完成', tone: 'done' }
+  }
+  if (rejectedCount === total) {
+    return { label: '已拒绝', tone: 'rejected' }
+  }
+  if (pendingAcceptCount === total) {
+    return { label: '待接受', tone: 'pending' }
+  }
+  if (doneCount > 0) {
+    return { label: `${doneCount}/${total} 已完成`, tone: 'accepted' }
+  }
+  if (rejectedCount > 0) {
+    return { label: `${rejectedCount}/${total} 已拒绝`, tone: 'rejected' }
+  }
+  return { label: '进行中', tone: 'waiting' }
+}
+
+export function mergeCalendarEventWithDetail(
+  listEvent: CalendarEvent,
+  detail?: CalendarEvent | null,
+): CalendarEvent {
+  if (!detail) return listEvent
+
+  return {
+    ...detail,
+    ...listEvent,
+    childTodos: detail.childTodos,
+  }
+}
+
+export function storeCalendarEventDetail(
+  cache: Record<string, CalendarEvent>,
+  detail: CalendarEvent,
+  requestId?: string,
+) {
+  const next = {
+    ...cache,
+    [detail.id]: detail,
+  }
+
+  if (requestId && requestId !== detail.id) {
+    next[requestId] = detail
+  }
+
+  return next
+}
+
+export function resolveCalendarEventDetail(
+  cache: Record<string, CalendarEvent>,
+  task: CalendarEvent,
+) {
+  return cache[task.id] ?? task
+}
+
+function getAssigneeProgressSortRank(event: CalendarEvent) {
+  const label = getAssigneeProgressStatusLabel(event)
+  if (label === '待接受') return 0
+  if (label === '待处理') return 1
+  if (label === '已接受') return 2
+  if (label === '已完成') return 3
+  if (label === '已拒绝') return 4
+  return 5
+}
+
+function compareAssigneeProgressItems(left: CalendarEvent, right: CalendarEvent) {
+  const rankCompare = getAssigneeProgressSortRank(left) - getAssigneeProgressSortRank(right)
+  if (rankCompare !== 0) return rankCompare
+
+  const nameCompare = getAssigneeProgressDisplayName(left).localeCompare(
+    getAssigneeProgressDisplayName(right),
+    'zh-CN',
+  )
+  if (nameCompare !== 0) return nameCompare
+
+  return left.id.localeCompare(right.id)
+}
+
+export function buildAssigneeProgressItems(childTodos: CalendarEvent[]): AssigneeProgressItem[] {
+  return [...childTodos]
+    .sort(compareAssigneeProgressItems)
+    .map((child) => {
+      const note = getRejectedTodoMessage(child)
+      return {
+        id: child.id,
+        name: getAssigneeProgressDisplayName(child),
+        statusLabel: getAssigneeProgressStatusLabel(child),
+        statusTone: getAssigneeProgressStatusTone(child),
+        note: note || undefined,
+      }
+    })
+}
+
+function shouldShowAssigneeProgress(task: CalendarEvent, currentUser: CalendarUser) {
+  return Boolean(
+    currentUser.id &&
+      task.creatorId === currentUser.id &&
+      task.childTodos?.length,
+  )
+}
+
 export function buildTodoDetailPanelViewModel(
   task: CalendarEvent,
   currentUser: CalendarUser,
 ): TodoDetailPanelViewModel {
+  const showAssigneeProgress = shouldShowAssigneeProgress(task, currentUser)
   const meta: TodoDetailPanelViewModel['meta'] = [
     {
       key: 'type',
@@ -107,20 +256,29 @@ export function buildTodoDetailPanelViewModel(
     })
   }
 
-  meta.push({
-    key: 'receiver',
-    label: '接受人',
-    value: getTodoAssigneeDisplayName(task),
-  })
+  if (!showAssigneeProgress) {
+    meta.push({
+      key: 'receiver',
+      label: '接受人',
+      value: getTodoAssigneeDisplayName(task),
+    })
+  }
+
+  const progressSummary = showAssigneeProgress
+    ? buildDispatchProgressSummary(task.childTodos ?? [])
+    : null
 
   return {
     title: task.title || '未命名待办',
     typeLabel: getTaskTypeLabel(task),
     typeTone: task.type === 'meeting' ? 'meeting' : 'todo',
-    statusLabel: getBackendTodoStatusLabel(task),
-    statusTone: getDetailStatusTone(task, currentUser),
+    statusLabel: progressSummary?.label ?? getBackendTodoStatusLabel(task),
+    statusTone: progressSummary?.tone ?? getDetailStatusTone(task, currentUser),
     time: formatTodoDetailTimeField(task),
     content: getTodoContentDisplay(task),
     meta,
+    assigneeProgress: showAssigneeProgress
+      ? buildAssigneeProgressItems(task.childTodos ?? [])
+      : undefined,
   }
 }

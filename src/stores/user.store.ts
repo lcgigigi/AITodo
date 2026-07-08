@@ -31,6 +31,7 @@ export const useUserStore = defineStore('user', {
   }),
   getters: {
     isLoggedIn: (state) => Boolean(state.token),
+    isAdmin: (state) => state.profile?.roles?.includes('admin') ?? false,
   },
   actions: {
     setToken(token: string) {

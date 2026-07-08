@@ -23,6 +23,7 @@ import type {
 import EventScheduleTime from './components/EventScheduleTime.vue'
 import {
   eventTypeLabel,
+  filterEventsByScope,
   filterEventsByStatus,
   filterEventsByType,
   isMeetingEvent,
@@ -32,12 +33,15 @@ import {
   statusText,
   type PanelMode,
   type ParsedHighlightField,
+  type TodoScopeFilter,
   type TodoStatusFilter,
   type TodoTypeFilter,
 } from './dayPreviewPanel.helpers'
 import {
   addDays,
   getRejectedTodoMessage,
+  getTodoListDisplayText,
+  getTodoScopeBadge,
   isRangeEvent,
   isRejectedTodo,
   parseDate,
@@ -76,10 +80,12 @@ const emit = defineEmits<{
 const panelMode = ref<PanelMode>('list')
 const statusFilter = ref<TodoStatusFilter>('all')
 const typeFilter = ref<TodoTypeFilter>('all')
+const scopeFilter = ref<TodoScopeFilter>('all')
 const editingId = ref('')
 const aiPrompt = ref('')
 const aiParsedOriginalText = ref('')
 const isParsing = ref(false)
+const isTitleInvalid = ref(false)
 const highlightedFields = ref<Set<ParsedHighlightField>>(new Set())
 const todoForm = ref<CalendarTodoForm>(createEmptyForm(props.date))
 const initialFormSnapshot = ref(formSnapshot(todoForm.value))
@@ -111,10 +117,25 @@ const taskTypeCount = computed(
 const meetingTypeCount = computed(
   () => eventsForTypeCounts.value.filter((event) => isMeetingEvent(event)).length,
 )
-const filteredEvents = computed(() =>
-  filterEventsByType(filterEventsByStatus(props.events, statusFilter.value), typeFilter.value),
+const assignedByMeCount = computed(
+  () => props.events.filter((event) => event.scope === 'assigned_by_me').length,
 )
-const hasActiveFilters = computed(() => statusFilter.value !== 'all' || typeFilter.value !== 'all')
+const assignedToMeCount = computed(
+  () => props.events.filter((event) => event.scope === 'assigned_to_me').length,
+)
+const hasScopeFilters = computed(() => assignedByMeCount.value > 0 || assignedToMeCount.value > 0)
+const filteredEvents = computed(() =>
+  filterEventsByScope(
+    filterEventsByType(filterEventsByStatus(props.events, statusFilter.value), typeFilter.value),
+    scopeFilter.value,
+  ),
+)
+const hasActiveFilters = computed(
+  () =>
+    statusFilter.value !== 'all' ||
+    typeFilter.value !== 'all' ||
+    scopeFilter.value !== 'all',
+)
 const isFilterEmpty = computed(() => props.events.length > 0 && filteredEvents.value.length === 0)
 const isFormMode = computed(() => panelMode.value !== 'list')
 const isViewMode = computed(() => panelMode.value === 'view')
@@ -124,12 +145,20 @@ const formTitle = computed(() => {
   if (panelMode.value === 'edit') return '编辑待办'
   return '新增待办'
 })
-const canSubmit = computed(() => canEditForm.value && Boolean(todoForm.value.title.trim()))
 const isFormReadonly = computed(() => isParsing.value || isViewMode.value)
 const isDeadlineMode = computed(() => todoForm.value.mode === 'deadline')
 const canChooseAssignee = computed(() => props.assignableUsers.length > 1)
 const hasUnsavedChanges = computed(
   () => canEditForm.value && formSnapshot(todoForm.value) !== initialFormSnapshot.value,
+)
+
+watch(
+  () => todoForm.value.title,
+  (title) => {
+    if (title.trim()) {
+      isTitleInvalid.value = false
+    }
+  },
 )
 
 watch(
@@ -151,6 +180,8 @@ watch(
 watch(
   () => props.date,
   () => {
+    if (props.formOnly) return
+
     resetFormState()
     resetListFilters()
   },
@@ -320,6 +351,7 @@ function confirmDiscardChanges(onConfirm?: () => void) {
 function resetListFilters() {
   statusFilter.value = 'all'
   typeFilter.value = 'all'
+  scopeFilter.value = 'all'
 }
 
 function setStatusFilter(filter: TodoStatusFilter) {
@@ -342,6 +374,10 @@ function setTypeFilter(filter: TodoTypeFilter) {
   typeFilter.value = typeFilter.value === filter && filter !== 'all' ? 'all' : filter
 }
 
+function setScopeFilter(filter: Exclude<TodoScopeFilter, 'all'>) {
+  scopeFilter.value = scopeFilter.value === filter ? 'all' : filter
+}
+
 function resetFormState() {
   hideDiscardWarning()
   hideDeleteWarning()
@@ -351,6 +387,7 @@ function resetFormState() {
   aiPrompt.value = ''
   aiParsedOriginalText.value = ''
   isParsing.value = false
+  isTitleInvalid.value = false
   todoForm.value = nextForm
   syncFormSnapshot(nextForm)
   panelMode.value = 'list'
@@ -368,6 +405,7 @@ function beginCreateForm(overrides: Partial<CalendarTodoForm> = {}) {
   aiPrompt.value = ''
   aiParsedOriginalText.value = ''
   isParsing.value = false
+  isTitleInvalid.value = false
   todoForm.value = nextForm
   syncFormSnapshot(nextForm)
   panelMode.value = 'create'
@@ -442,6 +480,7 @@ async function beginEditForm(event: CalendarEvent) {
   aiPrompt.value = ''
   aiParsedOriginalText.value = ''
   isParsing.value = false
+  isTitleInvalid.value = false
   todoForm.value = nextForm
   syncFormSnapshot(nextForm)
   panelMode.value = 'edit'
@@ -626,7 +665,14 @@ function setTodoType(type: 1 | 2) {
 }
 
 function submitTodo() {
-  if (!canEditForm.value || !todoForm.value.title.trim()) return
+  if (!canEditForm.value) return
+
+  if (!todoForm.value.title.trim()) {
+    isTitleInvalid.value = true
+    return
+  }
+
+  isTitleInvalid.value = false
 
   const payload = createFormCopy(todoForm.value)
 
@@ -782,37 +828,73 @@ defineExpose({
         </button>
       </div>
 
-      <div class="type-filter-row" role="group" aria-label="待办类型筛选">
-        <button
-          type="button"
-          class="type-filter-chip type-all"
-          :class="{ active: typeFilter === 'all' }"
-          :aria-pressed="typeFilter === 'all'"
-          @click="setTypeFilter('all')"
-        >
-          <span class="type-filter-label"> 全部 </span>
-          <span class="type-filter-count">{{ eventsForTypeCounts.length }}</span>
-        </button>
-        <button
-          type="button"
-          class="type-filter-chip type-task"
-          :class="{ active: typeFilter === 'task' }"
-          :aria-pressed="typeFilter === 'task'"
-          @click="setTypeFilter('task')"
-        >
-          <span class="type-filter-label"> 待办 </span>
-          <span class="type-filter-count">{{ taskTypeCount }}</span>
-        </button>
-        <button
-          type="button"
-          class="type-filter-chip type-meeting"
-          :class="{ active: typeFilter === 'meeting' }"
-          :aria-pressed="typeFilter === 'meeting'"
-          @click="setTypeFilter('meeting')"
-        >
-          <span class="type-filter-label"> 会议 </span>
-          <span class="type-filter-count">{{ meetingTypeCount }}</span>
-        </button>
+      <div
+        class="type-filter-toolbar"
+        :class="{ 'has-scope-filters': hasScopeFilters }"
+      >
+        <div class="type-filter-row" role="group" aria-label="待办类型筛选">
+          <button
+            type="button"
+            class="type-filter-chip type-all"
+            :class="{ active: typeFilter === 'all' }"
+            :aria-pressed="typeFilter === 'all'"
+            @click="setTypeFilter('all')"
+          >
+            <span class="type-filter-label"> 全部 </span>
+            <span class="type-filter-count">{{ eventsForTypeCounts.length }}</span>
+          </button>
+          <button
+            type="button"
+            class="type-filter-chip type-task"
+            :class="{ active: typeFilter === 'task' }"
+            :aria-pressed="typeFilter === 'task'"
+            @click="setTypeFilter('task')"
+          >
+            <span class="type-filter-label"> 待办 </span>
+            <span class="type-filter-count">{{ taskTypeCount }}</span>
+          </button>
+          <button
+            type="button"
+            class="type-filter-chip type-meeting"
+            :class="{ active: typeFilter === 'meeting' }"
+            :aria-pressed="typeFilter === 'meeting'"
+            @click="setTypeFilter('meeting')"
+          >
+            <span class="type-filter-label"> 会议 </span>
+            <span class="type-filter-count">{{ meetingTypeCount }}</span>
+          </button>
+        </div>
+
+        <template v-if="hasScopeFilters">
+          <span class="type-filter-divider" aria-hidden="true"></span>
+          <div class="scope-filter-panel" role="group" aria-label="派发来源筛选">
+            <span class="scope-filter-kicker">派发</span>
+            <div class="scope-filter-row">
+              <button
+                v-if="assignedByMeCount > 0"
+                type="button"
+                class="scope-filter-chip scope-outgoing"
+                :class="{ active: scopeFilter === 'assigned_by_me' }"
+                :aria-pressed="scopeFilter === 'assigned_by_me'"
+                @click="setScopeFilter('assigned_by_me')"
+              >
+                <span class="scope-filter-label">我派发</span>
+                <span class="scope-filter-count">{{ assignedByMeCount }}</span>
+              </button>
+              <button
+                v-if="assignedToMeCount > 0"
+                type="button"
+                class="scope-filter-chip scope-incoming"
+                :class="{ active: scopeFilter === 'assigned_to_me' }"
+                :aria-pressed="scopeFilter === 'assigned_to_me'"
+                @click="setScopeFilter('assigned_to_me')"
+              >
+                <span class="scope-filter-label">派给我</span>
+                <span class="scope-filter-count">{{ assignedToMeCount }}</span>
+              </button>
+            </div>
+          </div>
+        </template>
       </div>
 
       <p v-if="hasActiveFilters" class="filter-hint">
@@ -851,7 +933,7 @@ defineExpose({
           <div class="event-body">
             <div class="event-title-row">
               <div class="event-title-block">
-                <h3>{{ event.title }}</h3>
+                <h3>{{ getTodoListDisplayText(event) }}</h3>
                 <div class="event-meta-row">
                   <span
                     class="event-kind"
@@ -859,14 +941,12 @@ defineExpose({
                   >
                     {{ eventTypeLabel(event) }}
                   </span>
-                  <span v-if="event.scope === 'assigned_by_me'" class="dispatch-target">
-                    派发：{{ event.assigneeName ?? event.owner }}
-                  </span>
                   <span
-                    v-else-if="event.scope === 'assigned_to_me' && event.creatorName"
-                    class="dispatch-target"
+                    v-if="getTodoScopeBadge(event)"
+                    class="scope-badge"
+                    :class="`tone-${getTodoScopeBadge(event)!.tone}`"
                   >
-                    派发人：{{ event.creatorName }}
+                    {{ getTodoScopeBadge(event)!.label }}
                   </span>
                   <span
                     class="event-status"
@@ -989,6 +1069,7 @@ defineExpose({
         </div>
       </Transition>
 
+      <div class="inline-todo-form-body">
       <section
         v-if="canEditForm"
         class="inline-section ai-inline-section"
@@ -1040,6 +1121,7 @@ defineExpose({
                 <div class="mode-switch" role="group" aria-label="事项类型">
                   <button
                     type="button"
+                    class="is-todo-type"
                     :class="{
                       active: todoForm.type === 1,
                       'is-ai-highlighted': isAiHighlighted('type'),
@@ -1051,6 +1133,7 @@ defineExpose({
                   </button>
                   <button
                     type="button"
+                    class="is-meeting-type"
                     :class="{
                       active: todoForm.type === 2,
                       'is-ai-highlighted': isAiHighlighted('type'),
@@ -1064,12 +1147,13 @@ defineExpose({
               </label>
             </div>
 
-            <div class="basic-info-column schedule-info-column">
+            <div class="basic-info-column schedule-info-column" :class="{ 'is-deadline-mode': isDeadlineMode }">
               <label class="mode-switch-field">
                 <span>时间模式</span>
                 <div class="mode-switch" role="group" aria-label="时间模式">
                   <button
                     type="button"
+                    class="is-scheduled-mode"
                     :class="{ active: todoForm.mode === 'scheduled' }"
                     :disabled="isFormReadonly"
                     @click="setMode('scheduled')"
@@ -1078,6 +1162,7 @@ defineExpose({
                   </button>
                   <button
                     type="button"
+                    class="is-deadline-mode"
                     :class="{ active: todoForm.mode === 'deadline' }"
                     :disabled="isFormReadonly"
                     @click="setMode('deadline')"
@@ -1089,7 +1174,7 @@ defineExpose({
             </div>
           </div>
 
-          <div class="schedule-field-panel">
+          <div class="schedule-field-panel" :class="{ 'is-deadline-panel': isDeadlineMode }">
             <template v-if="!isDeadlineMode">
               <div class="scheduled-time-fields">
                 <label class="field">
@@ -1175,9 +1260,12 @@ defineExpose({
               <span>待办内容</span>
               <Input
                 v-model="todoForm.title"
-                :class="{ 'is-ai-highlighted': isAiHighlighted('title') }"
+                :class="{
+                  'is-ai-highlighted': isAiHighlighted('title'),
+                  'is-field-invalid': isTitleInvalid,
+                }"
+                :aria-invalid="isTitleInvalid || undefined"
                 type="text"
-                required
                 :disabled="isFormReadonly"
                 :readonly="isViewMode"
                 placeholder="输入待办内容"
@@ -1197,6 +1285,7 @@ defineExpose({
           </div>
         </div>
       </section>
+      </div>
 
       <div
         class="form-actions"
@@ -1208,7 +1297,7 @@ defineExpose({
         </template>
         <template v-else>
           <Button type="button" :disabled="isParsing" @click="requestCancelForm">取消</Button>
-          <Button type="submit" :disabled="!canSubmit || isParsing">保存</Button>
+          <Button type="submit">保存</Button>
         </template>
       </div>
     </form>
@@ -1240,10 +1329,22 @@ defineExpose({
 }
 
 .preview-panel.is-form-mode {
+  --form-green-rgb: 34, 197, 94;
+  --form-sky-rgb: 14, 165, 233;
+  --form-amber-rgb: 245, 158, 11;
+  --form-surface: rgba(255, 255, 255, 0.72);
+  --form-surface-strong: rgba(255, 255, 255, 0.92);
+  --form-border: rgba(203, 213, 225, 0.72);
+  --form-module-bg: linear-gradient(
+    135deg,
+    rgba(var(--todo-primary-rgb), 0.07),
+    rgba(239, 246, 255, 0.88)
+  );
+  --form-module-border: rgba(var(--todo-primary-rgb), 0.1);
   gap: 0;
   padding: 0;
   border-radius: 22px;
-  background: linear-gradient(165deg, rgba(255, 255, 255, 0.8), rgba(246, 250, 255, 0.58));
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.84), rgba(239, 246, 255, 0.62));
   border: 1px solid rgba(255, 255, 255, 0.82);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.92),
@@ -1265,8 +1366,8 @@ defineExpose({
   flex: 0 0 auto;
   align-items: flex-start;
   padding: 18px 20px 16px;
-  border-bottom: 1px solid var(--todo-line);
-  background: rgba(255, 255, 255, 0.42);
+  border-bottom: 1px solid rgba(var(--todo-primary-rgb), 0.1);
+  background: linear-gradient(135deg, rgba(239, 246, 255, 0.82), rgba(255, 255, 255, 0.48));
 }
 
 .preview-head > div:first-child {
@@ -1402,13 +1503,33 @@ defineExpose({
   transform: translateY(0);
 }
 
+.type-filter-toolbar {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  border-bottom: 1px solid #e5ebf2;
+  background: transparent;
+}
+
+.type-filter-toolbar.has-scope-filters .type-filter-row {
+  flex: 3 1 0;
+  min-width: 0;
+}
+
 .type-filter-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0;
-  border-bottom: 1px solid #e5ebf2;
+  border-bottom: 0;
   background: transparent;
   padding: 0 4px;
+}
+
+.type-filter-divider {
+  flex: 0 0 1px;
+  align-self: stretch;
+  margin: 8px 0;
+  background: rgba(148, 163, 184, 0.28);
 }
 
 .type-filter-chip {
@@ -1475,6 +1596,96 @@ defineExpose({
 .type-filter-chip.active .type-filter-count {
   background: #eaf2ff;
   color: var(--todo-primary-hover);
+}
+
+.scope-filter-panel {
+  flex: 2 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 8px 0 4px;
+}
+
+.scope-filter-kicker {
+  color: #7b8798;
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.scope-filter-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.scope-filter-label {
+  white-space: nowrap;
+}
+
+.scope-filter-chip {
+  min-height: 32px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #475569;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.scope-filter-count {
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.07);
+  color: #475569;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.scope-filter-chip.scope-outgoing.active {
+  border-color: rgba(14, 116, 144, 0.28);
+  background: rgba(236, 254, 255, 0.96);
+  color: #0e7490;
+  box-shadow: 0 4px 12px rgba(14, 116, 144, 0.08);
+}
+
+.scope-filter-chip.scope-outgoing.active .scope-filter-count {
+  background: rgba(14, 116, 144, 0.12);
+  color: #0e7490;
+}
+
+.scope-filter-chip.scope-incoming.active {
+  border-color: rgba(217, 119, 6, 0.28);
+  background: rgba(255, 251, 235, 0.98);
+  color: #b45309;
+  box-shadow: 0 4px 12px rgba(217, 119, 6, 0.08);
+}
+
+.scope-filter-chip.scope-incoming.active .scope-filter-count {
+  background: rgba(217, 119, 6, 0.12);
+  color: #b45309;
 }
 
 .filter-hint {
@@ -1626,10 +1837,16 @@ defineExpose({
 .preview-panel.is-form-mode .close-btn {
   width: 36px;
   height: 36px;
-  border-color: rgba(226, 232, 240, 0.9);
+  border-color: rgba(var(--todo-primary-rgb), 0.12);
   border-radius: 12px;
   color: #60708d;
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.preview-panel.is-form-mode .close-btn:hover {
+  border-color: rgba(var(--todo-primary-rgb), 0.22);
+  background: rgba(239, 246, 255, 0.92);
+  color: var(--todo-primary-hover);
 }
 
 .close-btn svg {
@@ -1725,18 +1942,18 @@ defineExpose({
 }
 
 .timeline::-webkit-scrollbar,
-.inline-todo-form::-webkit-scrollbar {
+.inline-todo-form-body::-webkit-scrollbar {
   width: 6px;
 }
 
 .timeline::-webkit-scrollbar-thumb,
-.inline-todo-form::-webkit-scrollbar-thumb {
+.inline-todo-form-body::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: rgba(148, 163, 184, 0.42);
 }
 
 .timeline::-webkit-scrollbar-track,
-.inline-todo-form::-webkit-scrollbar-track {
+.inline-todo-form-body::-webkit-scrollbar-track {
   background: transparent;
 }
 
@@ -1804,18 +2021,41 @@ defineExpose({
   flex-wrap: wrap;
 }
 
-.dispatch-target {
-  color: #0e7490;
-  font-size: 13px;
-  font-weight: 900;
+.dispatch-target,
+.scope-badge {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
   line-height: 1.2;
   white-space: nowrap;
+}
+
+.scope-badge.tone-outgoing {
+  color: #0e7490;
+  background: rgba(207, 250, 254, 0.92);
+  box-shadow: inset 0 0 0 1px rgba(14, 116, 144, 0.16);
+}
+
+.scope-badge.tone-incoming {
+  color: #b45309;
+  background: rgba(254, 243, 199, 0.96);
+  box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.18);
 }
 
 .timeline-item.scope-assigned_by_me {
   margin: 2px 0;
   border-radius: 14px;
   background: linear-gradient(90deg, rgba(236, 254, 255, 0.72), rgba(255, 255, 255, 0)), #ffffff;
+}
+
+.timeline-item.scope-assigned_to_me {
+  margin: 2px 0;
+  border-radius: 14px;
+  background: linear-gradient(90deg, rgba(255, 251, 235, 0.82), rgba(255, 255, 255, 0)), #ffffff;
 }
 
 .timeline-item.status-done .event-body::before {
@@ -2143,11 +2383,24 @@ p {
   position: relative;
   min-height: 0;
   flex: 1 1 auto;
-  overflow-y: hidden;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 14px 18px 0;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.18), rgba(239, 246, 255, 0.08));
+}
+
+.inline-todo-form-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 14px 18px 0;
+  padding-bottom: 10px;
+  scrollbar-width: thin;
 }
 
 .inline-section {
@@ -2169,9 +2422,12 @@ p {
   z-index: 4;
   overflow: visible;
   padding: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.78);
+  border: 1px solid var(--form-module-border, rgba(var(--todo-primary-rgb), 0.1));
   border-radius: 16px;
-  background: var(--todo-surface-soft);
+  background: var(
+    --form-module-bg,
+    linear-gradient(135deg, rgba(var(--todo-primary-rgb), 0.07), rgba(239, 246, 255, 0.88))
+  );
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
   transition:
     border-color 0.18s ease,
@@ -2183,8 +2439,8 @@ p {
   border-color: rgba(var(--todo-primary-rgb), 0.16);
   background: linear-gradient(
     135deg,
-    rgba(var(--todo-primary-rgb), 0.08),
-    rgba(248, 250, 252, 0.78)
+    rgba(var(--todo-primary-rgb), 0.11),
+    rgba(239, 246, 255, 0.82)
   );
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
 }
@@ -2210,6 +2466,30 @@ p {
   gap: 6px;
   border-radius: 14px;
   font-size: 14px;
+}
+
+.ai-inline-section .field > span {
+  color: #5b7cab;
+}
+
+.ai-inline-section :deep(input) {
+  border-color: rgba(var(--todo-primary-rgb), 0.14);
+  background: var(--form-surface-strong, rgba(255, 255, 255, 0.92));
+}
+
+.ai-inline-section :deep(input:focus) {
+  border-color: rgba(var(--todo-primary-rgb), 0.28);
+  box-shadow: 0 0 0 3px rgba(var(--todo-primary-rgb), 0.08);
+}
+
+.ai-inline-row button:not(:disabled) {
+  border-color: rgba(var(--todo-primary-rgb), 0.24);
+  background: linear-gradient(
+    180deg,
+    rgba(var(--todo-primary-rgb), 0.92),
+    rgba(37, 99, 235, 0.9)
+  );
+  box-shadow: 0 10px 22px -18px rgba(var(--todo-primary-rgb), 0.55);
 }
 
 .ai-inline-row button.is-parsing:disabled {
@@ -2270,9 +2550,24 @@ p {
   gap: 9px;
   padding: 12px;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.58);
-  border: 1px solid rgba(255, 255, 255, 0.78);
+  border: 1px solid var(--form-module-border, rgba(var(--todo-primary-rgb), 0.1));
+  background: var(
+    --form-module-bg,
+    linear-gradient(135deg, rgba(var(--todo-primary-rgb), 0.07), rgba(239, 246, 255, 0.88))
+  );
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.type-info-column .mode-switch {
+  background: rgba(var(--form-green-rgb, 34, 197, 94), 0.1);
+}
+
+.schedule-info-column .mode-switch {
+  background: rgba(var(--form-sky-rgb, 14, 165, 233), 0.1);
+}
+
+.schedule-info-column.is-deadline-mode .mode-switch {
+  background: rgba(var(--form-amber-rgb, 245, 158, 11), 0.1);
 }
 
 .scheduled-time-fields {
@@ -2288,10 +2583,11 @@ p {
   gap: 10px;
   padding: 12px;
   border-radius: 16px;
-  background:
-    linear-gradient(135deg, rgba(var(--todo-primary-rgb), 0.055), rgba(255, 255, 255, 0.42)),
-    rgba(255, 255, 255, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.78);
+  border: 1px solid var(--form-module-border, rgba(var(--todo-primary-rgb), 0.1));
+  background: var(
+    --form-module-bg,
+    linear-gradient(135deg, rgba(var(--todo-primary-rgb), 0.07), rgba(239, 246, 255, 0.88))
+  );
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
@@ -2312,9 +2608,9 @@ p {
 
 .schedule-field-panel :deep(.todo-datetime-trigger) {
   height: 42px;
-  border-color: rgba(203, 213, 225, 0.82);
+  border-color: var(--form-border, rgba(203, 213, 225, 0.82));
   border-radius: 14px;
-  background: var(--todo-surface-strong);
+  background: var(--form-surface-strong, rgba(255, 255, 255, 0.92));
   color: var(--todo-text);
   font-size: 15px;
   font-weight: 650;
@@ -2322,8 +2618,14 @@ p {
 
 .schedule-field-panel :deep(.todo-datetime-trigger:hover),
 .schedule-field-panel :deep(.todo-datetime-trigger.is-active) {
-  border-color: rgba(var(--todo-primary-rgb), 0.42);
-  box-shadow: 0 0 0 3px rgba(var(--todo-primary-rgb), 0.1);
+  border-color: rgba(var(--form-sky-rgb, 14, 165, 233), 0.34);
+  box-shadow: 0 0 0 3px rgba(var(--form-sky-rgb, 14, 165, 233), 0.1);
+}
+
+.schedule-field-panel.is-deadline-panel :deep(.todo-datetime-trigger:hover),
+.schedule-field-panel.is-deadline-panel :deep(.todo-datetime-trigger.is-active) {
+  border-color: rgba(var(--form-amber-rgb, 245, 158, 11), 0.34);
+  box-shadow: 0 0 0 3px rgba(var(--form-amber-rgb, 245, 158, 11), 0.1);
 }
 
 .mode-switch-field {
@@ -2381,20 +2683,53 @@ p {
 }
 
 .mode-switch button.active {
-  background: #ffffff;
-  color: var(--todo-text);
-  border-color: rgba(226, 232, 240, 0.9);
   box-shadow:
     0 1px 1px rgba(15, 23, 42, 0.04),
     0 2px 8px rgba(15, 23, 42, 0.08);
 }
 
+.mode-switch button.is-todo-type.active {
+  background: rgba(34, 197, 94, 0.16);
+  color: #15803d;
+  border-color: rgba(34, 197, 94, 0.28);
+  box-shadow:
+    0 1px 1px rgba(21, 128, 61, 0.06),
+    0 2px 8px rgba(34, 197, 94, 0.12);
+}
+
+.mode-switch button.is-meeting-type.active {
+  background: rgba(var(--todo-primary-rgb), 0.14);
+  color: #1d4ed8;
+  border-color: rgba(var(--todo-primary-rgb), 0.24);
+  box-shadow:
+    0 1px 1px rgba(37, 99, 235, 0.06),
+    0 2px 8px rgba(var(--todo-primary-rgb), 0.12);
+}
+
+.mode-switch button.is-scheduled-mode.active {
+  background: rgba(14, 165, 233, 0.14);
+  color: #0369a1;
+  border-color: rgba(14, 165, 233, 0.26);
+  box-shadow:
+    0 1px 1px rgba(3, 105, 161, 0.06),
+    0 2px 8px rgba(14, 165, 233, 0.12);
+}
+
+.mode-switch button.is-deadline-mode.active {
+  background: rgba(245, 158, 11, 0.16);
+  color: #b45309;
+  border-color: rgba(245, 158, 11, 0.28);
+  box-shadow:
+    0 1px 1px rgba(180, 83, 9, 0.06),
+    0 2px 8px rgba(245, 158, 11, 0.12);
+}
+
 .quick-range-row button,
 .quick-time-row button {
   min-height: 28px;
-  border: 1px solid #dbe4ee;
+  border: 1px solid rgba(203, 213, 225, 0.82);
   border-radius: 999px;
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.82);
   font-size: 12px;
   font-weight: 700;
 }
@@ -2405,29 +2740,51 @@ p {
 
 .quick-range-row button:hover,
 .quick-time-row button:hover {
-  border-color: #cbd5e1;
-  color: #111827;
+  border-color: rgba(var(--form-sky-rgb, 14, 165, 233), 0.24);
+  background: rgba(239, 246, 255, 0.82);
+  color: #0369a1;
 }
 
 .quick-time-row button.active {
-  border-color: #bfdbfe;
-  background: #ffffff;
-  color: #2563eb;
+  border-color: rgba(var(--form-sky-rgb, 14, 165, 233), 0.28);
+  background: rgba(var(--form-sky-rgb, 14, 165, 233), 0.12);
+  color: #0369a1;
 }
 
-.mode-switch button.active:hover {
-  background: #ffffff;
-  color: #111827;
-  border-color: rgba(226, 232, 240, 0.95);
-  box-shadow:
-    0 1px 2px rgba(15, 23, 42, 0.06),
-    0 3px 8px rgba(15, 23, 42, 0.08);
+.schedule-field-panel.is-deadline-panel .quick-range-row button:hover {
+  border-color: rgba(var(--form-amber-rgb, 245, 158, 11), 0.28);
+  background: rgba(255, 251, 235, 0.88);
+  color: #b45309;
+}
+
+.mode-switch button.is-todo-type.active:hover {
+  background: rgba(34, 197, 94, 0.2);
+  color: #166534;
+  border-color: rgba(34, 197, 94, 0.34);
+}
+
+.mode-switch button.is-meeting-type.active:hover {
+  background: rgba(var(--todo-primary-rgb), 0.18);
+  color: #1e40af;
+  border-color: rgba(var(--todo-primary-rgb), 0.3);
+}
+
+.mode-switch button.is-scheduled-mode.active:hover {
+  background: rgba(14, 165, 233, 0.18);
+  color: #075985;
+  border-color: rgba(14, 165, 233, 0.32);
+}
+
+.mode-switch button.is-deadline-mode.active:hover {
+  background: rgba(245, 158, 11, 0.2);
+  color: #92400e;
+  border-color: rgba(245, 158, 11, 0.34);
 }
 
 .quick-time-row button.active:hover {
-  border-color: #93c5fd;
-  background: #ffffff;
-  color: #2563eb;
+  border-color: rgba(var(--form-sky-rgb, 14, 165, 233), 0.34);
+  background: rgba(var(--form-sky-rgb, 14, 165, 233), 0.16);
+  color: #075985;
 }
 
 .mode-switch button:disabled,
@@ -2441,6 +2798,14 @@ p {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid var(--form-module-border, rgba(var(--todo-primary-rgb), 0.1));
+  background: var(
+    --form-module-bg,
+    linear-gradient(135deg, rgba(var(--todo-primary-rgb), 0.07), rgba(239, 246, 255, 0.88))
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
 .field {
@@ -2472,9 +2837,9 @@ p {
 .field textarea {
   min-width: 0;
   box-sizing: border-box;
-  border: 1px solid rgba(203, 213, 225, 0.82);
+  border: 1px solid var(--form-border, rgba(203, 213, 225, 0.82));
   border-radius: 14px;
-  background: var(--todo-surface-strong);
+  background: var(--form-surface-strong, rgba(255, 255, 255, 0.92));
   color: var(--todo-text);
   padding: 0 14px;
   font: inherit;
@@ -2495,9 +2860,9 @@ p {
 .soft-picker {
   height: 42px;
   width: 100%;
-  border: 1px solid rgba(203, 213, 225, 0.82);
+  border: 1px solid var(--form-border, rgba(203, 213, 225, 0.82));
   border-radius: 14px;
-  background: var(--todo-surface-strong);
+  background: var(--form-surface-strong, rgba(255, 255, 255, 0.92));
   color: var(--todo-text);
   font-size: 15px;
   font-weight: 650;
@@ -2524,6 +2889,19 @@ p {
 .field textarea:focus {
   border-color: rgba(var(--todo-primary-rgb), 0.42);
   box-shadow: 0 0 0 3px rgba(var(--todo-primary-rgb), 0.1);
+}
+
+.field :deep(input.is-field-invalid),
+.field :deep(input[aria-invalid='true']) {
+  border-color: rgba(239, 68, 68, 0.72);
+  background: rgba(254, 242, 242, 0.92);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+}
+
+.field :deep(input.is-field-invalid:focus),
+.field :deep(input[aria-invalid='true']:focus) {
+  border-color: rgba(220, 38, 38, 0.82);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.14);
 }
 
 .field input.is-ai-highlighted,
@@ -2642,10 +3020,10 @@ p {
 
 .form-actions {
   flex: 0 0 auto;
-  margin: auto -18px 0;
-  padding: 12px 18px 14px;
-  border-top: 1px solid var(--todo-line);
-  background: rgba(255, 255, 255, 0.48);
+  margin: 0 -18px;
+  padding: 4px 18px 8px;
+  border-top: 1px solid rgba(var(--todo-primary-rgb), 0.1);
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.35), rgba(239, 246, 255, 0.78));
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
@@ -2661,6 +3039,40 @@ p {
   padding: 0 18px;
   font-size: 15px;
   font-weight: 850;
+}
+
+.form-actions button[type='button'] {
+  border-color: rgba(203, 213, 225, 0.9);
+  background: rgba(255, 255, 255, 0.88);
+  color: #52607a;
+}
+
+.form-actions button[type='button']:hover {
+  border-color: rgba(var(--todo-primary-rgb), 0.18);
+  background: rgba(239, 246, 255, 0.92);
+  color: #334155;
+}
+
+.form-actions button[type='submit'] {
+  border-color: rgba(var(--todo-primary-rgb), 0.24);
+  background: linear-gradient(
+    180deg,
+    rgba(var(--todo-primary-rgb), 0.92),
+    rgba(37, 99, 235, 0.9)
+  );
+  box-shadow: 0 10px 22px -18px rgba(var(--todo-primary-rgb), 0.55);
+}
+
+.form-actions button[type='submit']:not(:disabled):hover {
+  border-color: rgba(37, 99, 235, 0.34);
+  background: linear-gradient(180deg, #4f93f8, #2563eb);
+}
+
+.form-actions button[type='submit']:disabled {
+  border-color: rgba(203, 213, 225, 0.72);
+  background: rgba(226, 232, 240, 0.58);
+  color: #94a3b8;
+  box-shadow: none;
 }
 
 @media (max-width: 760px) {

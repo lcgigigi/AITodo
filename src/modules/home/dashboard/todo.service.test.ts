@@ -689,6 +689,153 @@ describe('todo.service real backend adapter', () => {
     ])
   })
 
+  it('dedupes parent and child todos returned together from month-list', async () => {
+    const creator: CalendarUser = {
+      id: '1110691',
+      name: '田坤坤',
+      role: 'employee',
+    }
+
+    vi.mocked(httpClient.request).mockImplementation((config) => {
+      if (config.url === '/smart-todo/month-list') {
+        return backendResponse([
+          {
+            id: 100,
+            title: '',
+            timeType: 1,
+            startDateShow: '2026-07-16 11:20:00',
+            content: '跟进需求',
+            assigneeIds: '1102080',
+            creatorId: '1110691',
+            status: 0,
+            fid: null,
+            type: 1,
+          },
+          {
+            id: 101,
+            title: '',
+            timeType: 1,
+            startDateShow: '2026-07-16 11:20:00',
+            content: '跟进需求',
+            assigneeIds: '1102080',
+            creatorId: '1110691',
+            status: 0,
+            fid: 100,
+            type: 1,
+          },
+        ]) as never
+      }
+
+      return backendResponse(true) as never
+    })
+
+    const events = await loadTodos(creator, assignableUsers)
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      id: '100',
+      title: '',
+      content: '跟进需求',
+      scope: 'assigned_by_me',
+    })
+  })
+
+  it('keeps child todo when parent is absent from month-list', async () => {
+    vi.mocked(httpClient.request).mockImplementation((config) => {
+      if (config.url === '/smart-todo/month-list') {
+        return backendResponse([
+          {
+            id: 101,
+            title: '',
+            timeType: 1,
+            startDateShow: '2026-07-16 11:20:00',
+            content: '跟进需求',
+            assigneeIds: '1102080',
+            creatorId: '1110691',
+            handlerId: '1102080',
+            status: 0,
+            fid: 100,
+            type: 1,
+          },
+        ]) as never
+      }
+
+      return backendResponse(true) as never
+    })
+
+    await expect(loadTodos(currentUser, assignableUsers)).resolves.toMatchObject([
+      {
+        id: '101',
+        title: '',
+        content: '跟进需求',
+      },
+    ])
+  })
+
+  it('loads todo detail with child todos for assignee progress', async () => {
+    vi.mocked(httpClient.request).mockImplementation((config) => {
+      if (config.url === '/smart-todo/100' && config.method === 'GET') {
+        return backendResponse({
+          mainTodo: {
+            id: 100,
+            title: '',
+            timeType: 1,
+            startDateShow: '2026-07-16 11:20:00',
+            content: '跟进需求',
+            assigneeIds: '1102080,1102081',
+            creatorId: '1110691',
+            status: 0,
+            type: 1,
+          },
+          childTodoList: [
+            {
+              id: 101,
+              title: '',
+              timeType: 1,
+              startDateShow: '2026-07-16 11:20:00',
+              content: '跟进需求',
+              assigneeIds: '1102080',
+              creatorId: '1110691',
+              handlerId: '1102080',
+              status: 6,
+              receiveStatus: 1,
+              fid: 100,
+              type: 1,
+            },
+            {
+              id: 102,
+              title: '',
+              timeType: 1,
+              startDateShow: '2026-07-16 11:20:00',
+              content: '跟进需求',
+              assigneeIds: '1102081',
+              creatorId: '1110691',
+              handlerId: '1102081',
+              status: 0,
+              receiveStatus: 2,
+              fid: 100,
+              type: 1,
+            },
+          ],
+        }) as never
+      }
+
+      return backendResponse(true) as never
+    })
+
+    await expect(
+      loadTodoDetail('100', { id: '1110691', name: '田坤坤', role: 'employee' }, [
+        { id: '1102080', name: '李四', role: 'employee' },
+        { id: '1102081', name: '王五', role: 'employee' },
+      ]),
+    ).resolves.toMatchObject({
+      id: '100',
+      childTodos: [
+        { id: '101', handlerName: '李四' },
+        { id: '102', handlerName: '王五' },
+      ],
+    })
+  })
+
   it('loads month-list with startDate and endDate query params', async () => {
     vi.mocked(httpClient.request).mockImplementation(async (config) => {
       if (config.url === '/smart-todo/month-list') {

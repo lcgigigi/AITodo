@@ -141,7 +141,6 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
       const result = await loadSysMessages({
         pageNum,
         pageSize: SYS_MESSAGE_PAGE_SIZE,
-        msgStatus: inboxFilter.value === 'actionable' ? 0 : undefined,
       })
       sysMessages.value = mergeSysMessages(isFirstPage ? [] : sysMessages.value, result.rows)
       sysMessageTotal.value = result.total
@@ -167,20 +166,11 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
   }
 
   function setInboxFilter(filter: InboxFilter) {
-    if (inboxFilter.value === filter) return
-
     inboxFilter.value = filter
-    void refreshSysMessages(1, { silent: sysMessagesLoaded.value })
   }
 
   function applySysMessageReadState(message: SysMessage) {
     if (message.msgStatus !== 0) return
-
-    if (inboxFilter.value === 'actionable') {
-      sysMessages.value = removeSysMessageIdsFromList(sysMessages.value, [message.rawId])
-      sysMessageTotal.value = Math.max(0, sysMessageTotal.value - 1)
-      return
-    }
 
     sysMessages.value = markSysMessageIdsReadInList(sysMessages.value, [message.rawId])
   }
@@ -223,11 +213,7 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
 
     try {
       await markAllSysMessagesRead()
-      sysMessages.value =
-        inboxFilter.value === 'actionable' ? [] : markAllSysMessagesReadInList(sysMessages.value)
-      if (inboxFilter.value === 'actionable') {
-        sysMessageTotal.value = 0
-      }
+      sysMessages.value = markAllSysMessagesReadInList(sysMessages.value)
     } catch (error) {
       inboxError.value = error instanceof Error ? error.message : '全部标记已读失败'
     } finally {
@@ -306,15 +292,10 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
     if (!message) return
 
     const alreadyExists = hasSysMessage(sysMessages.value, message.id)
-    const shouldShowInCurrentFilter =
-      inboxFilter.value === 'all' || message.msgStatus === 0 || alreadyExists
+    sysMessages.value = mergeSysMessages(sysMessages.value, [message], { prepend: true })
 
-    if (shouldShowInCurrentFilter) {
-      sysMessages.value = mergeSysMessages(sysMessages.value, [message], { prepend: true })
-
-      if (!alreadyExists) {
-        sysMessageTotal.value += 1
-      }
+    if (!alreadyExists) {
+      sysMessageTotal.value += 1
     }
 
     if (message.bizType === 1 && message.bizId) {

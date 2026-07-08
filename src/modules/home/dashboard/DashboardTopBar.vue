@@ -4,10 +4,12 @@ import { useRouter } from 'vue-router'
 import IconChevronDown from '~icons/lucide/chevron-down'
 import IconLayoutDashboard from '~icons/lucide/layout-dashboard'
 import IconLogOut from '~icons/lucide/log-out'
+import IconMailbox from '~icons/lucide/mailbox'
 import IconRefreshCw from '~icons/lucide/refresh-cw'
 import IconSettings from '~icons/lucide/settings'
 import IconSparkles from '~icons/lucide/sparkles'
 import DashboardNotificationCenter from '@/modules/home/dashboard/components/DashboardNotificationCenter.vue'
+import DashboardSuggestionBox from '@/modules/home/dashboard/components/DashboardSuggestionBox.vue'
 import DashboardViewModeSwitch, {
   type DashboardViewMode,
 } from '@/modules/home/dashboard/components/DashboardViewModeSwitch.vue'
@@ -58,12 +60,15 @@ const { glassStyle } = useDashboardGlassSettings()
 const isSettingsMenuOpen = ref(false)
 const isSyncingCalendar = ref(false)
 const isNotificationPanelOpen = ref(false)
+const isSuggestionBoxOpen = ref(false)
+const suggestionBoxRef = ref<InstanceType<typeof DashboardSuggestionBox> | null>(null)
 const isUserMenuOpen = ref(false)
 const isLoggingOut = ref(false)
 
 const displayName = computed(() => userStore.profile?.name ?? '刘美华')
 const department = computed(() => userStore.profile?.department ?? '信息技术部')
 const avatarUrl = computed(() => userStore.profile?.avatar ?? DEFAULT_USER_AVATAR)
+const isAdminUser = computed(() => userStore.isAdmin)
 
 const settingsMenuPanelStyle = computed(() => {
   if (!props.embedded) return undefined
@@ -77,6 +82,23 @@ const settingsMenuPanelStyle = computed(() => {
 
 function closeNotificationPanel() {
   isNotificationPanelOpen.value = false
+}
+
+function closeSuggestionBox() {
+  isSuggestionBoxOpen.value = false
+}
+
+function openSuggestionBox() {
+  closeNotificationPanel()
+  closeUserMenu()
+  closeSettingsMenu()
+
+  if (isSuggestionBoxOpen.value) {
+    suggestionBoxRef.value?.expand()
+    return
+  }
+
+  isSuggestionBoxOpen.value = true
 }
 
 function closeUserMenu() {
@@ -153,6 +175,13 @@ function openLeaderBoard() {
   void router.push({ name: 'LeaderBoard' })
 }
 
+function openSuggestionInbox() {
+  closeNotificationPanel()
+  closeUserMenu()
+  closeSettingsMenu()
+  void router.push({ name: 'SuggestionInbox' })
+}
+
 async function handleLogout() {
   if (isLoggingOut.value) {
     return
@@ -160,6 +189,7 @@ async function handleLogout() {
 
   isLoggingOut.value = true
   closeUserMenu()
+  closeSettingsMenu()
 
   try {
     await logoutSmartTodo()
@@ -249,6 +279,19 @@ onBeforeUnmount(() => {
         @open-todo="(payload) => emit('open-todo', payload)"
       />
       <button
+        class="suggestion-entry-btn"
+        type="button"
+        aria-label="打开体验建议箱"
+        title="悄悄说 — 体验建议箱"
+        @click="openSuggestionBox"
+      >
+        <span class="suggestion-entry-btn__icon" aria-hidden="true">
+          <IconMailbox />
+        </span>
+        <span class="suggestion-entry-btn__label">悄悄说</span>
+        <span class="suggestion-entry-btn__dot" aria-hidden="true" />
+      </button>
+      <button
         v-if="!props.embedded"
         class="icon-button"
         type="button"
@@ -297,6 +340,25 @@ onBeforeUnmount(() => {
               <button type="button" class="settings-menu-item" @click="openLeaderBoard">
                 <IconLayoutDashboard aria-hidden="true" />
                 <span>领导者看板</span>
+              </button>
+              <button
+                v-if="isAdminUser"
+                type="button"
+                class="settings-menu-item"
+                @click="openSuggestionInbox"
+              >
+                <IconMailbox aria-hidden="true" />
+                <span>心声收件箱</span>
+              </button>
+              <button
+                v-if="props.embedded"
+                type="button"
+                class="settings-menu-item is-danger"
+                :disabled="isLoggingOut"
+                @click="handleLogout"
+              >
+                <IconLogOut aria-hidden="true" />
+                <span>{{ isLoggingOut ? '正在退出…' : '退出登录' }}</span>
               </button>
             </section>
           </Transition>
@@ -349,6 +411,12 @@ onBeforeUnmount(() => {
         </Transition>
       </div>
     </div>
+
+    <DashboardSuggestionBox
+      ref="suggestionBoxRef"
+      v-model:open="isSuggestionBoxOpen"
+      :view-mode="props.viewMode"
+    />
   </header>
 </template>
 
@@ -478,6 +546,16 @@ onBeforeUnmount(() => {
   background: rgba(241, 245, 249, 0.92);
   color: #1d4ed8;
   outline: none;
+}
+
+.settings-menu-item.is-danger {
+  color: #dc2626;
+}
+
+.settings-menu-item.is-danger:hover:not(:disabled),
+.settings-menu-item.is-danger:focus-visible {
+  background: rgba(254, 226, 226, 0.72);
+  color: #b91c1c;
 }
 
 .settings-menu-item:disabled {
@@ -688,6 +766,28 @@ onBeforeUnmount(() => {
     gap: 4px;
   }
 
+  .suggestion-entry-btn__label {
+    display: none;
+  }
+
+  .suggestion-entry-btn {
+    width: 38px;
+    min-height: 38px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .suggestion-entry-btn__icon {
+    width: 20px;
+    height: 20px;
+    background: transparent;
+  }
+
+  .suggestion-entry-btn__dot {
+    top: 6px;
+    right: 7px;
+  }
+
   .notification-panel {
     --notification-arrow-center: 151px;
     right: -132px;
@@ -742,11 +842,65 @@ onBeforeUnmount(() => {
 }
 
 .dashboard-topbar.has-tool-dock {
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  padding-inline: 20px;
 }
 
-.dashboard-topbar.is-embedded {
-  grid-template-columns: minmax(0, 1fr) auto;
+.dashboard-topbar.has-tool-dock .topbar-tool-dock {
+  grid-column: 2;
+  justify-self: stretch;
+  width: 100%;
+  min-width: 0;
+}
+
+.dashboard-topbar.has-tool-dock .topbar-tool-dock :deep(.tool-dock) {
+  width: 100%;
+  max-width: 100%;
+  justify-content: flex-start;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.dashboard-topbar.has-tool-dock .topbar-tool-dock :deep(.tool-dock::-webkit-scrollbar) {
+  display: none;
+}
+
+.dashboard-topbar.has-tool-dock .brand-block {
+  justify-self: start;
+}
+
+.dashboard-topbar.has-tool-dock .topbar-actions {
+  grid-column: 3;
+  justify-self: end;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.dashboard-topbar.has-tool-dock .suggestion-entry-btn {
+  width: 38px;
+  min-height: 38px;
+  padding: 0;
+  justify-content: center;
+}
+
+.dashboard-topbar.has-tool-dock .suggestion-entry-btn__label {
+  display: none;
+}
+
+.dashboard-topbar.has-tool-dock .suggestion-entry-btn__icon {
+  width: 20px;
+  height: 20px;
+  background: transparent;
+}
+
+.dashboard-topbar.has-tool-dock .suggestion-entry-btn__dot {
+  top: 6px;
+  right: 7px;
+}
+
+.dashboard-topbar.has-tool-dock .user-chip {
+  max-width: 180px;
 }
 
 .dashboard-topbar.is-embedded.notification-open {
@@ -754,11 +908,14 @@ onBeforeUnmount(() => {
 }
 
 .dashboard-topbar.is-embedded {
+  grid-template-columns: minmax(0, 1fr) auto;
   position: relative;
   z-index: 2;
   width: 100%;
   height: auto;
   min-height: 0;
+  min-width: 0;
+  max-width: 100%;
   margin: 0;
   padding: 2px 4px 0;
   border: 0;
@@ -783,19 +940,6 @@ onBeforeUnmount(() => {
   justify-self: end;
   gap: 8px;
   padding-right: 0;
-}
-
-.dashboard-topbar.has-tool-dock .topbar-tool-dock {
-  grid-column: 2;
-  justify-self: center;
-}
-
-.dashboard-topbar.has-tool-dock .brand-block {
-  justify-self: start;
-}
-
-.dashboard-topbar.has-tool-dock .topbar-actions {
-  justify-self: end;
 }
 
 .topbar-tool-dock {
@@ -858,6 +1002,108 @@ onBeforeUnmount(() => {
 .icon-button svg {
   width: 20px;
   height: 20px;
+}
+
+.suggestion-entry-btn {
+  position: relative;
+  border: 1px solid rgba(253, 186, 116, 0.72);
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(255, 247, 237, 0.96), rgba(254, 215, 170, 0.88));
+  color: #c2410c;
+  min-height: 38px;
+  padding: 0 12px 0 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow:
+    0 12px 24px -18px rgba(234, 88, 12, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease;
+  animation: suggestion-entry-wiggle 4.8s ease-in-out infinite;
+}
+
+.suggestion-entry-btn:hover,
+.suggestion-entry-btn:focus-visible {
+  border-color: rgba(249, 115, 22, 0.88);
+  color: #9a3412;
+  transform: translateY(-2px) scale(1.02);
+  box-shadow:
+    0 16px 28px -16px rgba(234, 88, 12, 0.62),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
+  outline: none;
+}
+
+.suggestion-entry-btn__icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.suggestion-entry-btn__icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.suggestion-entry-btn__dot {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #f97316;
+  box-shadow: 0 0 0 2px rgba(255, 247, 237, 0.96);
+  animation: suggestion-entry-pulse 2s ease-in-out infinite;
+}
+
+@keyframes suggestion-entry-wiggle {
+  0%,
+  88%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  90% {
+    transform: translateY(-1px) rotate(-2deg);
+  }
+  92% {
+    transform: translateY(-2px) rotate(2deg);
+  }
+  94% {
+    transform: translateY(-1px) rotate(-1deg);
+  }
+}
+
+@keyframes suggestion-entry-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 0.72;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .suggestion-entry-btn,
+  .suggestion-entry-btn__dot {
+    animation: none;
+  }
 }
 
 .user-chip {
@@ -933,8 +1179,8 @@ onBeforeUnmount(() => {
   }
 
   .dashboard-topbar.has-tool-dock {
-    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-    gap: 12px;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 10px;
   }
 
   .brand-block {

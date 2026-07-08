@@ -71,6 +71,9 @@ interface SmartTodoBackendItem {
   remark?: string | null
   creatorId?: string | number | null
   creatorName?: string | null
+  creatorNickName?: string | null
+  assigneeNickName?: string | null
+  handlerNickName?: string | null
   createTime?: string | null
   status?: 0 | 3 | 6 | 9 | 99
   currentHandlerId?: string | number | null
@@ -387,6 +390,7 @@ function normalizeBackendTodo(
   const assignee = userMap.get(primaryAssigneeId)
   const creator = userMap.get(creatorId)
   const assigneeName =
+    item.assigneeNickName?.trim() ||
     assignee?.name ||
     (assigneeId.includes(',')
       ? assigneeId
@@ -396,6 +400,7 @@ function normalizeBackendTodo(
       : assigneeId) ||
     '未指定'
   const creatorName =
+    item.creatorNickName?.trim() ||
     item.creatorName?.trim() ||
     creator?.name ||
     (creatorId === currentUser.id ? currentUser.name : '')
@@ -407,7 +412,7 @@ function normalizeBackendTodo(
   const end = parseDateTimeShow(endDateShow, preserveMidnight)
   const date = start.date || todayDate()
   const endDate = timeType === 2 ? end.date || date : undefined
-  const title = item.title?.trim() || item.content?.trim() || '未命名待办'
+  const title = item.title?.trim() || ''
   const status = mapBackendStatus(item.status)
   const isRejected = item.status === 9
   const completable = isRejected
@@ -424,7 +429,7 @@ function normalizeBackendTodo(
     type: mapBackendEventType(item.type),
     owner: assigneeName,
     status,
-    source: item.remark?.trim() || item.content?.trim() || undefined,
+    source: item.remark?.trim() || undefined,
     creatorId: creatorId || undefined,
     creatorName: creatorName || undefined,
     assigneeId: assigneeId || undefined,
@@ -438,6 +443,7 @@ function normalizeBackendTodo(
     startDateShow: startDateShow || undefined,
     endDateShow: endDateShow || undefined,
     handlerName:
+      item.handlerNickName?.trim() ||
       userMap.get(currentHandlerId)?.name ||
       (currentHandlerId ? currentHandlerId : undefined) ||
       '未指定',
@@ -449,13 +455,24 @@ function normalizeBackendTodo(
   }
 }
 
+function dedupeLinkedBackendTodoItems(items: SmartTodoBackendItem[]) {
+  const ids = new Set(items.map((item) => toId(item.id)).filter(Boolean))
+
+  // 派发待办时后台会返回主待办（fid 为空）和子待办（fid 指向主待办 id）。
+  // 同一列表里两者内容重复，保留主待办即可。
+  return items.filter((item) => {
+    const parentId = toId(item.fid)
+    if (!parentId) return true
+    return !ids.has(parentId)
+  })
+}
+
 function normalizeBackendTodos(
   items: SmartTodoBackendItem[],
   currentUser: CalendarUser,
   users: CalendarUser[] = [],
 ) {
-  return items
-    .filter((item) => item.status !== 99)
+  return dedupeLinkedBackendTodoItems(items.filter((item) => item.status !== 99))
     .map((item) => normalizeBackendTodo(item, currentUser, users))
     .sort(compareEvents)
 }
@@ -871,6 +888,16 @@ function extractTodoDetailItem(
   return data as SmartTodoBackendItem
 }
 
+function extractChildTodoList(
+  data: SmartTodoBackendItem | SmartTodoDetailResponse | null | undefined,
+) {
+  if (!data || typeof data !== 'object' || !('childTodoList' in data)) return []
+
+  return (data.childTodoList ?? []).filter(
+    (item): item is SmartTodoBackendItem => Boolean(item),
+  )
+}
+
 export async function loadTodoDetail(
   id: string,
   currentUser: CalendarUser,
@@ -889,7 +916,16 @@ export async function loadTodoDetail(
     throw new Error('查询待办详情失败')
   }
 
-  return normalizeBackendTodo(item, currentUser, users)
+  const todo = normalizeBackendTodo(item, currentUser, users)
+  const childTodos = extractChildTodoList(data)
+    .map((child) => normalizeBackendTodo(child, currentUser, users))
+    .sort(compareEvents)
+
+  if (childTodos.length) {
+    todo.childTodos = childTodos
+  }
+
+  return todo
 }
 
 export async function createTodo(payload: CalendarTodoDraft) {

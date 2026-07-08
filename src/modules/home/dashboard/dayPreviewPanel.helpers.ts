@@ -1,9 +1,16 @@
 import type { CalendarEvent, CalendarSpecialDay } from './types'
-import { getRejectedTodoMessage, getTodoStatusLabel, isRejectedTodo } from './todoDisplay'
+import {
+  getRejectedTodoMessage,
+  getTodoStatusLabel,
+  isRejectedTodo,
+  matchesTodoScopeFilter,
+  type TodoScopeFilter,
+} from './todoDisplay'
 
 export type PanelMode = 'list' | 'create' | 'edit' | 'view'
 export type TodoStatusFilter = 'all' | 'pending' | 'done'
 export type TodoTypeFilter = 'all' | 'task' | 'meeting'
+export type { TodoScopeFilter }
 export type ParsedHighlightField =
   | 'date'
   | 'time'
@@ -48,6 +55,10 @@ export function filterEventsByStatus(events: CalendarEvent[], filter: TodoStatus
 
 export function filterEventsByType(events: CalendarEvent[], filter: TodoTypeFilter) {
   return events.filter((event) => matchesTypeFilter(event, filter))
+}
+
+export function filterEventsByScope(events: CalendarEvent[], filter: TodoScopeFilter) {
+  return events.filter((event) => matchesTodoScopeFilter(event, filter))
 }
 
 export function eventTypeLabel(event: CalendarEvent) {

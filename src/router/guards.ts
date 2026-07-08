@@ -52,6 +52,10 @@ export function setupRouterGuards(router: Router) {
       }
     }
 
+    if (to.meta.requiresAdmin && !userStore.isAdmin) {
+      return routeConfig.defaultRoute
+    }
+
     return true
   })
 
