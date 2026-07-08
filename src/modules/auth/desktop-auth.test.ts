@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   buildDesktopAuthCallbackUrl,
   DESKTOP_AUTH_CALLBACK,
+  DESKTOP_CLIENT,
+  getDesktopLaunchRequest,
   getDesktopAuthRequest,
+  isDesktopUserMismatch,
 } from './desktop-auth'
 
 describe('desktop-auth', () => {
@@ -65,5 +68,30 @@ describe('desktop-auth', () => {
     expect(url.searchParams.get('department')).toBe('信息技术部/AI')
     expect(callbackUrl).toContain('token=token%2Bvalue')
     expect(callbackUrl).toContain('userId=user%2F001')
+  })
+
+  it('recognizes desktop launch identity parameters', () => {
+    expect(
+      getDesktopLaunchRequest({
+        from: 'desktop',
+        desktopClient: DESKTOP_CLIENT,
+        desktopUserId: 'user-001',
+      }),
+    ).toEqual({
+      client: DESKTOP_CLIENT,
+      userId: 'user-001',
+    })
+  })
+
+  it('compares desktop and web user ids', () => {
+    const query = {
+      from: 'desktop',
+      desktopClient: DESKTOP_CLIENT,
+      desktopUserId: 'desktop-user',
+    }
+
+    expect(isDesktopUserMismatch(query, 'desktop-user')).toBe(false)
+    expect(isDesktopUserMismatch(query, 'web-user')).toBe(true)
+    expect(isDesktopUserMismatch(query, '')).toBe(false)
   })
 })

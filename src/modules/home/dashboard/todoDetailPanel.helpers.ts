@@ -6,6 +6,8 @@ import {
   getTodoAssigneeDisplayName,
   getTodoContentDisplay,
   getTodoCreatorDisplayName,
+  isCompletedTodoEvent,
+  isRejectedTodo,
   shouldShowTodoAssignerField,
 } from './todoDisplay'
 
@@ -50,17 +52,39 @@ export function isPendingAcceptanceTask(task: CalendarEvent, currentUser: Calend
   )
 }
 
-export function getDetailStatusTone(event: CalendarEvent): DetailStatusTone {
+export function getDetailStatusTone(event: CalendarEvent, currentUser: CalendarUser): DetailStatusTone {
+  if (isPendingAcceptanceTask(event, currentUser)) return 'pending'
+
   const label = getBackendTodoStatusLabel(event)
   if (label === '已完成') return 'done'
   if (label === '已拒绝') return 'rejected'
-  if (label === '待接受') return 'pending'
   if (label === '已接受') return 'accepted'
   return 'waiting'
 }
 
 export function canEditTodoEvent(event: CalendarEvent) {
   return Boolean(event.editable) && event.status !== 'done'
+}
+
+function isCurrentUserTodoParticipant(event: CalendarEvent, currentUser: CalendarUser) {
+  if (!currentUser.id) return false
+  if (event.creatorId && event.creatorId === currentUser.id) return true
+
+  const assigneeIds =
+    event.assigneeId
+      ?.split(',')
+      .map((item) => item.trim())
+      .filter(Boolean) ?? []
+
+  return assigneeIds.includes(currentUser.id)
+}
+
+export function canDeleteTodoEvent(event: CalendarEvent, currentUser: CalendarUser) {
+  if (isPendingAcceptanceTask(event, currentUser)) return false
+  if (Boolean(event.editable)) return true
+  if (isRejectedTodo(event) && isCurrentUserTodoParticipant(event, currentUser)) return true
+  if (isCompletedTodoEvent(event) && isCurrentUserTodoParticipant(event, currentUser)) return true
+  return false
 }
 
 export function buildTodoDetailPanelViewModel(
@@ -94,7 +118,7 @@ export function buildTodoDetailPanelViewModel(
     typeLabel: getTaskTypeLabel(task),
     typeTone: task.type === 'meeting' ? 'meeting' : 'todo',
     statusLabel: getBackendTodoStatusLabel(task),
-    statusTone: getDetailStatusTone(task),
+    statusTone: getDetailStatusTone(task, currentUser),
     time: formatTodoDetailTimeField(task),
     content: getTodoContentDisplay(task),
     meta,

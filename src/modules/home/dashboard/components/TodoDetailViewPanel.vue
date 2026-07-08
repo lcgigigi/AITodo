@@ -385,9 +385,19 @@ const emit = defineEmits<{
   gap: 10px;
 }
 
-.detail-panel-footer-slot :deep(.detail-panel-actions.is-pending-inbox),
-.detail-panel-footer-slot :deep(.detail-panel-actions.is-completed-detail) {
+.detail-panel-footer-slot :deep(.detail-panel-actions.is-pending-inbox) {
   grid-template-columns: 1fr 1fr;
+}
+
+.detail-panel-footer-slot :deep(.detail-panel-actions.is-completed-detail) {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 10px;
+}
+
+.detail-panel-footer-slot :deep(.detail-panel-actions.is-completed-detail .detail-action) {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .detail-panel-footer-slot :deep(.detail-panel-actions.is-delete-confirm) {

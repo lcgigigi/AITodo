@@ -5,30 +5,21 @@ import { useRoute, useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import IconBot from '~icons/lucide/bot'
 import IconBox from '~icons/lucide/box'
-import IconCalendarDays from '~icons/lucide/calendar-days'
 import IconChevronDown from '~icons/lucide/chevron-down'
-import IconCircleHelp from '~icons/lucide/circle-help'
 import IconCode2 from '~icons/lucide/code-2'
-import IconCpu from '~icons/lucide/cpu'
-import IconHistory from '~icons/lucide/history'
 import IconImage from '~icons/lucide/image'
-import IconInfo from '~icons/lucide/info'
+import IconLayers from '~icons/lucide/layers'
 import IconMessageCircle from '~icons/lucide/message-circle'
-import IconPanelLeftClose from '~icons/lucide/panel-left-close'
-import IconPanelLeftOpen from '~icons/lucide/panel-left-open'
-import IconPlus from '~icons/lucide/plus'
-import IconSearch from '~icons/lucide/search'
+import IconRocket from '~icons/lucide/rocket'
 import IconShieldCheck from '~icons/lucide/shield-check'
 import IconSparkles from '~icons/lucide/sparkles'
-import IconStar from '~icons/lucide/star'
+import IconTrendingDown from '~icons/lucide/trending-down'
 import IconTrendingUp from '~icons/lucide/trending-up'
 import IconUsers from '~icons/lucide/users'
 import IconX from '~icons/lucide/x'
-import makeUrl from '@/assets/agent-center/make.png'
-import moreAbilityUrl from '@/assets/agent-center/newagnet.png'
+import agentBgUrl from '@/assets/agentbg.png'
 import DashboardTopBar from '@/modules/home/dashboard/DashboardTopBar.vue'
 import {
-  getTokenUsagePeriodName,
   loadCurrentUserTokenUsage,
   resolveTokenUsageDateRange,
   type CurrentUserTokenUsage,
@@ -36,7 +27,7 @@ import {
 } from '@/modules/token-usage/token-usage.service'
 import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
 import { openUrlInNewTab } from './links'
-import { agentCategories, agents, getAgentByKey, permissionLabels, skills } from './mock'
+import { agents, getAgentByKey, permissionLabels } from './mock'
 import type { AgentCatalogItem, AgentCategory } from './types'
 
 defineOptions({
@@ -53,29 +44,10 @@ type TokenRangeTab = {
   periodCode: TokenUsagePeriodCode
 }
 
-type TokenModuleVisual = {
-  icon: Component
-  color: string
-  iconTone: string
-}
-
 type TokenModuleUsage = {
   moduleCode: string
   moduleName: string
   tokenUsage: number
-}
-
-type TokenRankingEntry = TokenModuleUsage &
-  TokenModuleVisual & {
-    rank: number
-    share: string
-  }
-
-type TokenDistributionEntry = {
-  label: string
-  value: number
-  percentLabel: string
-  color: string
 }
 
 type TokenTrendPoint = {
@@ -84,50 +56,48 @@ type TokenTrendPoint = {
   value: number
 }
 
+type WelcomeFeature = {
+  title: string
+  description: string
+  icon: Component
+}
+
+const welcomeFeatures: WelcomeFeature[] = [
+  {
+    title: '多场景覆盖',
+    description: '满足企业多样化业务需求',
+    icon: IconLayers,
+  },
+  {
+    title: '开箱即用',
+    description: '快速接入，轻松上手',
+    icon: IconRocket,
+  },
+  {
+    title: '安全可靠',
+    description: '企业级安全与权限管控',
+    icon: IconShieldCheck,
+  },
+]
+
 const route = useRoute()
 const router = useRouter()
 
-const searchKeyword = ref('')
 const activeCategory = ref<AgentCategory | '全部'>('全部')
 const selectedAgent = ref<AgentCatalogItem | null>(null)
 const actionToast = ref('')
-const sidebarCollapsed = ref(true)
 const currentUserTokenUsage = ref<CurrentUserTokenUsage | null>(null)
 const isTokenUsageLoading = ref(true)
 const tokenUsageError = ref('')
 const selectedTokenPeriodCode = ref<TokenUsagePeriodCode>('last7Days')
 
-const primaryNav = [
-  { label: '智能体 Agent', icon: IconBot, active: true },
-  { label: '能力 Skills', icon: IconCpu, active: false },
-  { label: '我的收藏', icon: IconStar, active: false },
-  { label: '使用记录', icon: IconHistory, active: false },
+const tokenPeriodOptions: TokenRangeTab[] = [
+  { label: '今日', periodCode: 'today' },
+  { label: '近7天', periodCode: 'last7Days' },
+  { label: '近30天', periodCode: 'last30Days' },
 ]
-
-const secondaryNav = [{ label: '帮助中心', icon: IconCircleHelp }]
-
-const tokenRangeTabs: TokenRangeTab[] = [
-  { label: '日', periodCode: 'today' },
-  { label: '周', periodCode: 'last7Days' },
-  { label: '月', periodCode: 'last30Days' },
-]
-
-const tokenModuleVisualMap: Record<string, TokenModuleVisual> = {
-  codeAssist: { icon: IconCode2, color: '#48c979', iconTone: 'token-icon-teal' },
-  libaiQa: { icon: IconMessageCircle, color: '#2e7bff', iconTone: 'token-icon-blue' },
-  fileAnalysis: { icon: IconImage, color: '#27c7c8', iconTone: 'token-icon-teal' },
-  smartTodo: { icon: IconCalendarDays, color: '#9a6df2', iconTone: 'token-icon-orange' },
-}
-
-const defaultTokenModuleVisual: TokenModuleVisual = {
-  icon: IconSparkles,
-  color: '#8196bf',
-  iconTone: 'token-icon-blue',
-}
 
 const usageTrendChartRef = ref<HTMLElement | null>(null)
-const rankingChartRef = ref<HTMLElement | null>(null)
-const distributionPieChartRef = ref<HTMLElement | null>(null)
 
 const chartInstances = new Set<echarts.ECharts>()
 let chartResizeObserver: ResizeObserver | null = null
@@ -153,10 +123,6 @@ function formatTrendDateLabel(date: string) {
   const [, month, day] = date.split('-')
   return month && day ? `${month}-${day}` : date
 }
-
-const selectedTokenPeriodLabel = computed(() =>
-  getTokenUsagePeriodName(selectedTokenPeriodCode.value),
-)
 
 const tokenTrendTimeline = computed<TokenTrendPoint[]>(() => {
   const usage = currentUserTokenUsage.value
@@ -197,48 +163,28 @@ const tokenTotalConsumption = computed(() =>
   selectedTokenModuleUsages.value.reduce((sum, module) => sum + module.tokenUsage, 0),
 )
 
-const tokenRanking = computed<TokenRankingEntry[]>(() => {
-  const total = tokenTotalConsumption.value
-
-  return selectedTokenModuleUsages.value
-    .filter((module) => module.tokenUsage > 0)
-    .sort((a, b) => b.tokenUsage - a.tokenUsage)
-    .map((module, index) => {
-      const visual = tokenModuleVisualMap[module.moduleCode] ?? defaultTokenModuleVisual
-
-      return {
-        ...module,
-        ...visual,
-        rank: index + 1,
-        share: total > 0 ? `${((module.tokenUsage / total) * 100).toFixed(1)}%` : '0%',
-      }
-    })
+const tokenTodayConsumption = computed(() => {
+  const timeline = tokenTrendTimeline.value
+  if (!timeline.length) return 0
+  return timeline[timeline.length - 1]?.value ?? 0
 })
 
-const tokenDistribution = computed<TokenDistributionEntry[]>(() =>
-  tokenRanking.value.map((item) => ({
-    label: item.moduleName,
-    value: item.tokenUsage,
-    percentLabel: item.share,
-    color: item.color,
-  })),
-)
-
-const tokenDateRangeLabel = computed(() => {
-  const points = tokenTrendTimeline.value.filter((point) => point.date)
-  if (points.length > 1) return `${points[0].date} ~ ${points[points.length - 1].date}`
-  if (points.length === 1) return points[0].date
-
-  const range = resolveTokenUsageDateRange(selectedTokenPeriodCode.value)
-  return range.startDate === range.endDate
-    ? range.startDate
-    : `${range.startDate} ~ ${range.endDate}`
+const tokenYesterdayConsumption = computed(() => {
+  const timeline = tokenTrendTimeline.value
+  if (timeline.length < 2) return 0
+  return timeline[timeline.length - 2]?.value ?? 0
 })
 
-const tokenDailyAverage = computed(() => {
-  const pointCount = Math.max(1, tokenTrendTimeline.value.length)
-  return Math.round(tokenTotalConsumption.value / pointCount)
+const tokenDayChangePercent = computed(() => {
+  const today = tokenTodayConsumption.value
+  const yesterday = tokenYesterdayConsumption.value
+  if (yesterday === 0) return today > 0 ? 100 : 0
+  return ((today - yesterday) / yesterday) * 100
 })
+
+const tokenDayChangeIsDown = computed(() => tokenDayChangePercent.value < 0)
+
+const tokenDayChangeLabel = computed(() => Math.abs(tokenDayChangePercent.value).toFixed(1))
 
 const hasTokenUsageContent = computed(() => {
   const usage = currentUserTokenUsage.value
@@ -272,10 +218,6 @@ const tokenUsageStateActionLabel = computed(() => {
 
 function selectTokenPeriod(periodCode: TokenUsagePeriodCode) {
   selectedTokenPeriodCode.value = periodCode
-}
-
-function openTokenDashboard() {
-  void router.push({ name: 'LeaderBoard' })
 }
 
 async function refreshTokenUsage() {
@@ -319,7 +261,7 @@ function renderUsageTrendChart() {
     {
       animationDuration: 620,
       textStyle: chartTextStyle,
-      grid: { top: 18, right: 18, bottom: 28, left: 46 },
+      grid: { top: 12, right: 12, bottom: 24, left: 40 },
       tooltip: {
         trigger: 'axis',
         confine: true,
@@ -406,150 +348,8 @@ function renderUsageTrendChart() {
   )
 }
 
-function renderRankingChart() {
-  const chart = getChart(rankingChartRef.value)
-  if (!chart) return
-
-  const ordered = [...tokenRanking.value].reverse()
-
-  chart.setOption(
-    {
-      animationDuration: 620,
-      textStyle: chartTextStyle,
-      grid: { top: 4, right: 52, bottom: 4, left: 72 },
-      tooltip: {
-        trigger: 'axis',
-        axisPointer: { type: 'shadow' },
-        confine: true,
-        borderColor: '#dfe8f4',
-        backgroundColor: 'rgba(255, 255, 255, 0.98)',
-        textStyle: { ...chartTextStyle, color: '#172033', fontWeight: 700 },
-        formatter: (params: unknown) => {
-          const item = (Array.isArray(params) ? params[0] : params) as {
-            name: string
-            value: number
-          }
-          const ranking = tokenRanking.value.find((entry) => entry.moduleName === item.name)
-          const share = ranking?.share ?? ''
-          return `${item.name}<br/>${formatTokenNumber(Number(item.value))} Tokens<br/>占比 ${share}`
-        },
-      },
-      xAxis: {
-        type: 'value',
-        axisLine: { show: false },
-        axisTick: { show: false },
-        axisLabel: { show: false },
-        splitLine: { show: false },
-      },
-      yAxis: {
-        type: 'category',
-        data: ordered.map((item) => item.moduleName),
-        axisLine: { show: false },
-        axisTick: { show: false },
-        axisLabel: {
-          ...chartTextStyle,
-          color: '#182337',
-          fontSize: 12,
-          fontWeight: 600,
-        },
-      },
-      series: [
-        {
-          type: 'bar',
-          data: ordered.map((item) => ({
-            value: item.tokenUsage,
-            itemStyle: { color: item.color, borderRadius: [0, 999, 999, 0] },
-          })),
-          barWidth: 8,
-          showBackground: true,
-          backgroundStyle: {
-            color: '#eef3fb',
-            borderRadius: 999,
-          },
-          label: {
-            show: true,
-            position: 'right',
-            ...chartTextStyle,
-            color: '#182337',
-            fontSize: 11,
-            fontWeight: 600,
-            formatter: (params: { value?: unknown }) =>
-              formatTokenNumber(Number(params.value ?? 0)),
-          },
-        },
-      ],
-    } satisfies echarts.EChartsOption,
-    true,
-  )
-}
-
-function renderDistributionPieChart() {
-  const chart = getChart(distributionPieChartRef.value)
-  if (!chart) return
-
-  chart.setOption(
-    {
-      animationDuration: 720,
-      textStyle: chartTextStyle,
-      color: tokenDistribution.value.map((item) => item.color),
-      title: {
-        text: formatTokenNumber(tokenTotalConsumption.value),
-        subtext: '总消耗 Tokens',
-        left: 'center',
-        top: '38%',
-        textStyle: {
-          ...chartTextStyle,
-          color: '#172033',
-          fontSize: 24,
-          fontWeight: 700,
-        },
-        subtextStyle: {
-          ...chartTextStyle,
-          color: '#7c8ca5',
-          fontSize: 11,
-          fontWeight: 500,
-        },
-      },
-      tooltip: {
-        trigger: 'item',
-        confine: true,
-        borderColor: '#dfe8f4',
-        backgroundColor: 'rgba(255, 255, 255, 0.98)',
-        textStyle: { ...chartTextStyle, color: '#172033', fontWeight: 700 },
-        formatter: (params: unknown) => {
-          const item = params as { name: string; percent: number }
-          return `${item.name}<br/>占比 ${item.percent}%`
-        },
-      },
-      series: [
-        {
-          name: 'Token 消耗分布',
-          type: 'pie',
-          radius: ['52%', '78%'],
-          center: ['50%', '50%'],
-          avoidLabelOverlap: true,
-          minAngle: 4,
-          itemStyle: {
-            borderColor: '#ffffff',
-            borderWidth: 3,
-          },
-          label: { show: false },
-          labelLine: { show: false },
-          data: tokenDistribution.value.map((item) => ({
-            name: item.label,
-            value: item.value,
-          })),
-        },
-      ],
-    } satisfies echarts.EChartsOption,
-    true,
-  )
-}
-
 function renderAllCharts() {
   renderUsageTrendChart()
-  renderRankingChart()
-  renderDistributionPieChart()
 }
 
 function resizeCharts() {
@@ -572,42 +372,12 @@ const defaultAgentVisual: AgentVisual = {
   tone: 'icon-blue',
 }
 
-const categoryTabs = computed(() => [
-  { key: '全部' as const, label: '全部', count: agents.length + skills.length },
-  ...agentCategories.map((category) => ({
-    key: category,
-    label: category,
-    count: agents.filter((agent) => agent.category === category).length,
-  })),
-])
-
-const visibleAgents = computed(() => {
-  const keyword = searchKeyword.value.trim().toLowerCase()
-
-  return agents.filter((agent) => {
-    const matchesCategory =
-      activeCategory.value === '全部' || agent.category === activeCategory.value
-    const matchesKeyword =
-      !keyword ||
-      [agent.name, agent.description, agent.category, ...agent.scenarios]
-        .join(' ')
-        .toLowerCase()
-        .includes(keyword)
-
-    return matchesCategory && matchesKeyword
-  })
-})
-
-const shouldShowMoreAbility = computed(
-  () => activeCategory.value === '全部' && searchKeyword.value.trim().length === 0,
+const visibleAgents = computed(() =>
+  agents.filter((agent) => activeCategory.value === '全部' || agent.category === activeCategory.value),
 )
 
 function getAgentVisual(agent: AgentCatalogItem) {
   return agentVisualMap[agent.key] ?? defaultAgentVisual
-}
-
-function selectCategory(category: AgentCategory | '全部') {
-  activeCategory.value = category
 }
 
 function showToast(message: string) {
@@ -615,36 +385,6 @@ function showToast(message: string) {
   window.setTimeout(() => {
     if (actionToast.value === message) actionToast.value = ''
   }, 2400)
-}
-
-function handleNav(label: string) {
-  if (label === '智能体 Agent') {
-    activeCategory.value = '全部'
-    searchKeyword.value = ''
-    void router.replace({ name: 'AgentCenter' })
-    return
-  }
-
-  showToast(`${label} 即将开放`)
-}
-
-function toggleSidebar() {
-  sidebarCollapsed.value = !sidebarCollapsed.value
-}
-
-function createAgent() {
-  showToast('开始创建专属智能体')
-}
-
-function openAgent(agent: AgentCatalogItem) {
-  if (agent.launchUrl) {
-    openUrlInNewTab(agent.launchUrl)
-    showToast(`已在新标签页打开 ${agent.name}`)
-    return
-  }
-
-  selectedAgent.value = agent
-  void router.replace({ query: { ...route.query, agent: agent.key } })
 }
 
 function closeAgentPanel() {
@@ -667,10 +407,6 @@ function launchAgent(agent: AgentCatalogItem) {
   }
 
   showToast(`即将打开 ${agent.name}`)
-}
-
-function statusClass(state: AgentCatalogItem['permissionState']) {
-  return state === 'available' ? 'is-available' : 'is-pending'
 }
 
 function locateAgentFromQuery(agentKey?: string) {
@@ -705,41 +441,21 @@ function handleOpenTodo(payload: { id: string; date?: string }) {
   })
 }
 
-const mobileSidebarMedia = window.matchMedia('(max-width: 760px)')
-
-function syncSidebarForViewport(event?: MediaQueryListEvent) {
-  const isMobile = event?.matches ?? mobileSidebarMedia.matches
-  if (isMobile) sidebarCollapsed.value = false
-}
-
 onMounted(async () => {
-  syncSidebarForViewport()
-  mobileSidebarMedia.addEventListener('change', syncSidebarForViewport)
-
   await nextTick()
   renderAllCharts()
   void refreshTokenUsage()
 
   chartResizeObserver = new ResizeObserver(resizeCharts)
-  ;[usageTrendChartRef.value, rankingChartRef.value, distributionPieChartRef.value].forEach(
-    (el) => {
-      if (el) chartResizeObserver?.observe(el)
-    },
-  )
+  if (usageTrendChartRef.value) chartResizeObserver.observe(usageTrendChartRef.value)
   window.addEventListener('resize', resizeCharts, { passive: true })
 })
 
 onBeforeUnmount(() => {
-  mobileSidebarMedia.removeEventListener('change', syncSidebarForViewport)
   window.removeEventListener('resize', resizeCharts)
   chartResizeObserver?.disconnect()
   chartInstances.forEach((chart) => chart.dispose())
   chartInstances.clear()
-})
-
-watch(sidebarCollapsed, async () => {
-  await nextTick()
-  resizeCharts()
 })
 
 watch(selectedTokenPeriodCode, () => {
@@ -749,9 +465,13 @@ watch(selectedTokenPeriodCode, () => {
 
 <template>
   <div class="agent-center-page">
+    <div class="agent-center-bg" aria-hidden="true">
+      <img :src="agentBgUrl" alt="" />
+    </div>
+
     <DashboardTopBar @open-todo="handleOpenTodo" />
 
-    <main class="agent-center-shell" :class="{ 'is-sidebar-collapsed': sidebarCollapsed }">
+    <main class="agent-center-shell">
       <Transition
         enter-active-class="toast-enter-active"
         enter-from-class="toast-enter-from"
@@ -765,168 +485,61 @@ watch(selectedTokenPeriodCode, () => {
         </div>
       </Transition>
 
-      <aside class="agent-sidebar" aria-label="Agent Center 导航">
-        <nav class="sidebar-nav" aria-label="主要导航">
-          <template v-for="item in primaryNav" :key="item.label">
-            <div v-if="item.label === '智能体 Agent'" class="sidebar-link-row">
-              <button
-                type="button"
-                class="sidebar-link"
-                :class="{ active: item.active }"
-                :aria-label="item.label"
-                :title="sidebarCollapsed ? item.label : undefined"
-                @click="handleNav(item.label)"
-              >
-                <component :is="item.icon" class="sidebar-link-icon" />
-                <span class="sidebar-link-label">{{ item.label }}</span>
-              </button>
-
-              <button
-                type="button"
-                class="sidebar-collapse-toggle"
-                :aria-label="sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'"
-                :aria-expanded="!sidebarCollapsed"
-                @click="toggleSidebar"
-              >
-                <span class="sidebar-collapse-toggle-icon" aria-hidden="true">
-                  <IconPanelLeftClose v-if="!sidebarCollapsed" />
-                  <IconPanelLeftOpen v-else />
-                </span>
-              </button>
-            </div>
-
-            <button
-              v-else
-              type="button"
-              class="sidebar-link"
-              :class="{ active: item.active }"
-              :aria-label="item.label"
-              :title="sidebarCollapsed ? item.label : undefined"
-              @click="handleNav(item.label)"
-            >
-              <component :is="item.icon" class="sidebar-link-icon" />
-              <span class="sidebar-link-label">{{ item.label }}</span>
-            </button>
-          </template>
-        </nav>
-
-        <div class="sidebar-divider" />
-
-        <nav class="sidebar-nav sidebar-nav-secondary" aria-label="辅助导航">
-          <button
-            v-for="item in secondaryNav"
-            :key="item.label"
-            type="button"
-            class="sidebar-link"
-            :aria-label="item.label"
-            :title="sidebarCollapsed ? item.label : undefined"
-            @click="handleNav(item.label)"
-          >
-            <component :is="item.icon" class="sidebar-link-icon" />
-            <span class="sidebar-link-label">{{ item.label }}</span>
-          </button>
-        </nav>
-
-        <div class="sidebar-spacer" />
-
-        <button
-          type="button"
-          class="make-agent-card"
-          :class="{ 'is-icon-only': sidebarCollapsed }"
-          :style="sidebarCollapsed ? undefined : { backgroundImage: `url(${makeUrl})` }"
-          :aria-label="sidebarCollapsed ? '创建专属智能体' : undefined"
-          @click="createAgent"
-        >
-          <span class="sr-only">创建专属智能体</span>
-          <span v-if="sidebarCollapsed" class="make-agent-icon-only" aria-hidden="true">
-            <IconPlus />
-          </span>
-          <span v-else class="make-agent-action">
-            <IconPlus />
-            创建智能体
-          </span>
-        </button>
-      </aside>
-
       <section class="agent-main">
-        <section class="token-record-card" aria-label="Token使用记录">
-          <div class="token-record-main">
-            <header class="token-record-topline">
-              <div class="token-record-title-stack">
-                <div class="token-record-title">
-                  <h2>Token使用记录</h2>
-                  <IconInfo aria-hidden="true" />
-                </div>
+        <section class="agent-hero-row">
+          <section class="agent-welcome" aria-label="欢迎语">
+            <h1 class="welcome-title">
+              AI Agent <span>应用广场</span>
+            </h1>
+            <p class="welcome-subtitle">
+              一站式企业级 AI 应用平台，赋能高效协作与智能创新
+            </p>
 
-                <div class="token-range-tabs" role="tablist" aria-label="Token 时间范围">
-                  <button
-                    v-for="range in tokenRangeTabs"
-                    :key="range.periodCode"
-                    type="button"
-                    class="token-range-tab"
-                    :class="{ active: selectedTokenPeriodCode === range.periodCode }"
-                    role="tab"
-                    :aria-selected="selectedTokenPeriodCode === range.periodCode"
-                    @click="selectTokenPeriod(range.periodCode)"
+            <div class="welcome-features">
+              <article
+                v-for="feature in welcomeFeatures"
+                :key="feature.title"
+                class="welcome-feature-card"
+              >
+                <span class="welcome-feature-icon" aria-hidden="true">
+                  <component :is="feature.icon" />
+                </span>
+                <div class="welcome-feature-copy">
+                  <h2>{{ feature.title }}</h2>
+                  <p>{{ feature.description }}</p>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section class="token-usage-card" aria-label="个人 Token 使用记录">
+            <header class="token-usage-header">
+              <div class="token-usage-title">
+                <IconShieldCheck aria-hidden="true" />
+                <h2>个人 Token 使用记录</h2>
+              </div>
+
+              <label class="token-period-select">
+                <span class="sr-only">选择统计周期</span>
+                <select
+                  :value="selectedTokenPeriodCode"
+                  @change="selectTokenPeriod(($event.target as HTMLSelectElement).value as TokenUsagePeriodCode)"
+                >
+                  <option
+                    v-for="option in tokenPeriodOptions"
+                    :key="option.periodCode"
+                    :value="option.periodCode"
                   >
-                    {{ range.label }}
-                  </button>
-                </div>
-              </div>
-
-              <div class="token-record-filters">
-                <button type="button" class="token-filter-button" disabled>
-                  <span>{{ tokenDateRangeLabel }}</span>
-                  <IconCalendarDays aria-hidden="true" />
-                </button>
-                <button type="button" class="token-filter-button token-filter-select" disabled>
-                  <span>全部模块</span>
-                  <IconChevronDown aria-hidden="true" />
-                </button>
-              </div>
+                    {{ option.label }}
+                  </option>
+                </select>
+                <IconChevronDown aria-hidden="true" />
+              </label>
             </header>
 
             <AppStateBlock
               v-if="tokenUsageStateType"
-              class="token-record-state"
-              :type="tokenUsageStateType"
-              :title="tokenUsageStateTitle"
-              :description="tokenUsageStateDescription"
-              :action-label="tokenUsageStateActionLabel"
-              @action="refreshTokenUsage"
-            />
-
-            <div v-else class="token-record-body">
-              <div class="usage-chart-panel">
-                <div
-                  ref="usageTrendChartRef"
-                  class="usage-trend-chart"
-                  aria-label="Token 消耗折线图"
-                />
-              </div>
-
-              <div class="token-ranking-panel">
-                <h3>智能体消耗排行</h3>
-                <div
-                  ref="rankingChartRef"
-                  class="ranking-chart"
-                  aria-label="智能体 Token 消耗排行柱状图"
-                />
-
-                <button type="button" class="ranking-more-button" @click="openTokenDashboard">
-                  查看看板
-                  <IconChevronDown aria-hidden="true" />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <aside class="token-distribution-panel" aria-label="Token 消耗分布">
-            <h2>Token 消耗分布</h2>
-
-            <AppStateBlock
-              v-if="tokenUsageStateType"
-              class="token-distribution-state"
+              class="token-usage-state"
               :type="tokenUsageStateType"
               :title="tokenUsageStateTitle"
               :description="tokenUsageStateDescription"
@@ -937,150 +550,70 @@ watch(selectedTokenPeriodCode, () => {
             />
 
             <template v-else>
-              <div class="token-distribution-body">
-                <div
-                  ref="distributionPieChartRef"
-                  class="distribution-pie-chart"
-                  aria-label="Token 总消耗环形图"
-                />
-
-                <ul class="distribution-legend">
-                  <li v-for="item in tokenDistribution" :key="item.label">
-                    <span class="legend-swatch" :style="{ backgroundColor: item.color }" />
-                    <span>{{ item.label }}</span>
-                    <strong>{{ item.percentLabel }}</strong>
-                  </li>
-                </ul>
-              </div>
-
-              <div class="token-week-summary">
-                <span class="week-summary-icon">
-                  <IconCalendarDays aria-hidden="true" />
-                </span>
-                <div>
-                  <p>
-                    {{ selectedTokenPeriodLabel }}总消耗
-                    <strong>{{ formatTokenNumber(tokenTotalConsumption) }}</strong>
-                    <IconTrendingUp aria-hidden="true" />
-                  </p>
-                  <span>日均消耗 {{ formatTokenNumber(tokenDailyAverage) }} Tokens</span>
+              <div class="token-usage-metrics">
+                <div class="token-metric">
+                  <span>总消耗</span>
+                  <strong>{{ formatTokenNumber(tokenTotalConsumption) }} Token</strong>
                 </div>
               </div>
-            </template>
-          </aside>
-        </section>
 
-        <!-- banner 暂时隐藏
-      <section
-        class="hero-banner"
-        :style="{ backgroundImage: `url(${bannerUrl})` }"
-        aria-label="AI 赋能，智能无限"
-      />
-      -->
-
-        <section class="catalog-toolbar" aria-label="智能体筛选">
-          <div class="category-tabs" role="tablist" aria-label="分类筛选">
-            <button
-              v-for="tab in categoryTabs"
-              :key="tab.key"
-              type="button"
-              class="category-tab"
-              :class="{ active: activeCategory === tab.key }"
-              role="tab"
-              :aria-selected="activeCategory === tab.key"
-              @click="selectCategory(tab.key)"
-            >
-              {{ tab.label }}
-              <span>{{ tab.count }}</span>
-            </button>
-          </div>
-
-          <div class="toolbar-actions">
-            <label class="search-box">
-              <span class="sr-only">搜索智能体或能力</span>
-              <input
-                v-model="searchKeyword"
-                type="search"
-                placeholder="搜索智能体或能力..."
-                autocomplete="off"
+              <div
+                ref="usageTrendChartRef"
+                class="token-usage-chart"
+                aria-label="Token 消耗折线图"
               />
-              <IconSearch class="search-icon" />
-            </label>
 
-            <button type="button" class="sort-button" @click="showToast('已按推荐排序')">
-              推荐排序
-              <IconChevronDown />
-            </button>
-          </div>
+              <footer class="token-usage-footer">
+                <p>
+                  今日消耗
+                  <strong>{{ formatTokenNumber(tokenTodayConsumption) }} Token</strong>
+                </p>
+                <p
+                  class="token-day-change"
+                  :class="tokenDayChangeIsDown ? 'is-down' : 'is-up'"
+                >
+                  较昨日
+                  <component
+                    :is="tokenDayChangeIsDown ? IconTrendingDown : IconTrendingUp"
+                    aria-hidden="true"
+                  />
+                  {{ tokenDayChangeLabel }}%
+                </p>
+              </footer>
+            </template>
+          </section>
         </section>
 
-        <section class="agent-grid" aria-label="智能体列表">
-          <button
-            v-for="agent in visibleAgents"
-            :key="agent.id"
-            type="button"
-            class="agent-card"
-            :class="{ selected: selectedAgent?.id === agent.id }"
-            @click="openAgent(agent)"
-          >
-            <div class="agent-card-body">
-              <span class="agent-icon" :class="getAgentVisual(agent).tone">
+        <section class="agent-catalog-panel" aria-label="智能体列表">
+          <section class="agent-grid">
+            <button
+              v-for="agent in visibleAgents"
+              :key="agent.id"
+              type="button"
+              class="agent-card"
+              @click="launchAgent(agent)"
+            >
+              <span class="agent-card-icon" :class="getAgentVisual(agent).tone">
                 <component :is="getAgentVisual(agent).icon" />
               </span>
 
               <div class="agent-card-copy">
-                <div class="agent-card-title-row">
-                  <h2>{{ agent.name }}</h2>
-                  <span v-if="agent.recommended" class="favorite-mark" aria-label="推荐">
-                    <IconStar />
-                  </span>
-                </div>
+                <h2>{{ agent.name }}</h2>
                 <p class="agent-description">{{ agent.description }}</p>
+                <span class="agent-card-action">进入应用 -&gt;</span>
               </div>
-            </div>
+            </button>
 
-            <div class="agent-card-footer">
-              <span class="status-pill" :class="statusClass(agent.permissionState)">
-                {{ permissionLabels[agent.permissionState] }}
-              </span>
-              <span class="agent-card-source">来自：{{ agent.category }}</span>
-            </div>
-          </button>
-
-          <button
-            v-if="shouldShowMoreAbility"
-            type="button"
-            class="agent-card more-ability-card"
-            @click="handleNav('能力 Skills')"
-          >
-            <div class="agent-card-body">
-              <span class="agent-icon icon-blue">
-                <IconPlus />
-              </span>
-
-              <div class="agent-card-copy">
-                <h2>更多能力</h2>
-                <p class="agent-description">更多智能体与技能正在路上，敬请期待。</p>
-              </div>
-            </div>
-
-            <img :src="moreAbilityUrl" alt="" class="more-ability-art" aria-hidden="true" />
-
-            <div class="agent-card-footer">
-              <span class="status-placeholder" aria-hidden="true" />
-              <span class="agent-card-source">来自：智体中心</span>
-            </div>
-          </button>
-
-          <AppStateBlock
-            v-if="visibleAgents.length === 0"
-            class="agent-grid-empty"
-            type="empty"
-            title="没有匹配的智能体"
-            description="换个关键词，或切换分类查看可用智能体。"
-            size="sm"
-            variant="inline"
-          />
+            <AppStateBlock
+              v-if="visibleAgents.length === 0"
+              class="agent-grid-empty"
+              type="empty"
+              title="没有匹配的智能体"
+              description="当前暂无可用智能体，请稍后再试。"
+              size="sm"
+              variant="inline"
+            />
+          </section>
         </section>
       </section>
 
@@ -1128,21 +661,40 @@ watch(selectedTokenPeriodCode, () => {
 
 <style scoped>
 .agent-center-page {
+  position: relative;
   display: flex;
   width: 100%;
   height: 100vh;
   flex-direction: column;
   overflow: hidden;
-  background: radial-gradient(circle at 78% 0%, rgba(207, 229, 255, 0.75) 0, transparent 360px),
-    linear-gradient(130deg, #f8fbff 0%, #edf6ff 52%, #f8fcff 100%);
+  background: #ffffff;
   color: #111827;
   font-family: Inter, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
 }
 
+.agent-center-page > :not(.agent-center-bg) {
+  position: relative;
+  z-index: 1;
+}
+
+.agent-center-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.agent-center-bg img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center calc(100% + clamp(96px, 11vh, 160px));
+}
+
 .agent-center-shell {
-  --sidebar-width: clamp(250px, 15vw, 288px);
-  --sidebar-collapsed-width: 76px;
-  --sidebar-card-margin: clamp(19px, 1.15vw, 22px);
   --main-pad-top: clamp(17px, 1.9vh, 21px);
   --main-pad-right: clamp(18px, 1.1vw, 21px);
   --main-pad-bottom: 32px;
@@ -1163,811 +715,282 @@ watch(selectedTokenPeriodCode, () => {
   overflow: hidden;
 }
 
-.agent-sidebar {
-  position: relative;
-  display: flex;
-  width: var(--sidebar-width);
-  min-width: var(--sidebar-width);
-  flex-direction: column;
-  overflow: hidden;
-  background: rgba(252, 253, 255, 0.78);
-  transition:
-    width 240ms ease,
-    min-width 240ms ease;
-}
-
-.sidebar-link-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.sidebar-link-row .sidebar-link {
-  flex: 1;
-  min-width: 0;
-}
-
-.is-sidebar-collapsed .sidebar-link-row {
-  flex-direction: column;
-  gap: 10px;
-}
-
-.is-sidebar-collapsed .sidebar-link-row .sidebar-collapse-toggle {
-  order: -1;
-}
-
-.is-sidebar-collapsed .sidebar-link-row .sidebar-link {
-  width: 100%;
-}
-
-.sidebar-collapse-toggle {
-  display: inline-flex;
-  width: 36px;
-  height: 36px;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid rgba(207, 224, 248, 0.95);
-  border-radius: 11px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(244, 249, 255, 0.98) 100%);
-  color: #355a8f;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.92),
-    0 6px 16px rgba(93, 130, 181, 0.1);
-  padding: 0;
-  transition:
-    background 180ms ease,
-    border-color 180ms ease,
-    box-shadow 180ms ease,
-    color 180ms ease,
-    transform 180ms ease;
-}
-
-.sidebar-collapse-toggle-icon {
-  display: grid;
-  width: 18px;
-  height: 18px;
-  place-items: center;
-}
-
-.sidebar-collapse-toggle-icon svg {
-  width: 18px;
-  height: 18px;
-  stroke-width: 2.35;
-}
-
-.sidebar-collapse-toggle:hover,
-.sidebar-collapse-toggle:focus-visible {
-  border-color: rgba(122, 168, 255, 0.55);
-  background: linear-gradient(180deg, #ffffff 0%, #edf4ff 100%);
-  color: #075df4;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.95),
-    0 0 0 3px rgba(42, 125, 255, 0.1),
-    0 8px 18px rgba(61, 122, 211, 0.14);
-  outline: none;
-}
-
-.sidebar-collapse-toggle:active {
-  transform: translateY(1px);
-}
-
-.is-sidebar-collapsed {
-  --sidebar-width: var(--sidebar-collapsed-width);
-}
-
-.is-sidebar-collapsed .sidebar-nav {
-  margin: 28px 10px 0;
-}
-
-.is-sidebar-collapsed .sidebar-link-label,
-.is-sidebar-collapsed .make-agent-action {
-  max-width: 0;
-  opacity: 0;
-}
-
-.sidebar-nav {
-  display: grid;
-  gap: 10px;
-  margin: 32px 19px 0;
-  transition: margin 240ms ease;
-}
-
-.sidebar-nav-secondary {
-  margin-top: 24px;
-}
-
-.sidebar-link {
-  display: flex;
-  height: 52px;
-  width: 100%;
-  align-items: center;
-  gap: 15px;
-  border: 0;
-  border-radius: 13px;
-  background: transparent;
-  padding: 0 18px;
-  color: #31527f;
-  font-size: 16px;
-  font-weight: 650;
-  text-align: left;
-  transition:
-    background 160ms ease,
-    color 160ms ease,
-    transform 160ms ease,
-    padding 240ms ease,
-    gap 240ms ease;
-}
-
-.is-sidebar-collapsed .sidebar-link {
-  justify-content: center;
-  gap: 0;
-  padding: 0;
-}
-
-.sidebar-link-label {
-  max-width: 160px;
-  overflow: hidden;
-  white-space: nowrap;
-  transition:
-    opacity 180ms ease,
-    max-width 240ms ease;
-}
-
-.sidebar-link:hover,
-.sidebar-link:focus-visible {
-  color: #075df4;
-  outline: none;
-}
-
-.sidebar-link:active {
-  transform: translateY(1px);
-}
-
-.sidebar-link.active {
-  color: #0862ff;
-  font-weight: 800;
-}
-
-.sidebar-link-icon {
-  width: 22px;
-  height: 22px;
-  stroke-width: 2.4;
-}
-
-.sidebar-divider {
-  height: 1px;
-  margin: 24px 28px 0;
-  background: #e9f0fa;
-  transition: margin 240ms ease;
-}
-
-.is-sidebar-collapsed .sidebar-divider {
-  margin: 24px 14px 0;
-}
-
-.sidebar-spacer {
-  flex: 1;
-  min-height: 24px;
-}
-
-.make-agent-card {
-  position: relative;
-  display: block;
-  width: auto;
-  height: clamp(243px, 25.9vh, 280px);
-  margin: 0 var(--sidebar-card-margin) 16px;
-  overflow: hidden;
-  border: 0;
-  border-radius: 15px;
-  background-position: center;
-  background-size: cover;
-  box-shadow: 0 18px 35px rgba(33, 116, 244, 0.22);
-  transition:
-    height 240ms ease,
-    margin 240ms ease,
-    box-shadow 240ms ease;
-}
-
-.make-agent-card.is-icon-only {
-  display: grid;
-  width: 52px;
-  height: 52px;
-  margin: 0 auto 16px;
-  place-items: center;
-  border-radius: 13px;
-  background: linear-gradient(145deg, #53a0ff 0%, #0763ff 100%);
-  box-shadow: 0 10px 24px rgba(30, 111, 255, 0.28);
-}
-
-.make-agent-icon-only {
-  display: grid;
-  place-items: center;
-  color: #ffffff;
-}
-
-.make-agent-icon-only svg {
-  width: 22px;
-  height: 22px;
-  stroke-width: 2.8;
-}
-
-.make-agent-card:focus-visible {
-  outline: 3px solid rgba(35, 112, 255, 0.34);
-  outline-offset: 3px;
-}
-
-.make-agent-action {
-  position: absolute;
-  top: clamp(86px, 9.2vh, 99px);
-  left: clamp(22px, 1.3vw, 25px);
-  display: inline-flex;
-  height: clamp(35px, 3.8vh, 41px);
-  min-width: clamp(128px, 7.7vw, 148px);
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border-radius: 999px;
-  background: #ffffff;
-  color: #0966ff;
-  font-size: 14px;
-  font-weight: 800;
-  box-shadow: 0 10px 24px rgba(22, 100, 225, 0.16);
-  overflow: hidden;
-  white-space: nowrap;
-  transition:
-    opacity 180ms ease,
-    max-width 240ms ease;
-}
-
-.make-agent-action svg {
-  width: 16px;
-  height: 16px;
-  stroke-width: 3;
-}
-
 .agent-main {
   display: flex;
   min-width: 0;
   min-height: 0;
   flex: 1;
   flex-direction: column;
+  gap: clamp(18px, 2.2vh, 28px);
   overflow: hidden;
   padding: var(--main-pad-top) var(--main-pad-right) var(--main-pad-bottom) var(--main-pad-left);
 }
 
-.search-box {
-  position: relative;
-  display: block;
-  width: clamp(302px, 18vw, 346px);
-}
-
-.search-box input {
-  width: 100%;
-  height: 42px;
-  border: 1px solid rgba(219, 230, 248, 0.95);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.95);
-  box-shadow: 0 8px 22px rgba(93, 130, 181, 0.12);
-  color: #17345f;
-  font-size: 14px;
-  font-weight: 600;
-  outline: none;
-  padding: 0 48px 0 23px;
-}
-
-.search-box input::placeholder {
-  color: #7892b7;
-}
-
-.search-box input:focus {
-  border-color: rgba(50, 122, 255, 0.45);
-  box-shadow: 0 8px 22px rgba(93, 130, 181, 0.12);
-}
-
-.search-icon {
-  position: absolute;
-  top: 11px;
-  right: 18px;
-  width: 20px;
-  height: 20px;
-  color: #153b76;
-  stroke-width: 2.5;
-}
-
-.token-record-card {
+.agent-hero-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.9fr) minmax(282px, 0.9fr);
   flex: 0 0 auto;
-  height: clamp(336px, 19vw, 392px);
-  min-height: 0;
-  overflow: hidden;
-  border: 1px solid rgba(219, 231, 248, 0.96);
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.95),
-    0 18px 42px rgba(72, 110, 165, 0.13);
-  margin-top: 18px;
-  padding: 16px clamp(18px, 1.45vw, 26px) 14px;
+  grid-template-columns: minmax(0, 1.12fr) minmax(320px, 0.88fr);
+  gap: clamp(18px, 2vw, 28px);
+  align-items: stretch;
 }
 
-.token-record-main {
+.agent-welcome {
   display: flex;
   min-width: 0;
-  min-height: 0;
   flex-direction: column;
-  padding-right: clamp(16px, 1.3vw, 24px);
+  justify-content: center;
+  padding: clamp(8px, 1.2vh, 16px) 0;
 }
 
-.token-record-topline {
+.welcome-title {
+  margin: 0;
+  color: #0f172a;
+  font-size: clamp(34px, 3.4vw, 52px);
+  font-weight: 900;
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+}
+
+.welcome-title span {
+  color: #126cff;
+}
+
+.welcome-subtitle {
+  max-width: 640px;
+  margin: clamp(12px, 1.4vh, 18px) 0 0;
+  color: #64748b;
+  font-size: clamp(14px, 1vw, 16px);
+  font-weight: 500;
+  line-height: 1.7;
+}
+
+.welcome-features {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: clamp(20px, 2.4vh, 28px);
+}
+
+.welcome-feature-card {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 18px;
-}
-
-.token-record-title-stack {
+  gap: 10px;
   min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.88);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 10px 24px rgba(100, 140, 200, 0.08);
+  padding: 12px 14px;
 }
 
-.token-record-title {
+.welcome-feature-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #edf5ff 0%, #e4efff 100%);
+  color: #126cff;
+}
+
+.welcome-feature-icon svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.4;
+}
+
+.welcome-feature-copy h2 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.welcome-feature-copy p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.token-usage-card {
+  display: flex;
+  min-width: 0;
+  min-height: clamp(280px, 30vh, 340px);
+  flex-direction: column;
+  border: 1px solid rgba(255, 255, 255, 0.92);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(18px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 18px 42px rgba(72, 110, 165, 0.12);
+  padding: 18px 20px 16px;
+}
+
+.token-usage-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.token-usage-title {
   display: flex;
   align-items: center;
   gap: 8px;
   color: #172033;
 }
 
-.token-record-title h2,
-.token-distribution-panel h2 {
+.token-usage-title h2 {
   margin: 0;
-  color: #172033;
-  font-size: clamp(18px, 1.2vw, 22px);
-  font-weight: 900;
-  line-height: 1.16;
-  letter-spacing: 0;
-}
-
-.token-record-title svg {
-  width: 16px;
-  height: 16px;
-  color: #9aaac2;
-  stroke-width: 2.6;
-}
-
-.token-range-tabs {
-  display: grid;
-  width: 134px;
-  height: 32px;
-  grid-template-columns: repeat(3, 1fr);
-  align-items: center;
-  border-radius: 999px;
-  background: #eef4fc;
-  margin-top: 14px;
-  padding: 3px;
-}
-
-.token-range-tab {
-  display: inline-flex;
-  height: 26px;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: #617391;
-  font-size: 14px;
-  font-weight: 850;
-  line-height: 1;
-  transition:
-    background 180ms ease,
-    color 180ms ease,
-    box-shadow 180ms ease,
-    transform 180ms ease;
-}
-
-.token-range-tab.active {
-  background: linear-gradient(180deg, #3788ff 0%, #126cff 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.45),
-    0 8px 16px rgba(35, 114, 245, 0.26);
-  color: #ffffff;
-}
-
-.token-range-tab:focus-visible,
-.token-filter-button:focus-visible,
-.ranking-more-button:focus-visible {
-  outline: 2px solid rgba(26, 111, 255, 0.28);
-  outline-offset: 2px;
-}
-
-.token-range-tab:active,
-.token-filter-button:active,
-.ranking-more-button:active {
-  transform: translateY(1px);
-}
-
-.token-record-filters {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.token-filter-button {
-  display: inline-flex;
-  height: 38px;
-  min-width: 164px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border: 1px solid #dfe8f4;
-  border-radius: 13px;
-  background: #ffffff;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    0 6px 15px rgba(69, 101, 148, 0.08);
-  color: #617391;
-  font-size: 13px;
-  font-weight: 850;
-  padding: 0 14px;
-  white-space: nowrap;
-}
-
-.token-filter-select {
-  min-width: 136px;
-}
-
-.token-filter-button svg {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-  color: #627795;
-  stroke-width: 2.5;
-}
-
-.token-record-body {
-  display: grid;
-  grid-template-columns: minmax(292px, 1fr) minmax(246px, 0.86fr);
-  flex: 1;
-  gap: clamp(16px, 1.45vw, 24px);
-  align-items: stretch;
-  min-height: 0;
-  margin-top: 4px;
-}
-
-.token-record-state {
-  flex: 1;
-  min-height: 0;
-  margin-top: 12px;
-}
-
-.usage-chart-panel {
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-  padding-top: 0;
-}
-
-.usage-trend-chart {
-  flex: 1;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-}
-
-.token-ranking-panel {
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-  flex-direction: column;
-  border-left: 1px solid #e2ebf6;
-  padding-left: clamp(16px, 1.4vw, 24px);
-}
-
-.token-ranking-panel h3 {
-  margin: 0 0 5px;
-  color: #172033;
-  font-size: clamp(15px, 0.98vw, 18px);
+  font-size: 16px;
   font-weight: 900;
   line-height: 1.2;
 }
 
-.ranking-chart {
-  flex: 1;
-  width: 100%;
-  min-height: 0;
+.token-usage-title svg {
+  width: 18px;
+  height: 18px;
+  color: #126cff;
+  stroke-width: 2.4;
 }
 
-.ranking-more-button {
+.token-period-select {
+  position: relative;
   display: inline-flex;
-  height: 24px;
   align-items: center;
-  justify-content: center;
-  gap: 5px;
-  border: 0;
-  background: transparent;
-  color: #2f7fff;
+}
+
+.token-period-select select {
+  height: 34px;
+  appearance: none;
+  border: 1px solid #dfe8f4;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 6px 15px rgba(69, 101, 148, 0.08);
+  color: #475569;
+  cursor: pointer;
   font-size: 13px;
-  font-weight: 900;
-  margin: 7px auto 0;
-  padding: 0 10px;
+  font-weight: 700;
+  outline: none;
+  padding: 0 34px 0 12px;
 }
 
-.ranking-more-button svg {
-  width: 14px;
-  height: 14px;
-  rotate: -90deg;
-  stroke-width: 3;
+.token-period-select select:focus-visible {
+  border-color: rgba(18, 108, 255, 0.45);
+  box-shadow: 0 0 0 3px rgba(18, 108, 255, 0.12);
 }
 
-.token-distribution-panel {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  border-left: 1px solid #e2ebf6;
-  padding-left: clamp(18px, 1.45vw, 26px);
+.token-period-select svg {
+  position: absolute;
+  right: 10px;
+  width: 15px;
+  height: 15px;
+  color: #627795;
+  pointer-events: none;
+  stroke-width: 2.5;
 }
 
-.token-distribution-state {
+.token-usage-state {
   flex: 1;
-  margin-top: 18px;
-}
-
-.token-distribution-body {
-  display: flex;
-  min-height: 0;
-  align-items: center;
-  gap: clamp(15px, 1.35vw, 24px);
   margin-top: 16px;
 }
 
-.distribution-pie-chart {
-  width: clamp(128px, 8.8vw, 158px);
-  height: clamp(128px, 8.8vw, 158px);
-  flex: 0 0 auto;
-}
-
-.distribution-legend {
-  display: grid;
-  flex: 1;
-  gap: 10px;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.distribution-legend li {
-  display: grid;
-  grid-template-columns: 12px minmax(38px, 1fr) 52px;
-  align-items: center;
-  gap: 10px;
-  color: #35425a;
-  font-size: 13px;
-  font-weight: 850;
-}
-
-.legend-swatch {
-  width: 12px;
-  height: 12px;
-  border-radius: 4px;
-  box-shadow: 0 4px 10px rgba(58, 125, 231, 0.16);
-}
-
-.distribution-legend strong {
-  color: #73829a;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-.token-week-summary {
+.token-usage-metrics {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 54px;
-  border: 1px solid #dbe8fb;
-  border-radius: 12px;
-  background: linear-gradient(180deg, #f8fbff 0%, #f2f7ff 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.88);
-  margin-top: auto;
-  padding: 9px 14px;
+  gap: 24px;
+  margin-top: 14px;
 }
 
-.week-summary-icon {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  flex-shrink: 0;
-  place-items: center;
-  border: 1px solid #d5e6ff;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #2e7bff;
-}
-
-.week-summary-icon svg {
-  width: 17px;
-  height: 17px;
-  stroke-width: 2.6;
-}
-
-.token-week-summary p {
+.token-metric {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 4px;
-  margin: 0 0 5px;
-  color: #344057;
-  font-size: 13px;
+}
+
+.token-metric span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.token-metric strong {
+  color: #0f172a;
+  font-size: 22px;
   font-weight: 900;
   line-height: 1.1;
 }
 
-.token-week-summary p strong,
-.token-week-summary p svg {
-  color: #43bc65;
+.token-usage-chart {
+  flex: 1;
+  width: 100%;
+  min-height: 150px;
+  margin-top: 4px;
 }
 
-.token-week-summary p svg {
-  width: 13px;
-  height: 13px;
-  stroke-width: 3;
-}
-
-.token-week-summary span {
-  color: #6f7f98;
-  font-size: 13px;
-  font-weight: 850;
-}
-
-.hero-banner {
-  flex: 0 0 auto;
-  height: var(--banner-height);
-  overflow: hidden;
-  border: 2px solid rgba(255, 255, 255, 0.95);
-  border-radius: 17px;
-  background: #dff0ff;
-  background-position: center 42%;
-  background-repeat: no-repeat;
-  background-size: cover;
-  box-shadow: 0 18px 35px rgba(51, 125, 229, 0.16);
-}
-
-.catalog-toolbar {
+.token-usage-footer {
   display: flex;
-  flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
-  margin-top: 18px;
-  margin-bottom: 12px;
-}
-
-.toolbar-actions {
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
   gap: 12px;
+  border-top: 1px solid #e8eef7;
+  margin-top: 8px;
+  padding-top: 12px;
 }
 
-.category-tabs {
+.token-usage-footer p {
   display: flex;
-  flex-wrap: wrap;
-  gap: 20px;
-}
-
-.category-tab,
-.sort-button {
-  border: 0;
-  background: transparent;
-  transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.category-tab {
-  display: inline-flex;
-  height: 38px;
   align-items: center;
-  justify-content: center;
   gap: 6px;
-  border-radius: 999px;
-  padding: 0 16px;
-  font-size: 15px;
-  font-weight: 500;
-  color: #64748b;
-  position: relative;
-}
-
-.category-tab::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 0;
-  height: 2px;
-  background-color: #2563eb;
-  transition: width 200ms ease;
-  border-radius: 2px 2px 0 0;
-}
-
-.category-tab span {
-  display: inline-flex;
-  height: 20px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  background: #f1f5f9;
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1;
-  padding: 0 7px;
-  margin-left: 2px;
-  transition: all 200ms ease;
-}
-
-.category-tab.active {
-  color: #2563eb;
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
   font-weight: 700;
 }
 
-.category-tab.active::after {
-  width: 100%;
-}
-
-.category-tab.active span {
-  background: #eff6ff;
-  color: #2563eb;
-}
-
-.category-tab:hover:not(.active) {
-  color: #2563eb;
-}
-
-.category-tab:hover:not(.active) span {
-  background: #e0e7ff;
-  color: #2563eb;
-}
-
-.category-tab:focus-visible,
-.sort-button:focus-visible {
-  outline: 2px solid rgba(15, 23, 42, 0.2);
-  outline-offset: 2px;
-  border-radius: 6px;
-}
-
-.category-tab:active,
-.sort-button:active {
-  transform: scale(0.97);
-}
-
-.sort-button {
-  display: inline-flex;
-  height: 38px;
-  min-width: 130px;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border-radius: 999px;
-  font-size: 14px;
-  font-weight: 600;
-  background: #ffffff;
+.token-usage-footer strong {
   color: #0f172a;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-  border: 1px solid #e2e8f0;
+  font-size: 14px;
+  font-weight: 900;
 }
 
-.sort-button:hover {
-  border-color: #cbd5e1;
+.token-day-change {
+  font-weight: 800;
+}
+
+.token-day-change.is-down {
+  color: #16a34a;
+}
+
+.token-day-change.is-up {
+  color: #ef4444;
+}
+
+.token-day-change svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.8;
+}
+
+.agent-catalog-panel {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.88);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(20px);
   box-shadow:
-    0 4px 6px -1px rgba(0, 0, 0, 0.05),
-    0 2px 4px -1px rgba(0, 0, 0, 0.03);
-}
-
-.sort-button svg {
-  width: 16px;
-  height: 16px;
-  stroke-width: 2;
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 24px 48px rgba(100, 140, 200, 0.12);
+  padding: clamp(18px, 1.8vw, 24px);
 }
 
 .agent-grid {
@@ -1977,9 +1000,8 @@ watch(selectedTokenPeriodCode, () => {
   align-content: start;
   gap: var(--grid-gap-y) var(--grid-gap-x);
   min-height: 0;
-  margin-top: 12px;
   overflow-y: auto;
-  padding: 4px 4px 8px 0;
+  padding: 2px 4px 8px 0;
 }
 
 .agent-grid::-webkit-scrollbar {
@@ -1998,17 +1020,16 @@ watch(selectedTokenPeriodCode, () => {
 }
 
 .agent-card {
-  position: relative;
   display: flex;
+  align-items: flex-start;
+  gap: 14px;
   min-height: var(--agent-card-min-height);
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid rgba(225, 235, 249, 0.95);
-  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.95);
+  border-radius: 16px;
   background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 13px 28px rgba(91, 131, 184, 0.1);
-  padding: 16px 16px 14px;
+  box-shadow: 0 12px 28px rgba(91, 131, 184, 0.1);
   color: inherit;
+  padding: 18px 18px 16px;
   text-align: left;
   transition:
     border-color 180ms ease,
@@ -2024,17 +1045,22 @@ watch(selectedTokenPeriodCode, () => {
   transform: translateY(-2px);
 }
 
-.agent-card.selected {
-  border-color: rgba(28, 111, 255, 0.72);
-  box-shadow:
-    0 0 0 3px rgba(42, 125, 255, 0.13),
-    0 18px 34px rgba(61, 122, 211, 0.16);
+.agent-card-icon {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  place-items: center;
+  border: 1px solid rgba(226, 237, 255, 0.95);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #f3f8ff 100%);
+  box-shadow: 0 10px 20px rgba(91, 131, 184, 0.12);
 }
 
-.agent-card-body {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
+.agent-card-icon svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 2.5;
 }
 
 .agent-card-copy {
@@ -2042,90 +1068,54 @@ watch(selectedTokenPeriodCode, () => {
   flex: 1;
 }
 
-.agent-card-title-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.agent-icon {
-  display: grid;
-  width: 40px;
-  height: 40px;
-  flex-shrink: 0;
-  place-items: center;
-  border-radius: 50%;
-}
-
-.agent-icon svg {
-  width: 18px;
-  height: 18px;
-  stroke-width: 2.7;
-}
-
-.icon-blue {
-  background: #eaf4ff;
-  color: #126cff;
-}
-
-.icon-teal {
-  background: #e9fbf7;
-  color: #19bfae;
-}
-
-.icon-orange {
-  background: #fff2e5;
-  color: #ff7a00;
-}
-
-.icon-cyan {
-  background: #e8fbff;
-  color: #16b9c1;
-}
-
-.favorite-mark {
-  display: grid;
-  width: 22px;
-  height: 22px;
-  place-items: center;
-  border-radius: 50%;
-  background: #fff7e6;
-  color: #f6a400;
-}
-
-.favorite-mark svg {
-  width: 12px;
-  height: 12px;
-  fill: currentColor;
-  stroke-width: 2;
-}
-
 .agent-card h2 {
   margin: 0;
-  color: #101827;
-  font-size: 15px;
+  color: #0f172a;
+  font-size: 16px;
   font-weight: 900;
   line-height: 1.3;
 }
 
 .agent-description {
   display: -webkit-box;
-  margin: 6px 0 0;
+  margin: 8px 0 0;
   overflow: hidden;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  color: #395982;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.5;
+  -webkit-line-clamp: 2;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.55;
 }
 
-.agent-card-source {
-  color: #6d83a8;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.2;
-  white-space: nowrap;
+.agent-card-action {
+  display: inline-flex;
+  margin-top: 12px;
+  color: #126cff;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.icon-blue {
+  color: #126cff;
+}
+
+.icon-teal {
+  color: #19bfae;
+}
+
+.icon-orange {
+  color: #ff7a00;
+}
+
+.icon-cyan {
+  color: #16b9c1;
+}
+
+.agent-grid-empty {
+  grid-column: 1 / -1;
+  align-self: start;
+  margin: 24px 0;
 }
 
 .detail-tags span {
@@ -2139,64 +1129,6 @@ watch(selectedTokenPeriodCode, () => {
   font-weight: 700;
   line-height: 1;
   padding: 0 8px;
-}
-
-.agent-card-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: auto;
-  padding-top: 12px;
-}
-
-.status-pill {
-  display: inline-flex;
-  height: 18px;
-  align-items: center;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 800;
-  line-height: 1;
-  padding: 0 7px;
-}
-
-.status-pill.is-available {
-  background: #d8f8ed;
-  color: #10a87c;
-}
-
-.status-pill.is-pending {
-  background: #fff0d7;
-  color: #f39419;
-}
-
-.more-ability-card {
-  background: rgba(255, 255, 255, 0.9);
-}
-
-.more-ability-card .agent-description {
-  max-width: 100%;
-}
-
-.more-ability-art {
-  position: absolute;
-  right: -6px;
-  bottom: -8px;
-  width: clamp(88px, 28%, 108px);
-  pointer-events: none;
-}
-
-.status-placeholder {
-  display: block;
-  width: 1px;
-  height: 24px;
-}
-
-.agent-grid-empty {
-  grid-column: 1 / -1;
-  align-self: start;
-  margin: 24px 0;
 }
 
 .agent-toast {
@@ -2363,100 +1295,47 @@ watch(selectedTokenPeriodCode, () => {
     --agent-grid-columns: 3;
   }
 
-  .token-record-card {
-    grid-template-columns: minmax(0, 1.8fr) minmax(260px, 0.92fr);
-  }
-
-  .token-record-body {
-    grid-template-columns: minmax(260px, 1fr) minmax(228px, 0.86fr);
+  .agent-hero-row {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 0.92fr);
   }
 }
 
 @media (max-width: 1024px) {
   .agent-center-shell {
-    --sidebar-width: 220px;
     --main-pad-top: 18px;
     --main-pad-right: 12px;
     --main-pad-bottom: 32px;
     --main-pad-left: 12px;
-    --banner-height: 170px;
-    --agent-grid-columns: 3;
+    --agent-grid-columns: 2;
     --agent-card-min-height: 148px;
     overflow: hidden;
-  }
-
-  .agent-sidebar {
-    width: var(--sidebar-width);
-    min-width: var(--sidebar-width);
   }
 
   .agent-main {
     padding: var(--main-pad-top) var(--main-pad-right) var(--main-pad-bottom) var(--main-pad-left);
   }
 
-  .token-record-card {
+  .agent-hero-row {
     grid-template-columns: 1fr;
-    gap: 18px;
-    height: auto;
-    min-height: auto;
   }
 
-  .token-record-main {
-    padding-right: 0;
+  .welcome-features {
+    grid-template-columns: 1fr;
   }
 
-  .token-distribution-panel {
-    border-top: 1px solid #e2ebf6;
-    border-left: 0;
-    padding-top: 18px;
-    padding-left: 0;
+  .token-usage-card {
+    min-height: 300px;
   }
 }
 
 @media (max-width: 760px) {
   .agent-center-shell {
-    --banner-height: 128px;
-    --agent-grid-columns: 2;
+    --agent-grid-columns: 1;
     --agent-card-min-height: 152px;
     display: flex;
     min-height: 0;
     flex-direction: column;
     overflow: hidden;
-  }
-
-  .agent-center-shell.is-sidebar-collapsed {
-    --sidebar-width: 100%;
-  }
-
-  .sidebar-collapse-toggle {
-    display: none;
-  }
-
-  .agent-sidebar {
-    width: 100%;
-    min-width: 0;
-    border-right: 0;
-    border-bottom: 1px solid rgba(220, 232, 250, 0.8);
-    padding-bottom: 14px;
-  }
-
-  .sidebar-nav {
-    display: flex;
-    overflow-x: auto;
-    margin: 20px 16px 0;
-    padding-bottom: 2px;
-  }
-
-  .sidebar-link {
-    width: auto;
-    min-width: fit-content;
-    padding: 0 16px;
-  }
-
-  .sidebar-divider,
-  .sidebar-nav-secondary,
-  .make-agent-card {
-    display: none;
   }
 
   .agent-main {
@@ -2466,88 +1345,13 @@ watch(selectedTokenPeriodCode, () => {
     padding: 18px 8px 28px;
   }
 
-  .toolbar-actions {
-    width: 100%;
-    flex-wrap: wrap;
+  .welcome-title {
+    font-size: 30px;
   }
 
-  .search-box {
-    flex: 1 1 auto;
-    min-width: 0;
-    width: auto;
-    max-width: 360px;
-  }
-
-  .token-record-card {
-    border-radius: 17px;
-    margin-top: 14px;
-    padding: 16px;
-  }
-
-  .token-record-topline,
-  .token-record-filters,
-  .token-record-body,
-  .token-distribution-body {
+  .token-usage-footer {
     flex-direction: column;
-  }
-
-  .token-record-topline,
-  .token-record-filters {
-    align-items: stretch;
-  }
-
-  .token-record-filters {
-    width: 100%;
-  }
-
-  .token-filter-button,
-  .token-filter-select {
-    width: 100%;
-  }
-
-  .token-record-body {
-    display: grid;
-    grid-template-columns: 1fr;
-  }
-
-  .token-ranking-panel {
-    border-top: 1px solid #e2ebf6;
-    border-left: 0;
-    padding-top: 14px;
-    padding-left: 0;
-  }
-
-  .token-distribution-body {
-    align-items: center;
-  }
-
-  .distribution-legend {
-    width: 100%;
-  }
-
-  .token-week-summary {
-    margin-top: 16px;
-  }
-
-  .hero-banner {
-    height: 168px;
-  }
-
-  .catalog-toolbar {
     align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .toolbar-actions {
-    justify-content: flex-end;
-  }
-
-  .category-tabs {
-    gap: 10px;
-  }
-
-  .category-tab {
-    min-width: auto;
   }
 }
 </style>

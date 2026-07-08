@@ -540,7 +540,7 @@ function normalizeAnalyzeData(
     owner: assignee.name,
     assigneeId: assignee.id,
     assigneeName: assignee.name,
-    source: data.remark?.trim() || fallback.source || 'AI预填',
+    source: data.remark?.trim() || undefined,
     type: resolveTodoKind(data.type ?? fallback.type),
   }
 }

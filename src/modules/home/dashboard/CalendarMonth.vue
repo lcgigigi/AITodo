@@ -61,7 +61,7 @@ const periodActionLabel = computed(() => (props.viewMode === 'week' ? 'å‘¨' : 'æ
 const weekTimelineDays = computed(() => props.days)
 const monthRangeDisplayMode = ref<MonthRangeDisplayMode>('daily')
 const hoveredWeekDay = ref<string | null>(null)
-const weekDayHoverDelayMs = 1000
+const weekDayHoverDelayMs = 500
 let weekDayHoverTimer: ReturnType<typeof setTimeout> | null = null
 const weekDaySlotDefs: WeekDaySlot[] = [
   { key: 'morning-early', events: [] },

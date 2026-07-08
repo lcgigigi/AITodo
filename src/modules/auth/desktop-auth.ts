@@ -2,10 +2,16 @@ import type { LocationQuery } from 'vue-router'
 import type { UserProfile } from '@/stores/user.store'
 
 export const DESKTOP_AUTH_CALLBACK = 'huali-ai-mascot://auth-callback'
+export const DESKTOP_CLIENT = 'huali-ai-mascot'
 
 export interface DesktopAuthRequest {
   callback: string
   state: string
+}
+
+export interface DesktopLaunchRequest {
+  client: string
+  userId: string
 }
 
 export interface DesktopAuthCallbackParams {
@@ -33,6 +39,31 @@ export function getDesktopAuthRequest(query: LocationQuery): DesktopAuthRequest 
     callback,
     state,
   }
+}
+
+export function getDesktopLaunchRequest(query: LocationQuery): DesktopLaunchRequest | null {
+  const from = getFirstQueryString(query.from)
+  const client = getFirstQueryString(query.desktopClient)
+  const userId = getFirstQueryString(query.desktopUserId)
+
+  if (from !== 'desktop') return null
+  if (client !== DESKTOP_CLIENT) return null
+  if (!userId) return null
+
+  return {
+    client,
+    userId,
+  }
+}
+
+export function isDesktopUserMismatch(query: LocationQuery, currentUserId?: string | null) {
+  const request = getDesktopLaunchRequest(query)
+  if (!request) return false
+
+  const normalizedCurrentUserId = currentUserId?.trim()
+  if (!normalizedCurrentUserId) return false
+
+  return request.userId !== normalizedCurrentUserId
 }
 
 export function buildDesktopAuthCallbackUrl(params: DesktopAuthCallbackParams) {

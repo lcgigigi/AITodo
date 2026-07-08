@@ -15,6 +15,7 @@ import {
   formatEventTime,
   getEventScheduleDisplay,
   isCompletedTodoEvent,
+  isRejectedTodo,
   matchesDetailCategoryFilter,
   matchesDetailStatusFilter,
   isAllDayEvent,
@@ -25,6 +26,7 @@ import {
 } from './todoDisplay'
 import {
   buildTodoDetailPanelViewModel,
+  canDeleteTodoEvent,
   canEditTodoEvent,
   getTaskTypeLabel,
   isPendingAcceptanceTask,
@@ -299,7 +301,7 @@ const isActiveDetailLoading = computed(
 const showDetailDeleteAction = computed(() => {
   const task = activeTask.value
   if (!task) return false
-  return isCompletedTodoEvent(task)
+  return canDeleteTodoEvent(getTaskDetail(task), currentUser.value)
 })
 
 const isDetailDeleteConfirming = computed(
@@ -1101,6 +1103,7 @@ function weekRangeLabel(anchorDate: string) {
                     :class="{
                       selected: activeTaskId === task.id,
                       completed: task.status === 'done',
+                      rejected: isRejectedTodo(task),
                       allday: isAllDayEvent(task),
                       meeting: task.type === 'meeting',
                       todo: task.type !== 'meeting',
@@ -1109,6 +1112,7 @@ function weekRangeLabel(anchorDate: string) {
                   >
                     <div class="check-wrap" @click.stop>
                       <button
+                        v-if="!isRejectedTodo(task)"
                         type="button"
                         class="task-check"
                         :class="{
@@ -1124,20 +1128,22 @@ function weekRangeLabel(anchorDate: string) {
                       </button>
                     </div>
 
-                    <div class="task-time-wrap">
+                    <div class="task-time-wrap" :class="{ 'has-range': isRangeEvent(task) }">
                       <div v-if="isRangeEvent(task)" class="task-time is-range">
-                        <span class="task-time-range-line">{{ formatTaskRangeStart(task) }}</span>
-                        <span
-                          v-if="formatTaskRangeEnd(task)"
-                          class="task-time-range-connector"
-                          aria-hidden="true"
-                        ></span>
-                        <span
-                          v-if="formatTaskRangeEnd(task)"
-                          class="task-time-range-line task-time-range-end"
-                        >
-                          {{ formatTaskRangeEnd(task) }}
-                        </span>
+                        <div class="task-time-range-rail" aria-hidden="true">
+                          <span class="task-time-range-dot"></span>
+                          <span class="task-time-range-bridge"></span>
+                          <span class="task-time-range-dot"></span>
+                        </div>
+                        <div class="task-time-range-stack">
+                          <span class="task-time-range-line">{{ formatTaskRangeStart(task) }}</span>
+                          <span
+                            v-if="formatTaskRangeEnd(task)"
+                            class="task-time-range-line task-time-range-end"
+                          >
+                            {{ formatTaskRangeEnd(task) }}
+                          </span>
+                        </div>
                       </div>
                       <div v-else class="task-time">{{ formatEventTime(task) }}</div>
                       <div v-if="getTaskTimeSub(task)" class="task-time-sub">
@@ -1159,7 +1165,13 @@ function weekRangeLabel(anchorDate: string) {
                     </div>
 
                     <div class="task-aside">
-                      <div class="task-status" :class="{ done: task.status === 'done' }">
+                      <div
+                        class="task-status"
+                        :class="{
+                          done: task.status === 'done',
+                          rejected: isRejectedTodo(task),
+                        }"
+                      >
                         {{ getTaskStatusLabel(task) }}
                       </div>
                       <div class="task-arrow" aria-hidden="true">›</div>
@@ -1285,6 +1297,24 @@ function weekRangeLabel(anchorDate: string) {
                 </template>
                 <template v-else>
                   <button
+                    v-if="showDetailDeleteAction"
+                    type="button"
+                    class="detail-action delete"
+                    :disabled="isActiveDetailLoading"
+                    @click="requestDeleteActiveTask"
+                  >
+                    删除
+                  </button>
+                  <button
+                    v-if="showDetailEditAction"
+                    type="button"
+                    class="detail-action secondary"
+                    :disabled="isActiveDetailLoading"
+                    @click="openTaskEdit"
+                  >
+                    编辑
+                  </button>
+                  <button
                     type="button"
                     class="detail-action primary"
                     :class="{ 'is-syncing': isTodoStatusUpdating(activeTask.id) }"
@@ -1303,24 +1333,6 @@ function weekRangeLabel(anchorDate: string) {
                           ? '恢复待处理'
                           : '标记完成'
                     }}
-                  </button>
-                  <button
-                    v-if="showDetailEditAction"
-                    type="button"
-                    class="detail-action secondary"
-                    :disabled="isActiveDetailLoading"
-                    @click="openTaskEdit"
-                  >
-                    编辑
-                  </button>
-                  <button
-                    v-if="showDetailDeleteAction"
-                    type="button"
-                    class="detail-action delete"
-                    :disabled="isActiveDetailLoading"
-                    @click="requestDeleteActiveTask"
-                  >
-                    删除
                   </button>
                 </template>
               </div>
@@ -1773,7 +1785,14 @@ function weekRangeLabel(anchorDate: string) {
 }
 
 .detail-panel-actions.is-completed-detail {
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 10px;
+}
+
+.detail-panel-actions.is-completed-detail .detail-action {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .detail-panel-actions.is-delete-confirm {
@@ -2372,6 +2391,36 @@ function weekRangeLabel(anchorDate: string) {
     box-shadow 0.2s ease;
 }
 
+.task-card.rejected {
+  background: linear-gradient(
+    90deg,
+    rgba(254, 226, 226, 0.72),
+    rgba(255, 255, 255, 0.28) 54%,
+    rgba(255, 255, 255, 0.06) 100%
+  );
+  box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.08);
+}
+
+.task-card.rejected:hover {
+  background: linear-gradient(
+    90deg,
+    rgba(254, 202, 202, 0.78),
+    rgba(255, 255, 255, 0.34) 54%,
+    rgba(255, 255, 255, 0.1) 100%
+  );
+  box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.12);
+}
+
+.task-card.rejected .task-name {
+  color: #991b1b;
+}
+
+.task-card.rejected .task-time,
+.task-card.rejected .task-time-sub,
+.task-card.rejected .task-sub {
+  color: #b45309;
+}
+
 .task-card + .task-card {
   margin-top: 6px;
 }
@@ -2595,13 +2644,64 @@ function weekRangeLabel(anchorDate: string) {
   text-overflow: ellipsis;
 }
 
+.task-time-wrap.has-range {
+  padding-left: 0;
+}
+
+.task-time-wrap.has-range::before {
+  display: none;
+}
+
 .task-time.is-range {
-  display: grid;
-  gap: 2px;
-  font-size: 15px;
-  letter-spacing: -0.18px;
-  line-height: 1.15;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  font-size: 14px;
+  letter-spacing: -0.16px;
+  line-height: 1;
   white-space: normal;
+}
+
+.task-time-range-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 12px;
+  padding: 3px 0;
+  flex-shrink: 0;
+}
+
+.task-time-range-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid rgba(52, 120, 246, 0.58);
+  box-shadow: 0 0 0 2px rgba(52, 120, 246, 0.1);
+  flex-shrink: 0;
+}
+
+.task-time-range-bridge {
+  flex: 1;
+  width: 2px;
+  min-height: 14px;
+  margin: 3px 0;
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    rgba(52, 120, 246, 0.58) 0%,
+    rgba(52, 120, 246, 0.28) 55%,
+    rgba(52, 120, 246, 0.12) 100%
+  );
+}
+
+.task-time-range-stack {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 1px 0;
 }
 
 .task-time-range-line {
@@ -2611,21 +2711,32 @@ function weekRangeLabel(anchorDate: string) {
   white-space: nowrap;
 }
 
-.task-time-range-connector {
-  display: block;
-  width: 2px;
-  height: 8px;
-  margin: -1px 0 -1px 2.35ch;
-  border-radius: 999px;
-  background: rgba(52, 120, 246, 0.42);
+.task-card.todo .task-time-range-dot {
+  border-color: rgba(30, 174, 118, 0.62);
+  box-shadow: 0 0 0 2px rgba(30, 174, 118, 0.1);
 }
 
-.task-card.todo .task-time-range-connector {
-  background: rgba(30, 174, 118, 0.42);
+.task-card.todo .task-time-range-bridge {
+  background: linear-gradient(
+    180deg,
+    rgba(30, 174, 118, 0.58) 0%,
+    rgba(30, 174, 118, 0.28) 55%,
+    rgba(30, 174, 118, 0.12) 100%
+  );
 }
 
-.task-card.meeting .task-time-range-connector {
-  background: rgba(52, 120, 246, 0.5);
+.task-card.meeting .task-time-range-dot {
+  border-color: rgba(52, 120, 246, 0.68);
+  box-shadow: 0 0 0 2px rgba(52, 120, 246, 0.12);
+}
+
+.task-card.meeting .task-time-range-bridge {
+  background: linear-gradient(
+    180deg,
+    rgba(52, 120, 246, 0.68) 0%,
+    rgba(52, 120, 246, 0.34) 55%,
+    rgba(52, 120, 246, 0.14) 100%
+  );
 }
 
 .task-time-range-end {
@@ -2728,6 +2839,12 @@ function weekRangeLabel(anchorDate: string) {
   font-weight: 900;
 }
 
+.task-status.rejected {
+  color: #991b1b;
+  background: rgba(254, 226, 226, 0.92);
+  border: 1px solid rgba(220, 38, 38, 0.22);
+}
+
 .task-arrow {
   color: #a4b2c4;
   font-size: 18px;
@@ -2816,10 +2933,40 @@ function weekRangeLabel(anchorDate: string) {
   box-shadow: 0 0 0 5px rgba(34, 197, 94, 0.1);
 }
 
+.task-card.completed .task-time-range-dot {
+  border-color: rgba(22, 163, 74, 0.55);
+  background: #dcfce7;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.1);
+}
+
+.task-card.completed .task-time-range-bridge {
+  background: linear-gradient(
+    180deg,
+    rgba(22, 163, 74, 0.45) 0%,
+    rgba(22, 163, 74, 0.2) 55%,
+    rgba(22, 163, 74, 0.08) 100%
+  );
+}
+
 .task-card.completed.meeting .task-time-wrap::before {
   border-color: #3478f6;
   background: #dbeafe;
   box-shadow: 0 0 0 5px rgba(52, 120, 246, 0.1);
+}
+
+.task-card.completed.meeting .task-time-range-dot {
+  border-color: rgba(52, 120, 246, 0.62);
+  background: #dbeafe;
+  box-shadow: 0 0 0 2px rgba(52, 120, 246, 0.12);
+}
+
+.task-card.completed.meeting .task-time-range-bridge {
+  background: linear-gradient(
+    180deg,
+    rgba(52, 120, 246, 0.55) 0%,
+    rgba(52, 120, 246, 0.26) 55%,
+    rgba(52, 120, 246, 0.1) 100%
+  );
 }
 
 .task-card.completed.meeting .task-tag.meeting {

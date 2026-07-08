@@ -13,21 +13,17 @@ import { useFeedbackStore } from '@/stores/feedback.store'
 const feedbackStore = useFeedbackStore()
 const { currentToast } = storeToRefs(feedbackStore)
 
-const toastMeta: Record<FeedbackType, { title: string; icon: Component }> = {
+const toastMeta: Record<FeedbackType, { icon: Component }> = {
   success: {
-    title: '操作成功',
     icon: IconCircleCheck,
   },
   error: {
-    title: '需要处理',
     icon: IconCircleAlert,
   },
   warning: {
-    title: '请注意',
     icon: IconTriangleAlert,
   },
   info: {
-    title: '消息提示',
     icon: IconInfo,
   },
 }
@@ -51,15 +47,7 @@ const toastMeta: Record<FeedbackType, { title: string; icon: Component }> = {
               <component :is="toastMeta[currentToast.type].icon" />
             </span>
             <span class="global-toast__content">
-              <strong>{{ toastMeta[currentToast.type].title }}</strong>
-              <span
-                v-if="currentToast.message"
-                class="global-toast__divider"
-                aria-hidden="true"
-              ></span>
-              <span v-if="currentToast.message" class="global-toast__message">{{
-                currentToast.message
-              }}</span>
+              <span class="global-toast__message">{{ currentToast.message }}</span>
             </span>
             <Button
               type="button"
@@ -106,15 +94,14 @@ const toastMeta: Record<FeedbackType, { title: string; icon: Component }> = {
   box-sizing: border-box;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
-  /* 自适应内容宽度，而不是撑满容器，让它看起来像一个轻量级的胶囊 */
   width: max-content;
   max-width: 100%;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--toast-accent) 40%, rgba(116, 132, 164, 0.2));
-  border-radius: 12px; /* 更圆润小巧的包围 */
-  padding: 8px 10px 8px 12px; /* 进一步缩减上下内边距 */
+  border: none;
+  border-radius: 16px;
+  padding: 12px 14px 12px 16px;
   color: var(--app-text-primary);
   background: color-mix(in srgb, var(--app-card-bg, #ffffff) 85%, transparent);
   backdrop-filter: blur(16px) saturate(140%);
@@ -138,8 +125,8 @@ const toastMeta: Record<FeedbackType, { title: string; icon: Component }> = {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px; /* 图标区域缩小 */
-  height: 26px;
+  width: 32px;
+  height: 32px;
   color: var(--toast-accent);
   background: color-mix(in srgb, var(--toast-accent) 15%, transparent);
   border-radius: 8px;
@@ -148,8 +135,8 @@ const toastMeta: Record<FeedbackType, { title: string; icon: Component }> = {
 }
 
 .global-toast__icon svg {
-  width: 15px; /* 图标本体缩小 */
-  height: 15px;
+  width: 18px;
+  height: 18px;
   filter: drop-shadow(0 0 3px var(--toast-glow));
 }
 
@@ -162,26 +149,10 @@ const toastMeta: Record<FeedbackType, { title: string; icon: Component }> = {
   min-width: 0;
 }
 
-.global-toast__content strong {
-  color: var(--app-text-primary);
-  font-size: 13px; /* 字体减小 */
-  font-weight: 600;
-  line-height: 1.4;
-  white-space: nowrap;
-}
-
-.global-toast__divider {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background-color: var(--app-text-tertiary);
-  opacity: 0.6;
-}
-
 .global-toast__message {
-  color: var(--app-text-secondary);
-  font-size: 13px; /* 字体减小 */
-  font-weight: 400;
+  color: var(--app-text-primary);
+  font-size: 15px;
+  font-weight: 500;
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
@@ -203,8 +174,8 @@ const toastMeta: Record<FeedbackType, { title: string; icon: Component }> = {
 }
 
 .global-toast__close svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 .global-toast__progress {

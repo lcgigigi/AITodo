@@ -13,7 +13,7 @@ import { routeConfig } from '@/config/route.config'
 import { APP_TITLE } from '@/shared/constants/app'
 import { useUserStore } from '@/stores/user.store'
 import { loadCurrentUser, loginSmartTodo } from '@/modules/home/dashboard/todo.service'
-import { getDesktopAuthRequest, redirectDesktopAuthCallback } from './desktop-auth'
+import { getDesktopAuthRequest } from './desktop-auth'
 
 const route = useRoute()
 const router = useRouter()
@@ -110,6 +110,13 @@ function unlockPageScroll() {
   document.body.style.overflow = ''
 }
 
+async function enterWebWorkbench() {
+  isExiting.value = true
+  lockPageScroll()
+  await new Promise((resolve) => setTimeout(resolve, 480))
+  await router.replace(redirectTarget.value)
+}
+
 async function submitLogin() {
   errorMessage.value = ''
 
@@ -133,19 +140,27 @@ async function submitLogin() {
 
     const desktopAuthRequest = getDesktopAuthRequest(route.query)
     if (desktopAuthRequest) {
-      redirectDesktopAuthCallback({
-        callback: desktopAuthRequest.callback,
-        state: desktopAuthRequest.state,
-        token,
-        profile,
+      const desktopClient = Array.isArray(route.query.desktopClient)
+        ? route.query.desktopClient[0]
+        : route.query.desktopClient
+      const desktopUserId = Array.isArray(route.query.desktopUserId)
+        ? route.query.desktopUserId[0]
+        : route.query.desktopUserId
+
+      await router.replace({
+        path: routeConfig.defaultRoute,
+        query: {
+          from: 'desktop',
+          desktopCallback: desktopAuthRequest.callback,
+          state: desktopAuthRequest.state,
+          ...(desktopClient ? { desktopClient } : {}),
+          ...(desktopUserId ? { desktopUserId } : {}),
+        },
       })
       return
     }
 
-    isExiting.value = true
-    lockPageScroll()
-    await new Promise((resolve) => setTimeout(resolve, 480))
-    await router.replace(redirectTarget.value)
+    await enterWebWorkbench()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '登录失败，请稍后再试'
     triggerShake()

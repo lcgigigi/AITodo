@@ -124,7 +124,7 @@ export const useDashboardTodosStore = defineStore('dashboard-todos', () => {
     return {
       ...event,
       status,
-      backendStatus: event.receiveStatus === 1 ? 3 : 0,
+      backendStatus: 3,
       handleDesc: undefined,
     }
   }

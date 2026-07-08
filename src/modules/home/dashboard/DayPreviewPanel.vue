@@ -660,7 +660,12 @@ function submitTodo() {
     })
   }
 
-  resetFormState()
+  if (props.formOnly) {
+    syncFormSnapshot()
+    hideDiscardWarning()
+  } else {
+    resetFormState()
+  }
 }
 
 function requestDeleteTodo(event: CalendarEvent) {

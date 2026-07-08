@@ -108,12 +108,32 @@ export function formatEventTimeForDayList(
   const display = getEventScheduleDisplay(event, allDayText)
 
   if (display.kind === 'range') {
+    const endDate = event.endDate ?? event.date
+
     if (isSameDayRangeEvent(event) && event.date === selectedDate) {
       const start = display.start.time || display.start.date
       const end = display.end.time || ''
       return end ? `${start} ~ ${end}` : start
     }
-    return formatEventTime(event, allDayText)
+
+    const startShort = formatShortDate(event.date)
+    const endShort = formatShortDate(endDate)
+    const startTime = event.time || ''
+    const endTime = event.endTime || ''
+
+    if (event.date === selectedDate) {
+      const start = startTime || startShort
+      const end = `${endShort}${endTime ? ` ${endTime}` : ''}`
+      return `${start} ~ ${end}`
+    }
+
+    if (endDate === selectedDate) {
+      const start = `${startShort}${startTime ? ` ${startTime}` : ''}`
+      const end = endTime || endShort
+      return `${start} ~ ${end}`
+    }
+
+    return `${startShort}~${endShort}`
   }
 
   if (display.kind === 'time') return display.time
@@ -268,11 +288,6 @@ export function getSmartTodoKindLabel(event: CalendarEvent) {
 }
 
 export function getBackendTodoStatusLabel(event: CalendarEvent) {
-  if (event.receiveStatus === 2) return '待接受'
-  if (event.receiveStatus === 1 && event.backendStatus !== 6 && event.backendStatus !== 9) {
-    return '已接受'
-  }
-
   switch (event.backendStatus) {
     case 0:
       return '待处理'
@@ -307,7 +322,7 @@ export function isPendingDetailStatusEvent(event: CalendarEvent) {
   if (isCompletedTodoEvent(event) || isRejectedTodo(event)) return false
 
   const label = getBackendTodoStatusLabel(event)
-  return label === '待处理' || label === '已接受' || label === '待接受'
+  return label === '待处理' || label === '已接受'
 }
 
 export function isOtherStatusTodoEvent(event: CalendarEvent) {
