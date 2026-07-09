@@ -13,10 +13,13 @@ function scheduleNextTick() {
   if (timer) clearTimeout(timer)
 
   const delay = getNextHomeAmbienceChangeAt(sharedNow.value).getTime() - Date.now()
-  timer = setTimeout(() => {
-    syncNow()
-    scheduleNextTick()
-  }, Math.max(delay, 1_000))
+  timer = setTimeout(
+    () => {
+      syncNow()
+      scheduleNextTick()
+    },
+    Math.max(delay, 1_000),
+  )
 }
 
 function handleVisibilityChange() {

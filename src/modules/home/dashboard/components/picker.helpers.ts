@@ -46,3 +46,42 @@ export function safeParseCalendarDate(value: string): DateValue | undefined {
     return undefined
   }
 }
+
+export type PickerPopoverOutsideEvent = {
+  target?: EventTarget | null
+  preventDefault?: () => void
+}
+
+const PICKER_SELECT_ANCESTOR_SELECTORS = [
+  '[data-slot="select-content"]',
+  '[data-slot="select-item"]',
+  '[data-slot="select-trigger"]',
+  '[data-slot="select-viewport"]',
+] as const
+
+export function shouldKeepPickerPopoverOpen(
+  event: PickerPopoverOutsideEvent,
+  options?: { keepTriggerSelector?: string },
+): boolean {
+  const target = event.target
+  if (!(target instanceof Element)) return false
+
+  if (options?.keepTriggerSelector && target.closest(options.keepTriggerSelector)) {
+    return true
+  }
+
+  return PICKER_SELECT_ANCESTOR_SELECTORS.some((selector) => target.closest(selector))
+}
+
+export function handlePickerPopoverOutside(
+  event: PickerPopoverOutsideEvent,
+  close: () => void,
+  options?: { keepTriggerSelector?: string },
+): void {
+  if (shouldKeepPickerPopoverOpen(event, options)) {
+    event.preventDefault?.()
+    return
+  }
+
+  close()
+}

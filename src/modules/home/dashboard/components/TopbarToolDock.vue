@@ -33,11 +33,7 @@ function selectTool(tool: DashboardTool) {
       type="button"
       @click="selectTool(tool)"
     >
-      <span
-        class="tool-dock-icon"
-        :class="{ 'has-image': tool.iconSrc }"
-        aria-hidden="true"
-      >
+      <span class="tool-dock-icon" :class="{ 'has-image': tool.iconSrc }" aria-hidden="true">
         <img v-if="tool.iconSrc" :src="tool.iconSrc" alt="" class="tool-dock-icon-image" />
         <component v-else-if="tool.icon" :is="tool.icon" />
       </span>

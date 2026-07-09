@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button'
 import { routeConfig } from '@/config/route.config'
 import { APP_TITLE } from '@/shared/constants/app'
 import { useUserStore } from '@/stores/user.store'
-import { loadCurrentUser, loginSmartTodo } from '@/modules/home/dashboard/todo.service'
+import { loadCurrentUser, loginSmartTodo } from '@/modules/auth/services/auth.service'
 import { getDesktopAuthRequest } from './desktop-auth'
 
 const route = useRoute()

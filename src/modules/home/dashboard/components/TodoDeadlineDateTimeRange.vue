@@ -22,6 +22,7 @@ import { cn } from '@/lib/utils'
 import {
   getTodoHourOptions,
   getTodoMinuteOptions,
+  handlePickerPopoverOutside,
   parseTodoTime,
   safeParseCalendarDate,
 } from './picker.helpers'
@@ -187,26 +188,14 @@ function schedulePopoverWidthSync() {
   })
 }
 
-function shouldKeepPopoverOpen(event: { target?: EventTarget | null }) {
-  const target = event.target
-  if (!(target instanceof Element)) return false
-
-  return Boolean(
-    target.closest('.todo-datetime-trigger') ||
-      target.closest('[data-slot="select-content"]') ||
-      target.closest('[data-slot="select-item"]') ||
-      target.closest('[data-slot="select-trigger"]') ||
-      target.closest('[data-slot="select-viewport"]'),
-  )
-}
-
 function onPopoverOutside(event: { target?: EventTarget | null; preventDefault?: () => void }) {
-  if (shouldKeepPopoverOpen(event)) {
-    event.preventDefault?.()
-    return
-  }
-
-  open.value = false
+  handlePickerPopoverOutside(
+    event,
+    () => {
+      open.value = false
+    },
+    { keepTriggerSelector: '.todo-datetime-trigger' },
+  )
 }
 
 watch(
@@ -320,6 +309,7 @@ onBeforeUnmount(() => {
         class="todo-datetime-popover !z-[1200] !w-auto !gap-0 !overflow-hidden !rounded-2xl !border !border-slate-200 !bg-white !p-0 !ring-0 !shadow-[0_18px_42px_-30px_rgba(15,23,42,0.45)]"
         @pointer-down-outside="onPopoverOutside"
         @interact-outside="onPopoverOutside"
+        @focus-outside="onPopoverOutside"
       >
         <div class="deadline-datetime-popover-head">正在设置{{ activeFieldLabel }}</div>
         <div class="todo-datetime-panel">

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { getHomeTimePeriod, resolveHomeGreetingText, getNextHomeAmbienceChangeAt } from './homeTimeOfDay'
+import {
+  getHomeTimePeriod,
+  resolveHomeGreetingText,
+  getNextHomeAmbienceChangeAt,
+} from './homeTimeOfDay'
 
 function at(iso: string) {
   return new Date(iso)

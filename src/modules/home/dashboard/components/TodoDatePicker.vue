@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
-import { safeParseCalendarDate } from './picker.helpers'
+import { safeParseCalendarDate, handlePickerPopoverOutside } from './picker.helpers'
 
 defineOptions({
   inheritAttrs: false,
@@ -63,21 +63,10 @@ watch(
   { immediate: true },
 )
 
-function shouldKeepDatePopoverOpen(event: { target?: EventTarget | null }) {
-  const target = event.target
-  if (!(target instanceof Element)) return false
-
-  return Boolean(
-    target.closest('[data-slot="select-content"]') ||
-      target.closest('[data-slot="select-item"]') ||
-      target.closest('[data-slot="select-trigger"]') ||
-      target.closest('[data-slot="select-viewport"]'),
-  )
-}
-
 function onDatePopoverOutside(event: { target?: EventTarget | null; preventDefault?: () => void }) {
-  if (!shouldKeepDatePopoverOpen(event)) return
-  event.preventDefault?.()
+  handlePickerPopoverOutside(event, () => {
+    open.value = false
+  })
 }
 </script>
 
@@ -102,6 +91,7 @@ function onDatePopoverOutside(event: { target?: EventTarget | null; preventDefau
       class="todo-date-popover !z-[1200] !w-[264px] !gap-0 !overflow-hidden !rounded-2xl !border !border-slate-200 !bg-white !p-0 !ring-0 !shadow-[0_18px_42px_-30px_rgba(15,23,42,0.45)]"
       @pointer-down-outside="onDatePopoverOutside"
       @interact-outside="onDatePopoverOutside"
+      @focus-outside="onDatePopoverOutside"
     >
       <Calendar
         v-model="selectedDate"

@@ -129,18 +129,20 @@ export function navigateDashboardTool(router: Router, tool: DashboardToolTarget)
   }
 
   if (tool.routeName) {
-    return router.push({ name: tool.routeName })
+    return router.push({ name: tool.routeName }).catch(() => undefined)
   }
 
   if (tool.agentKey) {
-    return router.push({
-      name: 'AgentCenter',
-      query: { agent: tool.agentKey },
-    })
+    return router
+      .push({
+        name: 'AgentCenter',
+        query: { agent: tool.agentKey },
+      })
+      .catch(() => undefined)
   }
 
   if (tool.isMore) {
-    return router.push({ name: 'AgentCenter' })
+    return router.push({ name: 'AgentCenter' }).catch(() => router.push('/agents'))
   }
 
   return Promise.resolve()

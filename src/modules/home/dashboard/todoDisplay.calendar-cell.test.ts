@@ -24,11 +24,9 @@ describe('calendar cell display helpers', () => {
     const rejected = event({ id: 'rejected', backendStatus: 9, time: '09:00' })
     const active = event({ id: 'active', time: '10:00' })
 
-    expect(getActiveCalendarDisplayEvents([done, rejected, active]).map((item) => item.id)).toEqual([
-      'active',
-      'done',
-      'rejected',
-    ])
+    expect(getActiveCalendarDisplayEvents([done, rejected, active]).map((item) => item.id)).toEqual(
+      ['active', 'done', 'rejected'],
+    )
   })
 
   it('sorts meetings first by time, then todos, then cross-day events last within each status group', () => {

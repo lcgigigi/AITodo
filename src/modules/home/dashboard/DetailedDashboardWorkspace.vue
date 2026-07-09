@@ -14,7 +14,6 @@ import {
   compareEvents,
   formatEventTime,
   getEventScheduleDisplay,
-  isCompletedTodoEvent,
   isRejectedTodo,
   matchesDetailCategoryFilter,
   matchesDetailStatusFilter,
@@ -50,6 +49,7 @@ import {
   updateTodo as serviceUpdateTodo,
 } from './todo.service'
 import { useDashboardTodos } from './useDashboardTodos'
+import { runDashboardTodoAction } from './dashboardTodoActions'
 
 type DayPreviewPanelExpose = {
   openCreateForm: () => void
@@ -178,7 +178,8 @@ const taskListSections = computed(() => {
   const todoEvents = sortedFilteredTasks.value.filter((event) => !isMeetingEvent(event))
   const timed = todoEvents.filter((event) => !isAllDayEvent(event))
   const allDay = todoEvents.filter((event) => isAllDayEvent(event))
-  const sections: Array<{ key: string; label: string; timeline: boolean; tasks: CalendarEvent[] }> = []
+  const sections: Array<{ key: string; label: string; timeline: boolean; tasks: CalendarEvent[] }> =
+    []
 
   if (meetings.length) {
     sections.push({ key: 'meeting', label: '会议安排', timeline: true, tasks: meetings })
@@ -192,17 +193,6 @@ const taskListSections = computed(() => {
 
   return sections
 })
-
-const hasActiveTaskFilters = computed(
-  () =>
-    categoryFilter.value !== DEFAULT_CATEGORY_FILTER ||
-    statusFilter.value !== 'all' ||
-    scopeFilter.value !== 'all',
-)
-
-const isFilterEmpty = computed(
-  () => hasActiveTaskFilters.value && !filteredTasks.value.length && !isLoading.value,
-)
 
 const emptyStateCopy = computed(() => {
   if (!selectedDateEvents.value.length) {
@@ -333,8 +323,8 @@ const showDetailEditAction = computed(() => {
   return canEditTodoEvent(getTaskDetail(task))
 })
 
-const isActiveDetailLoading = computed(
-  () => Boolean(activeTaskId.value && detailLoadingId.value === activeTaskId.value),
+const isActiveDetailLoading = computed(() =>
+  Boolean(activeTaskId.value && detailLoadingId.value === activeTaskId.value),
 )
 
 const showDetailDeleteAction = computed(() => {
@@ -343,8 +333,8 @@ const showDetailDeleteAction = computed(() => {
   return canDeleteTodoEvent(getTaskDetail(task), currentUser.value)
 })
 
-const isDetailDeleteConfirming = computed(
-  () => Boolean(activeTaskId.value && pendingDeleteTaskId.value === activeTaskId.value),
+const isDetailDeleteConfirming = computed(() =>
+  Boolean(activeTaskId.value && pendingDeleteTaskId.value === activeTaskId.value),
 )
 
 watch(todoLoadRangeKey, () => {
@@ -420,7 +410,9 @@ async function refreshTodos() {
         preserveDetailId,
       )
     }
-    await loadTaskDetail(updatedTask, true, { silent: Boolean(preservedDetail?.childTodos?.length) })
+    await loadTaskDetail(updatedTask, true, {
+      silent: Boolean(preservedDetail?.childTodos?.length),
+    })
     return
   }
 
@@ -431,11 +423,7 @@ async function refreshTodos() {
 
   detailLoadingId.value = preserveDetailId
   try {
-    const detail = await loadTodoDetail(
-      preserveDetailId,
-      currentUser.value,
-      assignableUsers.value,
-    )
+    const detail = await loadTodoDetail(preserveDetailId, currentUser.value, assignableUsers.value)
     taskDetails.value = storeCalendarEventDetail(taskDetails.value, detail, preserveDetailId)
   } catch {
     closeTaskDetail()
@@ -681,7 +669,7 @@ function requestCloseTaskEdit(onConfirm?: () => void) {
 }
 
 async function handleUpdateTodo(payload: CalendarTodoUpdate) {
-  try {
+  await runDashboardTodoAction(async () => {
     await serviceUpdateTodo(payload)
     await refreshTodos()
     closeTaskEdit()
@@ -694,9 +682,7 @@ async function handleUpdateTodo(payload: CalendarTodoUpdate) {
       }
     }
     feedbackStore.success('待办已保存')
-  } catch {
-    // 全局拦截器已统一提示错误。
-  }
+  })
 }
 
 function closeTaskDetail() {
@@ -708,11 +694,7 @@ function closeTaskDetail() {
   }
 }
 
-async function loadTaskDetail(
-  task: CalendarEvent,
-  force = false,
-  options?: { silent?: boolean },
-) {
+async function loadTaskDetail(task: CalendarEvent, force = false, options?: { silent?: boolean }) {
   if (!currentUser.value.id || (!force && taskDetails.value[task.id])) return
 
   const silent = options?.silent ?? false
@@ -799,7 +781,7 @@ function submitQuickCreate() {
 }
 
 async function handleCreateTodo(payload: CalendarTodoDraft) {
-  try {
+  await runDashboardTodoAction(async () => {
     await serviceCreateTodo(payload)
     if (payload.date) {
       const parsedDate = new Date(`${payload.date}T12:00:00`)
@@ -810,9 +792,7 @@ async function handleCreateTodo(payload: CalendarTodoDraft) {
     closeCreateModal()
     await refreshTodos()
     feedbackStore.success('待办已创建')
-  } catch {
-    // 全局拦截器已统一提示错误。
-  }
+  })
 }
 
 function notifyFromPreview(message: string, type: 'success' | 'error' | 'info' = 'info') {
@@ -892,7 +872,7 @@ async function confirmDeleteActiveTask() {
   if (!task || deleteActionProcessing.value || pendingDeleteTaskId.value !== task.id) return
 
   deleteActionProcessing.value = true
-  try {
+  await runDashboardTodoAction(async () => {
     await serviceDeleteTodo(task.id)
     const nextDetails = { ...taskDetails.value }
     delete nextDetails[task.id]
@@ -901,11 +881,8 @@ async function confirmDeleteActiveTask() {
     closeTaskDetail()
     await refreshTodos()
     feedbackStore.success('待办已删除')
-  } catch {
-    // 全局拦截器已统一提示错误。
-  } finally {
-    deleteActionProcessing.value = false
-  }
+  })
+  deleteActionProcessing.value = false
 }
 
 function isMeetingEvent(event: CalendarEvent) {
@@ -1055,7 +1032,11 @@ function weekRangeLabel(anchorDate: string) {
             </div>
           </header>
 
-          <div class="filter-stack" :class="{ 'has-scope-filters': hasScopeFilters }" aria-label="待办筛选">
+          <div
+            class="filter-stack"
+            :class="{ 'has-scope-filters': hasScopeFilters }"
+            aria-label="待办筛选"
+          >
             <div class="filter-primary">
               <div class="filter-flow" role="tablist" aria-label="类型与状态筛选">
                 <div
@@ -2261,14 +2242,15 @@ function weekRangeLabel(anchorDate: string) {
 }
 
 .filter-stack.has-scope-filters .filter-primary {
-  flex: 3 1 0;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
 .filter-stack-divider {
   flex: 0 0 1px;
+  flex-shrink: 0;
   align-self: stretch;
-  margin: 6px 0;
+  margin: 6px 4px 6px 0;
   background: rgba(148, 163, 184, 0.28);
 }
 
@@ -2277,15 +2259,16 @@ function weekRangeLabel(anchorDate: string) {
 }
 
 .filter-secondary {
-  flex: 2 1 0;
+  flex: 0 0 auto;
+  flex-shrink: 0;
+  margin-left: auto;
+  padding-left: 2px;
   min-width: 0;
   display: flex;
   flex-direction: column;
   justify-content: center;
   gap: 6px;
 }
-
-
 
 .filter-secondary-flow {
   display: flex;
@@ -2417,9 +2400,6 @@ function weekRangeLabel(anchorDate: string) {
   border-color: rgba(52, 120, 246, 0.28);
   box-shadow: none;
 }
-
-
-
 
 .filter:focus-visible,
 .type-filter:focus-visible {
@@ -2615,8 +2595,7 @@ function weekRangeLabel(anchorDate: string) {
 
 .task-card.allday:hover {
   transform: translateY(-1px);
-  background:
-    radial-gradient(circle at 87% 50%, rgba(52, 120, 246, 0.13), transparent 36%),
+  background: radial-gradient(circle at 87% 50%, rgba(52, 120, 246, 0.13), transparent 36%),
     linear-gradient(
       90deg,
       rgba(52, 120, 246, 0.1),
@@ -2629,8 +2608,7 @@ function weekRangeLabel(anchorDate: string) {
 
 .task-card.allday.selected {
   transform: translateY(-1px);
-  background:
-    radial-gradient(circle at 87% 50%, rgba(52, 120, 246, 0.15), transparent 38%),
+  background: radial-gradient(circle at 87% 50%, rgba(52, 120, 246, 0.15), transparent 38%),
     linear-gradient(
       90deg,
       rgba(52, 120, 246, 0.13),
@@ -3149,8 +3127,6 @@ function weekRangeLabel(anchorDate: string) {
   .type-filter {
     padding: 0 10px;
   }
-
- 
 }
 
 @media (max-width: 1180px) {

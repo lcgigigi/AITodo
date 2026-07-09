@@ -48,6 +48,10 @@ export default defineConfig({
         target: smartTodoApiTarget,
         changeOrigin: true,
       },
+      '/opinion-box': {
+        target: smartTodoApiTarget,
+        changeOrigin: true,
+      },
       '/sys-message': {
         target: smartTodoApiTarget,
         changeOrigin: true,

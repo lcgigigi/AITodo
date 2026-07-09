@@ -88,54 +88,50 @@ const monthRangeSegments = computed<MonthRangeSegment[]>(() => {
   )
   const segments: MonthRangeSegment[] = []
 
-  ;[...rangeEvents.values()]
-    .sort(compareCalendarRangeBarEvents)
-    .forEach((event) => {
-      const eventEndDate = event.endDate ?? event.date
+  ;[...rangeEvents.values()].sort(compareCalendarRangeBarEvents).forEach((event) => {
+    const eventEndDate = event.endDate ?? event.date
 
-      for (let row = 0; row < 6; row += 1) {
-        let startColumn = -1
-        let endColumn = -1
+    for (let row = 0; row < 6; row += 1) {
+      let startColumn = -1
+      let endColumn = -1
 
-        for (let column = 0; column < 7; column += 1) {
-          const day = props.days[row * 7 + column]
-          if (!day || day.date < event.date || day.date > eventEndDate) continue
+      for (let column = 0; column < 7; column += 1) {
+        const day = props.days[row * 7 + column]
+        if (!day || day.date < event.date || day.date > eventEndDate) continue
 
-          if (startColumn < 0) startColumn = column
-          endColumn = column
-        }
-
-        if (startColumn < 0) continue
-
-        const rowLanes = lanesByRow[row]
-        let lane = 0
-        while (
-          rowLanes[lane]?.some(({ start, end }) => !(endColumn < start || startColumn > end))
-        ) {
-          lane += 1
-        }
-
-        if (!rowLanes[lane]) rowLanes[lane] = []
-        rowLanes[lane].push({ start: startColumn, end: endColumn })
-
-        for (let column = startColumn; column <= endColumn; column += 1) {
-          const day = props.days[row * 7 + column]
-          if (!day) continue
-
-          segments.push({
-            key: `${event.id}-${row}-${column}`,
-            event,
-            row: row + 1,
-            startColumn: column + 1,
-            endColumn: column + 1,
-            lane,
-            isStart: day.date === event.date,
-            isEnd: day.date === eventEndDate,
-            showTitle: column === startColumn,
-          })
-        }
+        if (startColumn < 0) startColumn = column
+        endColumn = column
       }
-    })
+
+      if (startColumn < 0) continue
+
+      const rowLanes = lanesByRow[row]
+      let lane = 0
+      while (rowLanes[lane]?.some(({ start, end }) => !(endColumn < start || startColumn > end))) {
+        lane += 1
+      }
+
+      if (!rowLanes[lane]) rowLanes[lane] = []
+      rowLanes[lane].push({ start: startColumn, end: endColumn })
+
+      for (let column = startColumn; column <= endColumn; column += 1) {
+        const day = props.days[row * 7 + column]
+        if (!day) continue
+
+        segments.push({
+          key: `${event.id}-${row}-${column}`,
+          event,
+          row: row + 1,
+          startColumn: column + 1,
+          endColumn: column + 1,
+          lane,
+          isStart: day.date === event.date,
+          isEnd: day.date === eventEndDate,
+          showTitle: column === startColumn,
+        })
+      }
+    }
+  })
 
   return segments
 })
@@ -346,11 +342,7 @@ onUnmounted(() => {
           @mouseenter="scheduleWeekDayHovered(day.date)"
           @mouseleave="clearWeekDayHovered()"
         >
-          <button
-            class="week-day-head"
-            type="button"
-            @click="emit('select', day.date)"
-          >
+          <button class="week-day-head" type="button" @click="emit('select', day.date)">
             <span>周{{ weekdayText(day.date) }}</span>
             <b>{{ day.day }}</b>
           </button>
@@ -373,10 +365,7 @@ onUnmounted(() => {
                   v-for="event in weekSlotEventsForDisplay(slot, day.date)"
                   :key="event.id"
                   class="week-event-cell"
-                  :class="[
-                    `type-${event.type}`,
-                    { 'is-selected': day.date === selectedDate },
-                  ]"
+                  :class="[`type-${event.type}`, { 'is-selected': day.date === selectedDate }]"
                   type="button"
                   :aria-label="`${weekEventTimeLabel(event)} ${getTodoListDisplayText(event)}`"
                   @click="selectWeekDayEvent(day, event)"

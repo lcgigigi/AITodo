@@ -131,10 +131,7 @@ const filteredEvents = computed(() =>
   ),
 )
 const hasActiveFilters = computed(
-  () =>
-    statusFilter.value !== 'all' ||
-    typeFilter.value !== 'all' ||
-    scopeFilter.value !== 'all',
+  () => statusFilter.value !== 'all' || typeFilter.value !== 'all' || scopeFilter.value !== 'all',
 )
 const isFilterEmpty = computed(() => props.events.length > 0 && filteredEvents.value.length === 0)
 const isFormMode = computed(() => panelMode.value !== 'list')
@@ -828,10 +825,7 @@ defineExpose({
         </button>
       </div>
 
-      <div
-        class="type-filter-toolbar"
-        :class="{ 'has-scope-filters': hasScopeFilters }"
-      >
+      <div class="type-filter-toolbar" :class="{ 'has-scope-filters': hasScopeFilters }">
         <div class="type-filter-row" role="group" aria-label="待办类型筛选">
           <button
             type="button"
@@ -1070,221 +1064,238 @@ defineExpose({
       </Transition>
 
       <div class="inline-todo-form-body">
-      <section
-        v-if="canEditForm"
-        class="inline-section ai-inline-section"
-        :class="{ 'is-parsing': isParsing }"
-        :aria-busy="isParsing"
-        data-tour-target="todo-ai-parser"
-      >
-        <label class="field field-full">
-          <span>一句话创建待办</span>
-          <div class="ai-inline-row">
-            <Input
-              v-model="aiPrompt"
-              type="text"
-              :disabled="isParsing"
-              :aria-describedby="isParsing ? 'ai-parse-status-title' : undefined"
-              placeholder="例如：明天下午给刘畅布置一项开发公司官方网站的任务"
-            />
-            <Button
-              type="button"
-              :class="{ 'is-parsing': isParsing }"
-              :disabled="isParsing || !aiPrompt.trim()"
-              @click="parseTodoText"
-            >
-              <span v-if="isParsing" class="ai-button-dots" aria-hidden="true">
-                <span></span>
-                <span></span>
-                <span></span>
-              </span>
-              {{ isParsing ? '解析中' : 'AI 解析' }}
-            </Button>
-          </div>
-        </label>
-        <Transition name="ai-parse-status">
-          <AiParseStatus v-if="isParsing" />
-        </Transition>
-      </section>
+        <section
+          v-if="canEditForm"
+          class="inline-section ai-inline-section"
+          :class="{ 'is-parsing': isParsing }"
+          :aria-busy="isParsing"
+          data-tour-target="todo-ai-parser"
+        >
+          <label class="field field-full">
+            <span>一句话创建待办</span>
+            <div class="ai-inline-row">
+              <Input
+                v-model="aiPrompt"
+                type="text"
+                :disabled="isParsing"
+                :aria-describedby="isParsing ? 'ai-parse-status-title' : undefined"
+                placeholder="例如：明天下午给刘畅布置一项开发公司官方网站的任务"
+              />
+              <Button
+                type="button"
+                :class="{ 'is-parsing': isParsing }"
+                :disabled="isParsing || !aiPrompt.trim()"
+                @click="parseTodoText"
+              >
+                <span v-if="isParsing" class="ai-button-dots" aria-hidden="true">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </span>
+                {{ isParsing ? '解析中' : 'AI 解析' }}
+              </Button>
+            </div>
+          </label>
+          <Transition name="ai-parse-status">
+            <AiParseStatus v-if="isParsing" />
+          </Transition>
+        </section>
 
-      <section
-        class="inline-section todo-details-section"
-        :class="{ 'is-readonly': isViewMode }"
-        :aria-disabled="isFormReadonly"
-        data-tour-target="todo-detail-fields"
-      >
-        <div class="basic-info-layout" :inert="isFormReadonly">
-          <div class="basic-info-columns">
-            <div class="basic-info-column type-info-column">
-              <label class="mode-switch-field">
-                <span>事项类型</span>
-                <div class="mode-switch" role="group" aria-label="事项类型">
-                  <button
-                    type="button"
-                    class="is-todo-type"
-                    :class="{
-                      active: todoForm.type === 1,
-                      'is-ai-highlighted': isAiHighlighted('type'),
-                    }"
-                    :disabled="isFormReadonly"
-                    @click="setTodoType(1)"
-                  >
-                    待办
-                  </button>
-                  <button
-                    type="button"
-                    class="is-meeting-type"
-                    :class="{
-                      active: todoForm.type === 2,
-                      'is-ai-highlighted': isAiHighlighted('type'),
-                    }"
-                    :disabled="isFormReadonly"
-                    @click="setTodoType(2)"
-                  >
-                    会议
-                  </button>
-                </div>
-              </label>
+        <section
+          class="inline-section todo-details-section"
+          :class="{ 'is-readonly': isViewMode }"
+          :aria-disabled="isFormReadonly"
+          data-tour-target="todo-detail-fields"
+        >
+          <div class="basic-info-layout" :inert="isFormReadonly">
+            <div class="basic-info-columns">
+              <div class="basic-info-column type-info-column">
+                <label class="mode-switch-field">
+                  <span>事项类型</span>
+                  <div class="mode-switch" role="group" aria-label="事项类型">
+                    <button
+                      type="button"
+                      class="is-todo-type"
+                      :class="{
+                        active: todoForm.type === 1,
+                        'is-ai-highlighted': isAiHighlighted('type'),
+                      }"
+                      :disabled="isFormReadonly"
+                      @click="setTodoType(1)"
+                    >
+                      待办
+                    </button>
+                    <button
+                      type="button"
+                      class="is-meeting-type"
+                      :class="{
+                        active: todoForm.type === 2,
+                        'is-ai-highlighted': isAiHighlighted('type'),
+                      }"
+                      :disabled="isFormReadonly"
+                      @click="setTodoType(2)"
+                    >
+                      会议
+                    </button>
+                  </div>
+                </label>
+              </div>
+
+              <div
+                class="basic-info-column schedule-info-column"
+                :class="{ 'is-deadline-mode': isDeadlineMode }"
+              >
+                <label class="mode-switch-field">
+                  <span>时间模式</span>
+                  <div class="mode-switch" role="group" aria-label="时间模式">
+                    <button
+                      type="button"
+                      class="is-scheduled-mode"
+                      :class="{ active: todoForm.mode === 'scheduled' }"
+                      :disabled="isFormReadonly"
+                      @click="setMode('scheduled')"
+                    >
+                      指定时间
+                    </button>
+                    <button
+                      type="button"
+                      class="is-deadline-mode"
+                      :class="{ active: todoForm.mode === 'deadline' }"
+                      :disabled="isFormReadonly"
+                      @click="setMode('deadline')"
+                    >
+                      截止日期
+                    </button>
+                  </div>
+                </label>
+              </div>
             </div>
 
-            <div class="basic-info-column schedule-info-column" :class="{ 'is-deadline-mode': isDeadlineMode }">
-              <label class="mode-switch-field">
-                <span>时间模式</span>
-                <div class="mode-switch" role="group" aria-label="时间模式">
-                  <button
-                    type="button"
-                    class="is-scheduled-mode"
-                    :class="{ active: todoForm.mode === 'scheduled' }"
-                    :disabled="isFormReadonly"
-                    @click="setMode('scheduled')"
-                  >
-                    指定时间
-                  </button>
-                  <button
-                    type="button"
-                    class="is-deadline-mode"
-                    :class="{ active: todoForm.mode === 'deadline' }"
-                    :disabled="isFormReadonly"
-                    @click="setMode('deadline')"
-                  >
-                    截止日期
-                  </button>
+            <div class="schedule-field-panel" :class="{ 'is-deadline-panel': isDeadlineMode }">
+              <div class="schedule-mode-shell">
+                <div v-if="!isDeadlineMode" key="scheduled" class="schedule-mode-panel">
+                  <div class="scheduled-time-fields">
+                    <label class="field">
+                      <span>日期</span>
+                      <TodoDatePicker
+                        v-model="todoForm.date"
+                        class="soft-picker"
+                        :disabled="isFormReadonly"
+                        :highlighted="isAiHighlighted('date')"
+                        aria-label="选择待办日期"
+                        @change="syncDateRange"
+                      />
+                    </label>
+                    <label class="field">
+                      <span>时间</span>
+                      <TodoTimePicker
+                        v-model="todoForm.time"
+                        class="soft-picker"
+                        :disabled="isFormReadonly"
+                        :highlighted="isAiHighlighted('time')"
+                        aria-label="选择待办时间"
+                      />
+                    </label>
+                  </div>
+                  <div class="quick-time-row" aria-label="快捷时间">
+                    <button
+                      v-for="preset in scheduledTimePresets"
+                      :key="preset.value"
+                      type="button"
+                      :class="{ active: todoForm.time === preset.value }"
+                      :disabled="isFormReadonly"
+                      @click="applyScheduledTime(preset.value)"
+                    >
+                      {{ preset.label }}
+                    </button>
+                  </div>
                 </div>
-              </label>
-            </div>
-          </div>
-
-          <div class="schedule-field-panel" :class="{ 'is-deadline-panel': isDeadlineMode }">
-            <template v-if="!isDeadlineMode">
-              <div class="scheduled-time-fields">
-                <label class="field">
-                  <span>日期</span>
-                  <TodoDatePicker
-                    v-model="todoForm.date"
-                    class="soft-picker"
+                <div v-else key="deadline" class="schedule-mode-panel">
+                  <TodoDeadlineDateTimeRange
+                    v-model:start-date="todoForm.date"
+                    v-model:start-time="todoForm.time"
+                    v-model:end-date="todoForm.endDate"
+                    v-model:end-time="todoForm.endTime"
+                    class="field-full"
                     :disabled="isFormReadonly"
-                    :highlighted="isAiHighlighted('date')"
-                    aria-label="选择待办日期"
+                    :start-highlighted="isAiHighlighted('date') || isAiHighlighted('time')"
+                    :end-highlighted="isAiHighlighted('endDate') || isAiHighlighted('endTime')"
                     @change="syncDateRange"
                   />
-                </label>
-                <label class="field">
-                  <span>时间</span>
-                  <TodoTimePicker
-                    v-model="todoForm.time"
-                    class="soft-picker"
-                    :disabled="isFormReadonly"
-                    :highlighted="isAiHighlighted('time')"
-                    aria-label="选择待办时间"
-                  />
-                </label>
+                  <div class="quick-range-row field-full" aria-label="快捷时间">
+                    <button
+                      type="button"
+                      :disabled="isFormReadonly"
+                      @click="applyQuickRange('today')"
+                    >
+                      今天
+                    </button>
+                    <button
+                      type="button"
+                      :disabled="isFormReadonly"
+                      @click="applyQuickRange('week')"
+                    >
+                      本周内
+                    </button>
+                    <button
+                      type="button"
+                      :disabled="isFormReadonly"
+                      @click="applyQuickRange('nextWeek')"
+                    >
+                      下周前
+                    </button>
+                    <button
+                      type="button"
+                      :disabled="isFormReadonly"
+                      @click="applyQuickRange('month')"
+                    >
+                      本月内
+                    </button>
+                  </div>
+                </div>
               </div>
-              <div class="quick-time-row" aria-label="快捷时间">
-                <button
-                  v-for="preset in scheduledTimePresets"
-                  :key="preset.value"
-                  type="button"
-                  :class="{ active: todoForm.time === preset.value }"
-                  :disabled="isFormReadonly"
-                  @click="applyScheduledTime(preset.value)"
-                >
-                  {{ preset.label }}
-                </button>
-              </div>
-            </template>
-            <template v-else>
-              <TodoDeadlineDateTimeRange
-                v-model:start-date="todoForm.date"
-                v-model:start-time="todoForm.time"
-                v-model:end-date="todoForm.endDate"
-                v-model:end-time="todoForm.endTime"
-                class="field-full"
-                :disabled="isFormReadonly"
-                :start-highlighted="isAiHighlighted('date') || isAiHighlighted('time')"
-                :end-highlighted="isAiHighlighted('endDate') || isAiHighlighted('endTime')"
-                @change="syncDateRange"
-              />
-              <div class="quick-range-row field-full" aria-label="快捷时间">
-                <button type="button" :disabled="isFormReadonly" @click="applyQuickRange('today')">
-                  今天
-                </button>
-                <button type="button" :disabled="isFormReadonly" @click="applyQuickRange('week')">
-                  本周内
-                </button>
-                <button
-                  type="button"
-                  :disabled="isFormReadonly"
-                  @click="applyQuickRange('nextWeek')"
-                >
-                  下周前
-                </button>
-                <button type="button" :disabled="isFormReadonly" @click="applyQuickRange('month')">
-                  本月内
-                </button>
-              </div>
-            </template>
-          </div>
+            </div>
 
-          <div class="form-grid">
-            <label v-if="canChooseAssignee" class="field field-full">
-              <span>负责人</span>
-              <TodoAssigneeSelect
-                :model-value="parseAssigneeIds(todoForm.assigneeId)"
-                :users="assignableUsers"
-                :disabled="isFormReadonly"
-                :highlighted="isAiHighlighted('assignee')"
-                @update:model-value="selectAssignees"
-              />
-            </label>
-            <label class="field field-full">
-              <span>待办内容</span>
-              <Input
-                v-model="todoForm.title"
-                :class="{
-                  'is-ai-highlighted': isAiHighlighted('title'),
-                  'is-field-invalid': isTitleInvalid,
-                }"
-                :aria-invalid="isTitleInvalid || undefined"
-                type="text"
-                :disabled="isFormReadonly"
-                :readonly="isViewMode"
-                placeholder="输入待办内容"
-              />
-            </label>
-            <label class="field field-full">
-              <span>备注</span>
-              <Input
-                v-model="todoForm.source"
-                :class="{ 'is-ai-highlighted': isAiHighlighted('source') }"
-                type="text"
-                :disabled="isFormReadonly"
-                :readonly="isViewMode"
-                placeholder="备注或来源"
-              />
-            </label>
+            <div class="form-grid">
+              <label v-if="canChooseAssignee" class="field field-full">
+                <span>负责人</span>
+                <TodoAssigneeSelect
+                  :model-value="parseAssigneeIds(todoForm.assigneeId)"
+                  :users="assignableUsers"
+                  :disabled="isFormReadonly"
+                  :highlighted="isAiHighlighted('assignee')"
+                  @update:model-value="selectAssignees"
+                />
+              </label>
+              <label class="field field-full">
+                <span>待办内容</span>
+                <Input
+                  v-model="todoForm.title"
+                  :class="{
+                    'is-ai-highlighted': isAiHighlighted('title'),
+                    'is-field-invalid': isTitleInvalid,
+                  }"
+                  :aria-invalid="isTitleInvalid || undefined"
+                  type="text"
+                  :disabled="isFormReadonly"
+                  :readonly="isViewMode"
+                  placeholder="输入待办内容"
+                />
+              </label>
+              <label class="field field-full">
+                <span>备注</span>
+                <Input
+                  v-model="todoForm.source"
+                  :class="{ 'is-ai-highlighted': isAiHighlighted('source') }"
+                  type="text"
+                  :disabled="isFormReadonly"
+                  :readonly="isViewMode"
+                  placeholder="备注或来源"
+                />
+              </label>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
       </div>
 
       <div
@@ -2395,12 +2406,11 @@ p {
   flex: 1 1 auto;
   min-height: 0;
   overflow-x: hidden;
-  overflow-y: auto;
+  overflow-y: hidden;
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding-bottom: 10px;
-  scrollbar-width: thin;
 }
 
 .inline-section {
@@ -2484,11 +2494,7 @@ p {
 
 .ai-inline-row button:not(:disabled) {
   border-color: rgba(var(--todo-primary-rgb), 0.24);
-  background: linear-gradient(
-    180deg,
-    rgba(var(--todo-primary-rgb), 0.92),
-    rgba(37, 99, 235, 0.9)
-  );
+  background: linear-gradient(180deg, rgba(var(--todo-primary-rgb), 0.92), rgba(37, 99, 235, 0.9));
   box-shadow: 0 10px 22px -18px rgba(var(--todo-primary-rgb), 0.55);
 }
 
@@ -2580,8 +2586,12 @@ p {
 
 .schedule-field-panel {
   display: grid;
-  gap: 10px;
+  gap: 0;
+  flex: 0 0 129px;
+  height: 129px;
   padding: 12px;
+  overflow: hidden;
+  contain: layout;
   border-radius: 16px;
   border: 1px solid var(--form-module-border, rgba(var(--todo-primary-rgb), 0.1));
   background: var(
@@ -2589,6 +2599,17 @@ p {
     linear-gradient(135deg, rgba(var(--todo-primary-rgb), 0.07), rgba(239, 246, 255, 0.88))
   );
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.schedule-mode-shell {
+  height: 105px;
+  overflow: hidden;
+}
+
+.schedule-mode-panel {
+  display: grid;
+  gap: 10px;
+  align-content: start;
 }
 
 .schedule-field-panel :deep(.deadline-datetime-grid) {
@@ -2649,6 +2670,7 @@ p {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  min-height: 34px;
 }
 
 .mode-switch {
@@ -3055,11 +3077,7 @@ p {
 
 .form-actions button[type='submit'] {
   border-color: rgba(var(--todo-primary-rgb), 0.24);
-  background: linear-gradient(
-    180deg,
-    rgba(var(--todo-primary-rgb), 0.92),
-    rgba(37, 99, 235, 0.9)
-  );
+  background: linear-gradient(180deg, rgba(var(--todo-primary-rgb), 0.92), rgba(37, 99, 235, 0.9));
   box-shadow: 0 10px 22px -18px rgba(var(--todo-primary-rgb), 0.55);
 }
 

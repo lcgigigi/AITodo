@@ -109,7 +109,9 @@ const emit = defineEmits<{
         >
           <div class="detail-assignee-progress-head">
             <span class="detail-field-label">接受人进度</span>
-            <span class="detail-assignee-progress-count">{{ panel.assigneeProgress.length }} 人</span>
+            <span class="detail-assignee-progress-count"
+              >{{ panel.assigneeProgress.length }} 人</span
+            >
           </div>
           <ul class="detail-assignee-progress-list">
             <li

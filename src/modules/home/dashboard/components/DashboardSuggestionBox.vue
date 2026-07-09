@@ -8,9 +8,12 @@ import IconSparkles from '~icons/lucide/sparkles'
 import IconX from '~icons/lucide/x'
 import { Button } from '@/components/ui/button'
 import {
-  submitSuggestion,
-  type SuggestionCategory,
-} from '@/modules/home/dashboard/suggestion.service'
+  DAILY_OPINION_LIMIT,
+  loadTodayOpinionCount,
+  submitOpinion,
+  toOpinionType,
+  type OpinionCategory,
+} from '@/modules/home/dashboard/opinion-box.service'
 import { useFeedbackStore } from '@/stores/feedback.store'
 import { useUserStore } from '@/stores/user.store'
 
@@ -32,15 +35,17 @@ const panelY = ref(24)
 const isDragging = ref(false)
 const isCollapsed = ref(false)
 
-const category = ref<SuggestionCategory>('feature')
+const category = ref<OpinionCategory>('feature')
 const content = ref('')
 const isSubmitting = ref(false)
+const todaySubmittedCount = ref(0)
+const isLoadingTodayCount = ref(false)
 
 let dragPointerId: number | null = null
 let dragOffsetX = 0
 let dragOffsetY = 0
 
-const categoryOptions: Array<{ value: SuggestionCategory; label: string; emoji: string }> = [
+const categoryOptions: Array<{ value: OpinionCategory; label: string; emoji: string }> = [
   { value: 'feature', label: '功能建议', emoji: '💡' },
   { value: 'experience', label: '体验感受', emoji: '✨' },
   { value: 'bug', label: '发现问题', emoji: '🐛' },
@@ -48,8 +53,23 @@ const categoryOptions: Array<{ value: SuggestionCategory; label: string; emoji: 
 ]
 
 const displayName = computed(() => userStore.profile?.name ?? '体验用户')
-const canSubmit = computed(() => content.value.trim().length >= 8 && !isSubmitting.value)
+const remainingSubmissions = computed(() =>
+  Math.max(0, DAILY_OPINION_LIMIT - todaySubmittedCount.value),
+)
+const hasReachedDailyLimit = computed(() => todaySubmittedCount.value >= DAILY_OPINION_LIMIT)
 const contentLength = computed(() => content.value.trim().length)
+const canSubmit = computed(
+  () =>
+    contentLength.value > 0 &&
+    !isSubmitting.value &&
+    !hasReachedDailyLimit.value &&
+    !isLoadingTodayCount.value,
+)
+const submissionHint = computed(() => {
+  if (isLoadingTodayCount.value) return '正在同步今日投递额度…'
+  if (hasReachedDailyLimit.value) return '今日已达 3 条上限，明天再来～'
+  return `今日还可投递 ${remainingSubmissions.value} 条`
+})
 const hasDraft = computed(() => contentLength.value > 0)
 const collapsedSummary = computed(() => {
   if (!hasDraft.value) return '点开继续写'
@@ -92,6 +112,16 @@ function resetForm() {
   content.value = ''
 }
 
+async function refreshTodayOpinionCount() {
+  isLoadingTodayCount.value = true
+
+  try {
+    todaySubmittedCount.value = await loadTodayOpinionCount()
+  } finally {
+    isLoadingTodayCount.value = false
+  }
+}
+
 function clampPosition(x: number, y: number) {
   const panel = panelRef.value
   const margin = 12
@@ -111,10 +141,7 @@ function setDefaultPosition() {
   const width = panel?.offsetWidth ?? 560
   const height = panel?.offsetHeight ?? 520
 
-  const position = clampPosition(
-    (window.innerWidth - width) / 2,
-    (window.innerHeight - height) / 2,
-  )
+  const position = clampPosition((window.innerWidth - width) / 2, (window.innerHeight - height) / 2)
 
   panelX.value = position.x
   panelY.value = position.y
@@ -142,10 +169,7 @@ function startDrag(event: PointerEvent) {
 function handleDragMove(event: PointerEvent) {
   if (dragPointerId === null || event.pointerId !== dragPointerId) return
 
-  const position = clampPosition(
-    event.clientX - dragOffsetX,
-    event.clientY - dragOffsetY,
-  )
+  const position = clampPosition(event.clientX - dragOffsetX, event.clientY - dragOffsetY)
 
   panelX.value = position.x
   panelY.value = position.y
@@ -165,6 +189,7 @@ watch(
       isCollapsed.value = false
       await nextTick()
       setDefaultPosition()
+      void refreshTodayOpinionCount()
       return
     }
 
@@ -172,6 +197,8 @@ watch(
     isSubmitting.value = false
     isDragging.value = false
     dragPointerId = null
+    todaySubmittedCount.value = 0
+    isLoadingTodayCount.value = false
     resetForm()
   },
 )
@@ -192,20 +219,24 @@ onBeforeUnmount(() => {
 
 async function handleSubmit() {
   const text = content.value.trim()
-  if (text.length < 8 || isSubmitting.value) return
+  if (!text || isSubmitting.value || hasReachedDailyLimit.value) return
 
   isSubmitting.value = true
 
   try {
-    await submitSuggestion({
-      category: category.value,
+    await submitOpinion({
       content: text,
-      viewMode: props.viewMode ?? undefined,
+      type: toOpinionType(category.value),
     })
     feedbackStore.success('心声已投递，感谢你的真诚反馈！')
     resetForm()
+    await refreshTodayOpinionCount()
   } catch (error) {
-    feedbackStore.error(error instanceof Error ? error.message : '建议提交失败，请稍后再试')
+    const message = error instanceof Error ? error.message : '建议提交失败，请稍后再试'
+    if (message.includes('3') || message.includes('上限') || message.includes('最多')) {
+      todaySubmittedCount.value = DAILY_OPINION_LIMIT
+    }
+    feedbackStore.error(message)
   } finally {
     isSubmitting.value = false
   }
@@ -285,70 +316,74 @@ async function handleSubmit() {
           </div>
 
           <header class="suggestion-panel__header" @pointerdown="startDrag">
-          <div class="suggestion-panel__hero" aria-hidden="true">
-            <span class="suggestion-panel__mailbox">
-              <IconMailbox />
-            </span>
-            <span class="suggestion-panel__sparkle suggestion-panel__sparkle--one">
-              <IconSparkles />
-            </span>
-            <span class="suggestion-panel__sparkle suggestion-panel__sparkle--two">
-              <IconSparkles />
-            </span>
-          </div>
-          <p class="suggestion-panel__kicker">Beta Feedback</p>
-          <h2 id="suggestion-box-title">体验建议箱</h2>
-          <p class="suggestion-panel__desc">
-            内测阶段，{{ displayName }} 的每一条想法都会被认真读完。吐槽、点赞、脑洞都欢迎～
-          </p>
-          <p class="suggestion-panel__drag-hint">拖到这里可移动，边用边写</p>
-        </header>
-
-        <div class="suggestion-panel__body">
-          <fieldset class="suggestion-categories">
-            <legend>你想聊什么？</legend>
-            <div class="suggestion-categories__list" role="radiogroup" aria-label="建议类型">
-              <button
-                v-for="option in categoryOptions"
-                :key="option.value"
-                type="button"
-                class="suggestion-category"
-                :class="{ 'is-selected': category === option.value }"
-                role="radio"
-                :aria-checked="category === option.value"
-                @click="category = option.value"
-              >
-                <span class="suggestion-category__emoji" aria-hidden="true">{{ option.emoji }}</span>
-                <span>{{ option.label }}</span>
-              </button>
+            <div class="suggestion-panel__hero" aria-hidden="true">
+              <span class="suggestion-panel__mailbox">
+                <IconMailbox />
+              </span>
+              <span class="suggestion-panel__sparkle suggestion-panel__sparkle--one">
+                <IconSparkles />
+              </span>
+              <span class="suggestion-panel__sparkle suggestion-panel__sparkle--two">
+                <IconSparkles />
+              </span>
             </div>
-          </fieldset>
+            <p class="suggestion-panel__kicker">Beta Feedback</p>
+            <h2 id="suggestion-box-title">体验建议箱</h2>
+            <p class="suggestion-panel__desc">
+              内测阶段，{{ displayName }} 的每一条想法都会被认真读完。吐槽、点赞、脑洞都欢迎～
+            </p>
+            <p class="suggestion-panel__drag-hint">拖到这里可移动，边用边写</p>
+          </header>
 
-          <label class="suggestion-field">
-            <span>写下你的想法</span>
-            <textarea
-              v-model="content"
-              class="suggestion-textarea"
-              rows="5"
-              maxlength="800"
-              placeholder="比如：某个按钮找不到、希望增加某某功能、哪里用着特别顺手…"
-            />
-            <em :class="{ 'is-ready': contentLength >= 8 }">{{ contentLength }} / 800</em>
-          </label>
-        </div>
+          <div class="suggestion-panel__body">
+            <fieldset class="suggestion-categories">
+              <legend>你想聊什么？</legend>
+              <div class="suggestion-categories__list" role="radiogroup" aria-label="建议类型">
+                <button
+                  v-for="option in categoryOptions"
+                  :key="option.value"
+                  type="button"
+                  class="suggestion-category"
+                  :class="{ 'is-selected': category === option.value }"
+                  role="radio"
+                  :aria-checked="category === option.value"
+                  @click="category = option.value"
+                >
+                  <span class="suggestion-category__emoji" aria-hidden="true">{{
+                    option.emoji
+                  }}</span>
+                  <span>{{ option.label }}</span>
+                </button>
+              </div>
+            </fieldset>
 
-        <footer class="suggestion-panel__footer">
-          <p class="suggestion-panel__hint">至少 8 个字，我们会带上你的视角一起改进产品。</p>
-          <Button
-            type="button"
-            class="suggestion-submit"
-            :disabled="!canSubmit"
-            @click="handleSubmit"
-          >
-            <IconSend aria-hidden="true" />
-            <span>{{ isSubmitting ? '投递中…' : '投递心声' }}</span>
-          </Button>
-        </footer>
+            <label class="suggestion-field">
+              <span>写下你的想法</span>
+              <textarea
+                v-model="content"
+                class="suggestion-textarea"
+                rows="5"
+                maxlength="800"
+                placeholder="比如：某个按钮找不到、希望增加某某功能、哪里用着特别顺手…"
+              />
+              <em :class="{ 'is-ready': contentLength > 0 }">{{ contentLength }} / 800</em>
+            </label>
+          </div>
+
+          <footer class="suggestion-panel__footer">
+            <p class="suggestion-panel__hint" :class="{ 'is-limit': hasReachedDailyLimit }">
+              {{ submissionHint }}
+            </p>
+            <Button
+              type="button"
+              class="suggestion-submit"
+              :disabled="!canSubmit"
+              @click="handleSubmit"
+            >
+              <IconSend aria-hidden="true" />
+              <span>{{ isSubmitting ? '投递中…' : '投递心声' }}</span>
+            </Button>
+          </footer>
         </template>
       </section>
     </Transition>
@@ -785,6 +820,10 @@ async function handleSubmit() {
   font-size: 12px;
   line-height: 1.45;
   font-weight: 650;
+}
+
+.suggestion-panel__hint.is-limit {
+  color: #dc2626;
 }
 
 .suggestion-submit {

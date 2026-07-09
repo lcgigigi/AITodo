@@ -733,7 +733,7 @@ describe('todo.service real backend adapter', () => {
     expect(events).toHaveLength(1)
     expect(events[0]).toMatchObject({
       id: '100',
-      title: '',
+      title: '跟进需求',
       content: '跟进需求',
       scope: 'assigned_by_me',
     })
@@ -765,7 +765,7 @@ describe('todo.service real backend adapter', () => {
     await expect(loadTodos(currentUser, assignableUsers)).resolves.toMatchObject([
       {
         id: '101',
-        title: '',
+        title: '跟进需求',
         content: '跟进需求',
       },
     ])
@@ -853,6 +853,36 @@ describe('todo.service real backend adapter', () => {
       startDate: '2026-05-01',
       endDate: '2026-05-31',
     })
+  })
+
+  it('filters malformed backend todos and falls back to content for the title', async () => {
+    vi.mocked(httpClient.request).mockResolvedValueOnce(
+      backendResponse([
+        {
+          title: '缺少 ID',
+          startDateShow: '2026-07-01 09:00:00',
+        },
+        {
+          id: 2,
+          title: '非法日期',
+          startDateShow: '2026-02-30 09:00:00',
+        },
+        {
+          id: 3,
+          title: '',
+          content: '来自内容字段的标题',
+          startDateShow: '2026-07-03 09:00:00',
+        },
+      ]) as never,
+    )
+
+    await expect(loadTodos(currentUser, assignableUsers)).resolves.toMatchObject([
+      {
+        id: '3',
+        date: '2026-07-03',
+        title: '来自内容字段的标题',
+      },
+    ])
   })
 
   it('builds month and week date ranges for calendar loading', () => {

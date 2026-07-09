@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  clearDesktopTodoDetailQuery,
-  getDesktopTodoDetailRequest,
-} from './desktopTodoQuery'
+import { clearDesktopTodoDetailQuery, getDesktopTodoDetailRequest } from './desktopTodoQuery'
 
 describe('desktopTodoQuery', () => {
   it('reads desktop todo detail query fields', () => {

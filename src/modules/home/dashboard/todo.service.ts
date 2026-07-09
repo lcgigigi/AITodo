@@ -1,5 +1,11 @@
 import type { AxiosRequestConfig } from 'axios'
 import { httpClient } from '@/shared/request/http'
+import {
+  SMART_TODO_REQUEST_TIMEOUT,
+  getResponseMessage,
+  toId,
+  type SmartTodoResponse,
+} from '@/shared/request/smart-todo-client'
 import type {
   CalendarEvent,
   CalendarEventStatus,
@@ -11,46 +17,6 @@ import type {
   SmartTodoKind,
 } from './types'
 import { compareEvents, ymd } from './todoDisplay'
-
-const SMART_TODO_REQUEST_TIMEOUT = 60_000
-const DEFAULT_LOGIN_USERNAME = import.meta.env.VITE_APP_TODO_USERNAME || 'admin'
-const DEFAULT_LOGIN_PASSWORD = import.meta.env.VITE_APP_TODO_PASSWORD || 'admin123'
-
-interface SmartTodoResponse<T = unknown> {
-  code?: number
-  msg?: string
-  message?: string
-  traceId?: string
-  data?: T | null
-  success?: boolean
-}
-
-interface SmartTodoLoginResponse extends SmartTodoResponse {
-  token?: string
-}
-
-interface SmartTodoInfoPayload {
-  user?: {
-    userId?: string | number
-    userName?: string
-    nickName?: string
-    avatar?: string
-    deptName?: string
-    department?: string
-    isSecurityPassword?: 'yes' | 'no'
-    checkEmail?: string | null
-  }
-  roles?: string[]
-  permissions?: string[]
-  checkEmail?: string | null
-}
-
-interface SmartTodoInfoResponse extends SmartTodoResponse<SmartTodoInfoPayload> {
-  user?: SmartTodoInfoPayload['user']
-  roles?: string[]
-  permissions?: string[]
-  checkEmail?: string | null
-}
 
 interface SmartTodoBackendUser {
   badge?: string | number
@@ -133,29 +99,6 @@ interface SmartTodoCreatePayload {
   type: SmartTodoKind
 }
 
-export interface SmartTodoLoginCredentials {
-  username?: string
-  password?: string
-}
-
-export interface SmartTodoCurrentUser extends CalendarUser {
-  roles: string[]
-  permissions: string[]
-  isSecurityPassword?: 'yes' | 'no'
-  checkEmail?: string | null
-}
-
-export type SmartTodoEmailProvider = 'outlook' | 'coremail'
-
-function getResponseMessage(response: SmartTodoResponse, fallbackMessage: string) {
-  return response.msg || response.message || fallbackMessage
-}
-
-function getOptionalText(value: unknown) {
-  if (value === null || value === undefined) return undefined
-  return String(value).trim()
-}
-
 function unwrapSmartTodoResponse<T>(response: SmartTodoResponse<T>, fallbackMessage: string): T {
   if (response.success === false) {
     throw new Error(getResponseMessage(response, fallbackMessage))
@@ -181,12 +124,13 @@ async function requestSmartTodoData<T>(config: AxiosRequestConfig, fallbackMessa
   return unwrapSmartTodoResponse(response.data, fallbackMessage)
 }
 
-function toId(value?: string | number | null) {
-  return value === null || value === undefined ? '' : String(value).trim()
-}
+function isValidDateText(value?: string | null) {
+  const trimmed = value?.trim()
+  if (!trimmed || !/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return false
 
-function todayDate() {
-  return ymd(new Date())
+  const [year, month, day] = trimmed.split('-').map(Number)
+  const date = new Date(year, month - 1, day)
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
 }
 
 function normalizeBackendTime(time?: string | null) {
@@ -236,7 +180,7 @@ function parseDateTimeShow(value?: string | null, preserveMidnight = false) {
   }
 
   const [datePart, timePart] = trimmed.split(/\s+/)
-  if (!datePart || !/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+  if (!isValidDateText(datePart)) {
     return {
       date: undefined,
       time: undefined,
@@ -268,8 +212,7 @@ function resolveAnalyzeTimeType(value?: number | string | null): 1 | 2 {
 }
 
 function isValidAnalyzeDate(value?: string | null) {
-  const trimmed = value?.trim()
-  return Boolean(trimmed && /^\d{4}-\d{2}-\d{2}$/.test(trimmed))
+  return isValidDateText(value)
 }
 
 function normalizeAnalyzeSchedule(data: SmartTodoAnalyzeData) {
@@ -349,10 +292,6 @@ function resolveAssigneeIds(assigneeId?: string | number | null, assigneeIds?: s
   return ''
 }
 
-function resolveRole(roles: string[] = []): CalendarUser['role'] {
-  return roles.some((role) => ['admin', 'leader'].includes(role)) ? 'leader' : 'employee'
-}
-
 function createUserMap(users: CalendarUser[]) {
   return new Map(users.map((user) => [user.id, user]))
 }
@@ -380,9 +319,10 @@ function normalizeBackendTodo(
   item: SmartTodoBackendItem,
   currentUser: CalendarUser,
   users: CalendarUser[] = [],
-): CalendarEvent {
+): CalendarEvent | null {
   const userMap = createUserMap(users)
-  const id = toId(item.id) || `todo-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const id = toId(item.id)
+  if (!id) return null
   const assigneeId = resolveAssigneeIds(item.assigneeId, item.assigneeIds)
   const creatorId = toId(item.creatorId)
   const currentHandlerId = toId(item.currentHandlerId) || toId(item.handlerId)
@@ -410,9 +350,11 @@ function normalizeBackendTodo(
   const endDateShow = item.endDateShow || normalizeIsoDateTimeShow(item.endDate)
   const start = parseDateTimeShow(startDateShow, preserveMidnight)
   const end = parseDateTimeShow(endDateShow, preserveMidnight)
-  const date = start.date || todayDate()
+  const date = start.date
+  if (!date) return null
   const endDate = timeType === 2 ? end.date || date : undefined
-  const title = item.title?.trim() || ''
+  const title = item.title?.trim() || item.content?.trim() || ''
+  if (!title) return null
   const status = mapBackendStatus(item.status)
   const isRejected = item.status === 9
   const completable = isRejected
@@ -474,6 +416,7 @@ function normalizeBackendTodos(
 ) {
   return dedupeLinkedBackendTodoItems(items.filter((item) => item.status !== 99))
     .map((item) => normalizeBackendTodo(item, currentUser, users))
+    .filter((item): item is CalendarEvent => Boolean(item))
     .sort(compareEvents)
 }
 
@@ -481,8 +424,7 @@ function matchAssignableUser(token: string, assignableUsers: CalendarUser[]) {
   if (!token) return undefined
 
   return assignableUsers.find(
-    (user) =>
-      user.id === token || user.name === token || token.includes(user.name),
+    (user) => user.id === token || user.name === token || token.includes(user.name),
   )
 }
 
@@ -505,7 +447,9 @@ function findAssignees(
     return findAssignee(assigneeId, currentUser, assignableUsers, fallback)
   }
 
-  const matched = ids.map((token) => matchAssignableUser(token, assignableUsers) ?? { id: token, name: token })
+  const matched = ids.map(
+    (token) => matchAssignableUser(token, assignableUsers) ?? { id: token, name: token },
+  )
 
   return {
     id: matched.map((user) => user.id).join(','),
@@ -639,98 +583,19 @@ function buildIds(ids: string | string[]) {
   return Array.isArray(ids) ? ids.join(',') : ids
 }
 
-export async function loginSmartTodo(credentials: SmartTodoLoginCredentials = {}) {
-  const response = await httpClient.post<SmartTodoLoginResponse>(
-    '/login',
-    {
-      username: credentials.username || DEFAULT_LOGIN_USERNAME,
-      password: credentials.password || DEFAULT_LOGIN_PASSWORD,
-    },
-    {
-      timeout: SMART_TODO_REQUEST_TIMEOUT,
-      showError: false,
-    },
-  )
-
-  if (typeof response.data.code === 'number' && response.data.code !== 200) {
-    throw new Error(getResponseMessage(response.data, '登录失败'))
-  }
-
-  if (!response.data.token) {
-    throw new Error(getResponseMessage(response.data, '登录失败，后台未返回 token'))
-  }
-
-  return response.data.token
-}
-
-export async function logoutSmartTodo() {
-  const response = await httpClient.post<SmartTodoResponse>('/logout', undefined, {
-    timeout: SMART_TODO_REQUEST_TIMEOUT,
-  })
-
-  if (typeof response.data.code === 'number' && response.data.code !== 200) {
-    throw new Error(getResponseMessage(response.data, '退出登录失败'))
-  }
-}
-
-export async function loadCurrentUser(options?: {
-  silent?: boolean
-}): Promise<SmartTodoCurrentUser> {
-  const response = await httpClient.get<SmartTodoInfoResponse>('/getInfo', {
-    timeout: SMART_TODO_REQUEST_TIMEOUT,
-    showError: !options?.silent,
-  })
-  const result = response.data
-
-  if (typeof result.code === 'number' && result.code !== 200) {
-    throw new Error(getResponseMessage(result, '获取当前用户失败'))
-  }
-
-  const info = result.data && typeof result.data === 'object' ? result.data : result
-  const user = info.user
-
-  if (!user) {
-    throw new Error(getResponseMessage(result, '获取当前用户失败'))
-  }
-
-  const roles = info.roles ?? []
-  const id = user.userName || toId(user.userId)
-  const checkEmail = getOptionalText(user.checkEmail) || getOptionalText(info.checkEmail)
-
-  return {
-    id,
-    name: user.nickName || user.userName || id || '未命名用户',
-    avatar: user.avatar,
-    department: user.department || user.deptName,
-    role: resolveRole(roles),
-    roles,
-    permissions: info.permissions ?? [],
-    isSecurityPassword: user.isSecurityPassword,
-    checkEmail,
-  }
-}
-
-export async function selectEmailProvider(provider: SmartTodoEmailProvider) {
-  const choice = provider === 'outlook' ? 1 : 2
-  const response = await httpClient.request<SmartTodoResponse>({
-    method: 'POST',
-    url: '/smart-todo/select-email',
-    params: { choice },
-    timeout: SMART_TODO_REQUEST_TIMEOUT,
-    showError: false,
-  })
-  const result = response.data
-
-  if (typeof result.code === 'number' && result.code !== 200) {
-    throw new Error(getResponseMessage(result, '邮箱类型确认失败'))
-  }
-
-  if (result.success === false) {
-    throw new Error(getResponseMessage(result, '邮箱类型确认失败'))
-  }
-
-  return true
-}
+// 认证相关接口已迁移至 auth 模块（src/modules/auth/services/auth.service.ts）。
+// 为兼容既有引用（测试、store、DashboardTopBar、DashboardPage 等），此处保留 re-export。
+export {
+  loginSmartTodo,
+  logoutSmartTodo,
+  loadCurrentUser,
+  selectEmailProvider,
+} from '@/modules/auth/services/auth.service'
+export type {
+  SmartTodoLoginCredentials,
+  SmartTodoCurrentUser,
+  SmartTodoEmailProvider,
+} from '@/modules/auth/services/auth.service'
 
 export async function analyzeTodoText(
   text: string,
@@ -893,9 +758,7 @@ function extractChildTodoList(
 ) {
   if (!data || typeof data !== 'object' || !('childTodoList' in data)) return []
 
-  return (data.childTodoList ?? []).filter(
-    (item): item is SmartTodoBackendItem => Boolean(item),
-  )
+  return (data.childTodoList ?? []).filter((item): item is SmartTodoBackendItem => Boolean(item))
 }
 
 export async function loadTodoDetail(
@@ -917,8 +780,12 @@ export async function loadTodoDetail(
   }
 
   const todo = normalizeBackendTodo(item, currentUser, users)
+  if (!todo) {
+    throw new Error('查询待办详情失败，返回数据不完整')
+  }
   const childTodos = extractChildTodoList(data)
     .map((child) => normalizeBackendTodo(child, currentUser, users))
+    .filter((child): child is CalendarEvent => Boolean(child))
     .sort(compareEvents)
 
   if (childTodos.length) {

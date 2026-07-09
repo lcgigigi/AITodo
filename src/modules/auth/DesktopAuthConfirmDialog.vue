@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { routeConfig } from '@/config/route.config'
 import { useUserStore } from '@/stores/user.store'
-import { loadCurrentUser } from '@/modules/home/dashboard/todo.service'
+import { loadCurrentUser } from '@/modules/auth/services/auth.service'
 import {
   buildDesktopAuthCallbackUrl,
   getDesktopAuthRequest,

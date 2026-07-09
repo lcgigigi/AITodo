@@ -84,7 +84,9 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
     teamMemberIds: userStore.profile?.teamMemberIds,
   }))
 
-  const inboxItems = computed(() => buildInboxItems(pendingTodos.value, sysMessages.value))
+  const inboxItems = computed(() =>
+    buildInboxItems(pendingTodos.value, sysMessages.value, assignableUsers.value),
+  )
   const filteredInboxItems = computed(() => filterInboxItems(inboxItems.value, inboxFilter.value))
   const actionableInboxCount = computed(() => countActionableInboxItems(inboxItems.value))
   const unreadNotificationCount = computed(() => actionableInboxCount.value)
@@ -415,10 +417,7 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
   async function refreshInbox(options?: { silent?: boolean }) {
     inboxError.value = ''
     const silent = options?.silent ?? (pendingTodosLoaded.value && sysMessagesLoaded.value)
-    await Promise.all([
-      refreshPendingTodos({ silent }),
-      refreshSysMessages(1, { silent }),
-    ])
+    await Promise.all([refreshPendingTodos({ silent }), refreshSysMessages(1, { silent })])
   }
 
   function resetPendingAction() {

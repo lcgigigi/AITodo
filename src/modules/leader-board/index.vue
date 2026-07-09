@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import type { Component, ComponentPublicInstance } from 'vue'
+import type { Component } from 'vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import * as echarts from 'echarts'
+import * as echarts from 'echarts/core'
 import IconBlocks from '~icons/lucide/blocks'
 import IconBox from '~icons/lucide/box'
 import IconBriefcaseBusiness from '~icons/lucide/briefcase-business'
@@ -18,16 +18,14 @@ import IconTrendingUp from '~icons/lucide/trending-up'
 import IconTrophy from '~icons/lucide/trophy'
 import IconUserRound from '~icons/lucide/user-round'
 import {
-  getMonthDateRange,
-  getYearDateRange,
-  isDateInRange,
+  getCurrentMonthKey,
   loadAdminTokenDashboard,
-  sumDailyInRange,
+  type AdminTokenQueryType,
   type AdminTokenUsageDashboard,
-  type AdminTokenUsageModule,
-  type TokenUsageDateRange,
 } from '@/modules/token-usage/token-usage.service'
+import { formatTokenCompact, formatTokenNumber } from '@/modules/token-usage/token-usage.formatters'
 import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
+import { useECharts } from '@/shared/composables/useECharts'
 
 defineOptions({
   name: 'LeaderBoardPage',
@@ -40,10 +38,8 @@ interface DepartmentUsage {
   tokens: string
   value: number
   share: number
-  change?: number
   color: string
   icon: Component
-  trend: number[]
 }
 
 interface AppUsage {
@@ -76,36 +72,50 @@ interface TrendDataset {
 
 const timeModes = ['月', '年']
 
-function getCurrentYearMonth() {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-}
-
 const selectedTimeMode = ref('月')
-const selectedMonth = ref(getCurrentYearMonth())
+const selectedMonth = ref(getCurrentMonthKey())
 const tokenDashboard = ref<AdminTokenUsageDashboard | null>(null)
 const isDashboardLoading = ref(true)
 const dashboardError = ref('')
 
-const dashboardDateRange = computed<TokenUsageDateRange>(() => {
-  if (selectedTimeMode.value === '年') {
-    const year = Number(selectedMonth.value.split('-')[0])
-    return getYearDateRange(year)
+const dashboardQueryType = computed<AdminTokenQueryType>(() =>
+  selectedTimeMode.value === '年' ? 'year' : 'month',
+)
+
+function formatPeriodPoint(period: string, queryType: AdminTokenQueryType) {
+  if (queryType === 'year') {
+    const [, month] = period.split('-')
+    return month ? `${Number(month)}月` : period
   }
 
-  return getMonthDateRange(selectedMonth.value)
+  const [, month, day] = period.split('-')
+  return month && day ? `${month}-${day}` : period
+}
+
+function formatPeriodRangeValue(value: string) {
+  if (value.length === 7) return value
+
+  const [, month, day] = value.split('-')
+  return month && day ? `${month}-${day}` : value
+}
+
+const periodRangeLabel = computed(() => {
+  const dashboard = tokenDashboard.value
+  if (!dashboard?.startPeriod || !dashboard?.endPeriod) return '同步中…'
+
+  return `${formatPeriodRangeValue(dashboard.startPeriod)} ~ ${formatPeriodRangeValue(dashboard.endPeriod)}`
 })
 
 const periodDisplayName = computed(() => {
-  const [yearText, monthText] = selectedMonth.value.split('-')
-  const year = Number(yearText)
-  const month = Number(monthText)
+  const rangeLabel = periodRangeLabel.value
 
   if (selectedTimeMode.value === '年') {
-    return Number.isFinite(year) ? `${year}年` : '本年度'
+    return rangeLabel === '同步中…' ? '当年累计' : `当年累计（${rangeLabel}）`
   }
 
-  return Number.isFinite(year) && Number.isFinite(month) ? `${year}年${month}月` : '本月'
+  return rangeLabel === '同步中…'
+    ? `${selectedMonth.value} 全月`
+    : `${selectedMonth.value} 全月（${rangeLabel}）`
 })
 
 const departmentColors = ['#1273f8', '#7a5cff', '#1fb7e8', '#18bf9e', '#ff9418', '#6a6cff']
@@ -132,87 +142,9 @@ const boardOffsetY = ref(0)
 
 const trendChartRef = ref<HTMLElement | null>(null)
 const appDonutChartRef = ref<HTMLElement | null>(null)
-const departmentSparklineRefs = ref<Record<string, HTMLElement | null>>({})
 
-const chartInstances = new Set<echarts.ECharts>()
+const { getChart, resizeCharts, disposeCharts } = useECharts()
 let resizeObserver: ResizeObserver | null = null
-
-let currentDisplayedTotal = 0
-let trendLiveTimer: number | null = null
-const FLIP_HALF_MS = 220
-const FLIP_OVERLAP_MS = 90
-const FLIP_DURATION_MS = FLIP_HALF_MS + FLIP_OVERLAP_MS
-
-function renderFlipDigit(char: string) {
-  return `
-    <span class="flip-digit" data-value="${char}">
-      <span class="flip-top"><span class="flip-line">${char}</span></span>
-      <span class="flip-bottom"><span class="flip-line">${char}</span></span>
-      <span class="flip-top-flip"><span class="flip-line">${char}</span></span>
-      <span class="flip-bottom-flip"><span class="flip-line">${char}</span></span>
-    </span>
-  `
-}
-
-function renderScoreboardText(text: string) {
-  return text
-    .split('')
-    .map((char) => {
-      if (char === ':' || char === '.') {
-        return `<span class="score-separator">${char}</span>`
-      }
-      return renderFlipDigit(char)
-    })
-    .join('')
-}
-
-function triggerFlipDigit(el: HTMLElement, newChar: string) {
-  const oldChar = el.dataset.value ?? newChar
-  if (oldChar === newChar || el.classList.contains('is-flipping')) return
-
-  const topLine = el.querySelector('.flip-top .flip-line')
-  const bottomLine = el.querySelector('.flip-bottom .flip-line')
-  const topFlipLine = el.querySelector('.flip-top-flip .flip-line')
-  const bottomFlipLine = el.querySelector('.flip-bottom-flip .flip-line')
-  if (!topLine || !bottomLine || !topFlipLine || !bottomFlipLine) return
-
-  // 新数字先写入静态上层，翻页过程中作为底层承接，避免翻到 90° 后出现空白
-  topLine.textContent = newChar
-  topFlipLine.textContent = oldChar
-  bottomFlipLine.textContent = newChar
-
-  el.classList.remove('is-flipping')
-  void el.offsetWidth
-  el.classList.add('is-flipping')
-
-  window.setTimeout(() => {
-    bottomLine.textContent = newChar
-    topFlipLine.textContent = newChar
-    bottomFlipLine.textContent = newChar
-    el.dataset.value = newChar
-    el.classList.remove('is-flipping')
-  }, FLIP_DURATION_MS)
-}
-
-function updateScoreboardDigits(container: HTMLElement, nextText: string) {
-  const flipDigits = Array.from(container.querySelectorAll<HTMLElement>('.flip-digit'))
-  const nextDigitChars = nextText.split('').filter((char) => char !== ':' && char !== '.')
-
-  if (flipDigits.length !== nextDigitChars.length) {
-    const unit = container.querySelector('.score-unit')
-    container.innerHTML = renderScoreboardText(nextText)
-    if (unit) container.appendChild(unit)
-    return
-  }
-
-  flipDigits.forEach((el, index) => {
-    const nextChar = nextDigitChars[index]
-    if (!nextChar) return
-    if ((el.dataset.value ?? '') !== nextChar) {
-      triggerFlipDigit(el, nextChar)
-    }
-  })
-}
 
 const boardCanvasStyle = computed(() => ({
   width: `${BOARD_DESIGN_WIDTH}px`,
@@ -240,183 +172,52 @@ function createTrendDataset(
   }
 }
 
-function getTrendDatesInRange(range: TokenUsageDateRange) {
-  const dates = new Set<string>()
-
-  for (const dept of tokenDashboard.value?.deptList ?? []) {
-    for (const module of dept.moduleList) {
-      for (const point of module.dailyList) {
-        if (isDateInRange(point.usageDate, range)) {
-          dates.add(point.usageDate)
-        }
-      }
-    }
-  }
-
-  return [...dates].sort()
-}
-
-function formatDateLabel(date: string) {
-  const [, month, day] = date.split('-')
-  return month && day ? `${month}-${day}` : date
-}
-
-function formatTokenNumber(value: number) {
-  return Math.round(value).toLocaleString('zh-CN')
-}
-
-function formatTokenCompact(value: number) {
-  return new Intl.NumberFormat('zh-CN', {
-    notation: 'compact',
-    maximumFractionDigits: 1,
-  }).format(value)
-}
-
-function aggregateModuleDailyList(moduleList: AdminTokenUsageModule[], dates: string[]) {
-  return dates.map((date) =>
-    moduleList.reduce((sum, module) => {
-      const point = module.dailyList.find((item) => item.usageDate === date)
-      return sum + (point?.tokenUsage ?? 0)
-    }, 0),
-  )
-}
-
-function aggregateModuleMonthlyTrend(moduleList: AdminTokenUsageModule[], range: TokenUsageDateRange) {
-  const monthMap = new Map<string, number>()
-
-  for (const module of moduleList) {
-    for (const point of module.dailyList) {
-      if (!isDateInRange(point.usageDate, range)) continue
-      const monthKey = point.usageDate.slice(0, 7)
-      monthMap.set(monthKey, (monthMap.get(monthKey) ?? 0) + point.tokenUsage)
-    }
-  }
-
-  const months = [...monthMap.keys()].sort()
-  return months.map((monthKey) => monthMap.get(monthKey) ?? 0)
-}
-
 const trendDataset = computed(() => {
-  const range = dashboardDateRange.value
-
-  if (selectedTimeMode.value === '年') {
-    const monthMap = new Map<string, number>()
-
-    for (const dept of tokenDashboard.value?.deptList ?? []) {
-      for (const module of dept.moduleList) {
-        for (const point of module.dailyList) {
-          if (!isDateInRange(point.usageDate, range)) continue
-          const monthKey = point.usageDate.slice(0, 7)
-          monthMap.set(monthKey, (monthMap.get(monthKey) ?? 0) + point.tokenUsage)
-        }
-      }
-    }
-
-    const months = [...monthMap.keys()].sort()
-    const totals = months.map((monthKey) => monthMap.get(monthKey) ?? 0)
-    const labels = months.map((monthKey) => {
-      const [, month] = monthKey.split('-')
-      return `${Number(month)}月`
-    })
-
-    if (totals.length) {
-      return createTrendDataset(labels, totals, months.length - 1)
-    }
-
+  const dashboard = tokenDashboard.value
+  if (!dashboard?.trendList.length) {
     return createTrendDataset([periodDisplayName.value], [0], 0)
   }
 
-  const selectedDates = getTrendDatesInRange(range)
-  const totals = selectedDates.map((date) =>
-    (tokenDashboard.value?.deptList ?? []).reduce((deptSum, dept) => {
-      const moduleTotal = dept.moduleList.reduce((moduleSum, module) => {
-        const point = module.dailyList.find((item) => item.usageDate === date)
-        return moduleSum + (point?.tokenUsage ?? 0)
-      }, 0)
-
-      return deptSum + moduleTotal
-    }, 0),
+  const labels = dashboard.trendList.map((point) =>
+    formatPeriodPoint(point.period, dashboard.queryType),
   )
+  const totals = dashboard.trendList.map((point) => point.tokenUsage)
 
-  if (totals.length) {
-    return createTrendDataset(selectedDates.map(formatDateLabel), totals, selectedDates.length - 1)
-  }
-
-  return createTrendDataset([periodDisplayName.value], [0], 0)
+  return createTrendDataset(labels, totals, totals.length - 1)
 })
 
 const departments = computed<DepartmentUsage[]>(() => {
-  const range = dashboardDateRange.value
-  const total = (tokenDashboard.value?.deptList ?? []).reduce(
-    (sum, dept) =>
-      sum +
-      dept.moduleList.reduce(
-        (moduleSum, module) => moduleSum + sumDailyInRange(module.dailyList, range),
-        0,
-      ),
-    0,
-  )
-  const trendDates =
-    selectedTimeMode.value === '年'
-      ? []
-      : getTrendDatesInRange(range)
+  const list = tokenDashboard.value?.deptDistributionList ?? []
+  const total = list.reduce((sum, dept) => sum + dept.tokenUsage, 0)
 
-  return (tokenDashboard.value?.deptList ?? [])
-    .map((dept, index) => {
-      const value = dept.moduleList.reduce(
-        (sum, module) => sum + sumDailyInRange(module.dailyList, range),
-        0,
-      )
-      const color = departmentColors[index % departmentColors.length]
-      const trend =
-        selectedTimeMode.value === '年'
-          ? aggregateModuleMonthlyTrend(dept.moduleList, range)
-          : aggregateModuleDailyList(dept.moduleList, trendDates)
-
-      return {
-        id: dept.deptId || dept.deptName,
-        rank: index + 1,
-        name: dept.deptName,
-        tokens: formatTokenCompact(value),
-        value,
-        share: total > 0 ? (value / total) * 100 : 0,
-        color,
-        icon: departmentIcons[index % departmentIcons.length],
-        trend,
-      }
-    })
-    .sort((a, b) => b.value - a.value)
-    .map((department, index) => ({
-      ...department,
+  return [...list]
+    .sort((a, b) => b.tokenUsage - a.tokenUsage)
+    .map((dept, index) => ({
+      id: dept.deptId || dept.deptName,
       rank: index + 1,
+      name: dept.deptName,
+      tokens: formatTokenCompact(dept.tokenUsage),
+      value: dept.tokenUsage,
+      share: total > 0 ? (dept.tokenUsage / total) * 100 : 0,
+      color: departmentColors[index % departmentColors.length],
+      icon: departmentIcons[index % departmentIcons.length],
     }))
 })
 
 const appUsages = computed<AppUsage[]>(() => {
-  const range = dashboardDateRange.value
-  const moduleMap = new Map<string, { name: string; value: number }>()
+  const list = tokenDashboard.value?.moduleDistributionList ?? []
+  const total = list.reduce((sum, module) => sum + module.tokenUsage, 0)
 
-  for (const dept of tokenDashboard.value?.deptList ?? []) {
-    for (const module of dept.moduleList) {
-      const key = module.moduleCode || module.moduleName
-      const current = moduleMap.get(key) ?? { name: module.moduleName, value: 0 }
-      current.value += sumDailyInRange(module.dailyList, range)
-      moduleMap.set(key, current)
-    }
-  }
-
-  const total = [...moduleMap.values()].reduce((sum, module) => sum + module.value, 0)
-
-  return [...moduleMap.entries()]
-    .map(([moduleCode, module]) => ({
-      id: moduleCode,
-      name: module.name,
-      tokens: formatTokenCompact(module.value),
-      value: module.value,
-      share: total > 0 ? (module.value / total) * 100 : 0,
-      color: moduleColors[moduleCode] ?? '#8196bf',
+  return [...list]
+    .sort((a, b) => b.tokenUsage - a.tokenUsage)
+    .map((module) => ({
+      id: module.moduleCode,
+      name: module.moduleName,
+      tokens: formatTokenCompact(module.tokenUsage),
+      value: module.tokenUsage,
+      share: total > 0 ? (module.tokenUsage / total) * 100 : 0,
+      color: moduleColors[module.moduleCode] ?? '#8196bf',
     }))
-    .sort((a, b) => b.value - a.value)
 })
 
 const departmentStats = computed<StatCard[]>(() => {
@@ -426,7 +227,7 @@ const departmentStats = computed<StatCard[]>(() => {
     {
       id: 'total',
       label: '总部门数',
-      value: formatTokenNumber(tokenDashboard.value?.deptList.length ?? 0),
+      value: formatTokenNumber(tokenDashboard.value?.deptDistributionList.length ?? 0),
       meta: '二级部门',
       icon: IconBuilding2,
       tone: 'blue',
@@ -442,7 +243,7 @@ const departmentStats = computed<StatCard[]>(() => {
     {
       id: 'usage',
       label: '部门总消耗',
-      value: formatTokenCompact(departments.value.reduce((sum, dept) => sum + dept.value, 0)),
+      value: formatTokenCompact(tokenDashboard.value?.totalTokenUsage ?? 0),
       meta: periodDisplayName.value,
       icon: IconTrendingUp,
       tone: 'blue',
@@ -473,7 +274,7 @@ const appStats = computed<StatCard[]>(() => {
     {
       id: 'total',
       label: '总消耗',
-      value: formatTokenCompact(appUsages.value.reduce((sum, app) => sum + app.value, 0)),
+      value: formatTokenCompact(tokenDashboard.value?.totalTokenUsage ?? 0),
       meta: periodDisplayName.value,
       icon: IconBlocks,
       tone: 'purple',
@@ -485,7 +286,17 @@ const maxDepartmentValue = computed(() =>
   Math.max(...departments.value.map((dept) => dept.value), 1),
 )
 const maxAppValue = computed(() => Math.max(...appUsages.value.map((app) => app.value), 1))
-const hasDashboardContent = computed(() => Boolean(tokenDashboard.value?.deptList.length))
+const hasDashboardContent = computed(() => {
+  const dashboard = tokenDashboard.value
+  if (!dashboard) return false
+
+  return (
+    dashboard.totalTokenUsage > 0 ||
+    dashboard.deptDistributionList.length > 0 ||
+    dashboard.moduleDistributionList.length > 0 ||
+    dashboard.trendList.length > 0
+  )
+})
 const dashboardStateType = computed<'loading' | 'empty' | 'error' | null>(() => {
   if (isDashboardLoading.value && !hasDashboardContent.value) return 'loading'
   if (dashboardError.value) return 'error'
@@ -513,22 +324,6 @@ const chartTextStyle = {
     '"Avenir Next", "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif',
 }
 
-function resolveElement(el: Element | ComponentPublicInstance | null): HTMLElement | null {
-  return el instanceof HTMLElement ? el : null
-}
-
-function setDepartmentSparklineRef(id: string, el: Element | ComponentPublicInstance | null) {
-  departmentSparklineRefs.value[id] = resolveElement(el)
-}
-
-function getChart(el: HTMLElement | null) {
-  if (!el) return null
-
-  const chart = echarts.getInstanceByDom(el) ?? echarts.init(el, undefined, { renderer: 'canvas' })
-  chartInstances.add(chart)
-  return chart
-}
-
 function formatTrendAxis(value: number) {
   return value === 0 ? '0' : formatTokenCompact(value)
 }
@@ -542,25 +337,6 @@ function makeAreaGradient(color: string) {
 
 function getProgressWidth(value: number, maxValue: number) {
   return `${Math.max(8, (value / Math.max(maxValue, 1)) * 100)}%`
-}
-
-function showDefaultTrendTip(chart: echarts.ECharts) {
-  const dataset = trendDataset.value
-
-  requestAnimationFrame(() => {
-    chart.dispatchAction({
-      type: 'showTip',
-      seriesIndex: 0,
-      dataIndex: dataset.selectedIndex,
-    })
-  })
-}
-
-function bindTrendChartInteraction(chart: echarts.ECharts) {
-  chart.off('globalout')
-  chart.on('globalout', () => {
-    showDefaultTrendTip(chart)
-  })
 }
 
 function renderTrendChart() {
@@ -579,13 +355,9 @@ function renderTrendChart() {
       tooltip: {
         trigger: 'axis',
         confine: true,
-        alwaysShowContent: true,
         borderWidth: 0,
         backgroundColor: 'rgba(255, 255, 255, 0.96)',
-        padding: [28, 36],
-        shadowBlur: 32,
-        shadowColor: 'rgba(26, 77, 145, 0.16)',
-        borderRadius: 16,
+        textStyle: { ...chartTextStyle, color: '#0d1d4a', fontWeight: 700 },
         formatter: (params: unknown) => {
           const list = Array.isArray(params) ? params : []
           const title = (list[0] as { axisValueLabel?: string } | undefined)?.axisValueLabel ?? ''
@@ -593,46 +365,7 @@ function renderTrendChart() {
             (item) => (item as { seriesName?: string }).seriesName === '总量',
           ) as { value?: number } | undefined
 
-          const isCurrent = title === dataset.selectedLabel
-          let timeStr = ''
-          if (isCurrent) {
-            const now = new Date()
-            timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
-          } else {
-            const match = title.match(/(\d+)(:\d+)?/)
-            if (match) {
-              const h = match[1].padStart(2, '0')
-              const m = match[2] ? match[2].substring(1) : '00'
-              timeStr = `${h}:${m}:00`
-            } else {
-              timeStr = title
-            }
-          }
-
-          let totalVal = Number(point?.value ?? 0)
-          if (isCurrent && currentDisplayedTotal > 0) {
-            totalVal = currentDisplayedTotal
-          }
-
-          const timeId = isCurrent ? 'id="live-time-digits"' : ''
-          const tokenId = isCurrent ? 'id="live-token-digits"' : ''
-
-          return `
-            <div class="token-scoreboard">
-              <div class="score-section">
-                <div class="score-label">${isCurrent ? '当前时间' : '记录时间'}</div>
-                <div class="score-digits" ${timeId}>
-                  ${renderScoreboardText(timeStr)}
-                </div>
-              </div>
-              <div class="score-section">
-                <div class="score-label">Token 消耗总量</div>
-                <div class="score-digits" ${tokenId}>
-                  ${renderScoreboardText(formatTokenNumber(totalVal))}<span class="score-unit">Tokens</span>
-                </div>
-              </div>
-            </div>
-          `
+          return `${title}<br/>${formatTokenNumber(Number(point?.value ?? 0))} Tokens`
         },
       },
       xAxis: {
@@ -698,12 +431,9 @@ function renderTrendChart() {
           z: 9,
         },
       ],
-    } as echarts.EChartsOption,
+    } as echarts.EChartsCoreOption,
     true,
   )
-
-  bindTrendChartInteraction(chart)
-  showDefaultTrendTip(chart)
 }
 
 function renderAppDonutChart() {
@@ -771,37 +501,7 @@ function renderAppDonutChart() {
           })),
         },
       ],
-    } as echarts.EChartsOption,
-    true,
-  )
-}
-
-function renderDepartmentSparkline(department: DepartmentUsage) {
-  const chart = getChart(departmentSparklineRefs.value[department.id] ?? null)
-  if (!chart) return
-  const trend = department.trend.length ? department.trend : [0]
-
-  chart.setOption(
-    {
-      animationDuration: 520,
-      grid: { top: 4, right: 2, bottom: 4, left: 2 },
-      xAxis: { type: 'category', show: false, data: trend.map((_, index) => index) },
-      yAxis: {
-        type: 'value',
-        show: false,
-        min: Math.max(0, Math.min(...trend) * 0.9),
-        max: Math.max(...trend, 1) * 1.1,
-      },
-      series: [
-        {
-          type: 'line',
-          data: trend,
-          smooth: true,
-          symbol: 'none',
-          lineStyle: { width: 2, color: department.color },
-        },
-      ],
-    } as echarts.EChartsOption,
+    } as echarts.EChartsCoreOption,
     true,
   )
 }
@@ -809,11 +509,6 @@ function renderDepartmentSparkline(department: DepartmentUsage) {
 function renderAllCharts() {
   renderTrendChart()
   renderAppDonutChart()
-  departments.value.forEach(renderDepartmentSparkline)
-}
-
-function resizeCharts() {
-  chartInstances.forEach((chart) => chart.resize())
 }
 
 function updateBoardScale() {
@@ -838,11 +533,9 @@ function handleWindowResize() {
 function observeChartContainers() {
   resizeObserver?.disconnect()
   resizeObserver = new ResizeObserver(resizeCharts)
-  const elements = [
-    trendChartRef.value,
-    appDonutChartRef.value,
-    ...Object.values(departmentSparklineRefs.value),
-  ].filter((el): el is HTMLElement => Boolean(el))
+  const elements = [trendChartRef.value, appDonutChartRef.value].filter((el): el is HTMLElement =>
+    Boolean(el),
+  )
 
   elements.forEach((el) => resizeObserver?.observe(el))
 }
@@ -852,16 +545,17 @@ async function refreshTokenDashboard() {
   dashboardError.value = ''
 
   try {
-    tokenDashboard.value = await loadAdminTokenDashboard(dashboardDateRange.value)
+    tokenDashboard.value = await loadAdminTokenDashboard({
+      queryType: dashboardQueryType.value,
+      month: dashboardQueryType.value === 'month' ? selectedMonth.value : undefined,
+    })
     await nextTick()
-    currentDisplayedTotal = trendDataset.value.selectedTotal || 0
     renderAllCharts()
     observeChartContainers()
   } catch (error) {
     tokenDashboard.value = null
     dashboardError.value = error instanceof Error ? error.message : '加载 Token 看板失败'
     await nextTick()
-    currentDisplayedTotal = 0
     renderAllCharts()
   } finally {
     isDashboardLoading.value = false
@@ -875,32 +569,16 @@ watch([selectedTimeMode, selectedMonth], async () => {
 onMounted(async () => {
   updateBoardScale()
   await nextTick()
-  currentDisplayedTotal = trendDataset.value.selectedTotal || 0
   renderAllCharts()
   observeChartContainers()
   window.addEventListener('resize', handleWindowResize, { passive: true })
   void refreshTokenDashboard()
-
-  trendLiveTimer = window.setInterval(() => {
-    const timeEl = document.getElementById('live-time-digits')
-    if (timeEl) {
-      const now = new Date()
-      const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
-      updateScoreboardDigits(timeEl, timeStr)
-    }
-    const tokenEl = document.getElementById('live-token-digits')
-    if (tokenEl) {
-      updateScoreboardDigits(tokenEl, formatTokenNumber(currentDisplayedTotal))
-    }
-  }, 1000)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleWindowResize)
   resizeObserver?.disconnect()
-  chartInstances.forEach((chart) => chart.dispose())
-  chartInstances.clear()
-  if (trendLiveTimer) window.clearInterval(trendLiveTimer)
+  disposeCharts()
 })
 </script>
 
@@ -931,14 +609,21 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
-          <label class="month-picker" :class="{ 'is-year-mode': selectedTimeMode === '年' }">
+          <label v-if="selectedTimeMode === '月'" class="month-picker">
             <IconCalendarDays aria-hidden="true" />
             <input
               v-model="selectedMonth"
+              class="month-picker__input"
               type="month"
-              :aria-label="selectedTimeMode === '年' ? '选择年份' : '选择月份'"
+              aria-label="选择统计月份"
             />
           </label>
+          <div v-else class="month-picker is-year-mode">
+            <IconCalendarDays aria-hidden="true" />
+            <span class="month-picker__value" aria-live="polite">
+              {{ periodRangeLabel }}
+            </span>
+          </div>
         </div>
       </header>
 
@@ -1033,22 +718,8 @@ onBeforeUnmount(() => {
                     <strong>{{ department.tokens }}</strong>
                   </td>
                   <td class="numeric">{{ department.share.toFixed(1) }}%</td>
-                  <td class="numeric">
-                    <span class="change-chip" :class="{ negative: (department.change ?? 0) < 0 }">
-                      <template v-if="department.change !== undefined">
-                        {{ department.change >= 0 ? '▲' : '▼' }}
-                        {{ Math.abs(department.change).toFixed(1) }}%
-                      </template>
-                      <template v-else>--</template>
-                    </span>
-                  </td>
-                  <td>
-                    <div
-                      :ref="(el) => setDepartmentSparklineRef(department.id, el)"
-                      class="sparkline-chart"
-                      :aria-label="`${department.name} Token 趋势`"
-                    ></div>
-                  </td>
+                  <td class="numeric muted">--</td>
+                  <td class="numeric muted">--</td>
                 </tr>
               </tbody>
             </table>
@@ -1317,14 +988,13 @@ onBeforeUnmount(() => {
   padding: 0 20px 0 24px;
   gap: 12px;
   box-shadow: 0 10px 24px rgba(26, 77, 145, 0.07);
-  cursor: pointer;
+  cursor: default;
   transition:
     border-color 0.18s ease,
     box-shadow 0.18s ease;
 }
 
-.month-picker:hover,
-.month-picker:focus-within {
+.month-picker:hover {
   border-color: rgba(18, 115, 248, 0.42);
   box-shadow: 0 14px 28px rgba(26, 77, 145, 0.12);
 }
@@ -1336,29 +1006,31 @@ onBeforeUnmount(() => {
   color: var(--blue);
 }
 
-.month-picker input {
+.month-picker__value,
+.month-picker__input {
   min-width: 132px;
-  border: 0;
-  background: transparent;
   color: #0d1d4a;
   font: inherit;
   font-size: 16px;
   font-weight: 900;
+  white-space: nowrap;
+}
+
+.month-picker__input {
+  border: 0;
+  background: transparent;
+  padding: 0;
   cursor: pointer;
   outline: none;
 }
 
-.month-picker input::-webkit-calendar-picker-indicator {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0;
-  cursor: pointer;
+.month-picker__input:focus-visible {
+  box-shadow: 0 0 0 3px rgba(18, 115, 248, 0.16);
+  border-radius: 8px;
 }
 
-.month-picker.is-year-mode input {
-  min-width: 88px;
+.month-picker.is-year-mode .month-picker__value {
+  min-width: 180px;
 }
 
 .panel {
@@ -1668,6 +1340,11 @@ onBeforeUnmount(() => {
   text-align: right;
 }
 
+.numeric.muted {
+  color: #94a3b8;
+  font-weight: 700;
+}
+
 .change-chip {
   color: var(--green);
   font-weight: 900;
@@ -1738,139 +1415,6 @@ onBeforeUnmount(() => {
   width: 180px;
 }
 
-:deep(.token-scoreboard) {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-width: 220px;
-}
-:deep(.score-section) {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-:deep(.score-label) {
-  font-size: 16px;
-  color: #526b9f;
-  font-weight: 800;
-}
-:deep(.score-digits) {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-:deep(.flip-digit) {
-  position: relative;
-  display: inline-block;
-  width: 46px;
-  height: 54px;
-  perspective: 320px;
-  transform-style: preserve-3d;
-  font-family: 'DIN Alternate', 'Arial Narrow', sans-serif;
-}
-:deep(.flip-digit::after) {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: rgba(220, 232, 251, 0.95);
-  transform: translateY(-50%);
-  z-index: 5;
-  pointer-events: none;
-}
-:deep(.flip-top),
-:deep(.flip-bottom),
-:deep(.flip-top-flip),
-:deep(.flip-bottom-flip) {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 50%;
-  overflow: hidden;
-  background: #f1f5fb;
-  border: 1px solid #dce8fb;
-  backface-visibility: hidden;
-}
-:deep(.flip-top),
-:deep(.flip-bottom) {
-  z-index: 1;
-}
-:deep(.flip-top),
-:deep(.flip-top-flip) {
-  top: 0;
-  border-radius: 8px 8px 0 0;
-  border-bottom: none;
-  transform-origin: bottom center;
-}
-:deep(.flip-bottom),
-:deep(.flip-bottom-flip) {
-  bottom: 0;
-  border-radius: 0 0 8px 8px;
-  border-top: none;
-  transform-origin: top center;
-}
-:deep(.flip-line) {
-  display: block;
-  height: 54px;
-  line-height: 54px;
-  text-align: center;
-  font-size: 38px;
-  font-weight: bold;
-  color: #0d1d4a;
-}
-:deep(.flip-bottom .flip-line),
-:deep(.flip-bottom-flip .flip-line) {
-  margin-top: -27px;
-}
-:deep(.flip-top-flip),
-:deep(.flip-bottom-flip) {
-  display: none;
-  z-index: 2;
-  box-shadow: 0 3px 8px rgba(26, 77, 145, 0.14);
-  will-change: transform;
-}
-:deep(.flip-digit.is-flipping .flip-top-flip) {
-  display: block;
-  animation: flip-top-down 220ms cubic-bezier(0.45, 0.05, 0.55, 0.95) forwards;
-}
-:deep(.flip-digit.is-flipping .flip-bottom-flip) {
-  display: block;
-  transform: rotateX(180deg);
-  animation: flip-bottom-up 220ms 90ms cubic-bezier(0.45, 0.05, 0.55, 0.95) forwards;
-}
-@keyframes flip-top-down {
-  0% {
-    transform: rotateX(0deg);
-  }
-  100% {
-    transform: rotateX(-180deg);
-  }
-}
-@keyframes flip-bottom-up {
-  0% {
-    transform: rotateX(180deg);
-  }
-  100% {
-    transform: rotateX(0deg);
-  }
-}
-:deep(.score-separator) {
-  font-size: 32px;
-  font-weight: bold;
-  color: #0d1d4a;
-  margin: 0 2px;
-}
-:deep(.score-unit) {
-  font-size: 24px;
-  font-weight: 900;
-  color: #0d1d4a;
-  margin-left: 8px;
-  align-self: flex-end;
-  margin-bottom: 4px;
-}
-
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -1879,11 +1423,6 @@ onBeforeUnmount(() => {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
-  }
-
-  :deep(.flip-digit.is-flipping .flip-top-flip),
-  :deep(.flip-digit.is-flipping .flip-bottom-flip) {
-    animation: none !important;
   }
 }
 </style>

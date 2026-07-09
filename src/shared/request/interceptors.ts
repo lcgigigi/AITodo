@@ -2,12 +2,14 @@ import type { AxiosError, AxiosInstance, AxiosResponse, InternalAxiosRequestConf
 import { useUserStore } from '@/stores/user.store'
 import { getErrorMessage } from './error-code'
 import { notifyRequestError } from './feedback'
+import { RequestError } from './request-error'
 import type { RequestResponse } from './types'
 
 type BusinessErrorPayload = {
   code?: unknown
   message?: unknown
   msg?: unknown
+  traceId?: unknown
 }
 
 function getBusinessErrorMessage(result: BusinessErrorPayload) {
@@ -18,10 +20,16 @@ function getBusinessErrorMessage(result: BusinessErrorPayload) {
   return getErrorMessage(code, '请求失败')
 }
 
-function rejectBusinessError(config: InternalAxiosRequestConfig, result: BusinessErrorPayload) {
+function rejectBusinessError(
+  config: InternalAxiosRequestConfig,
+  result: BusinessErrorPayload,
+  status?: number,
+) {
   const message = getBusinessErrorMessage(result)
+  const code = typeof result.code === 'number' ? result.code : undefined
+  const traceId = typeof result.traceId === 'string' ? result.traceId : undefined
   notifyRequestError(config, message)
-  return Promise.reject(new Error(message))
+  return Promise.reject(new RequestError(message, { status, code, traceId }))
 }
 
 export function setupInterceptors(instance: AxiosInstance) {
@@ -41,11 +49,11 @@ export function setupInterceptors(instance: AxiosInstance) {
 
       if (result && typeof result === 'object') {
         if ('success' in result && !result.success) {
-          return rejectBusinessError(response.config, result)
+          return rejectBusinessError(response.config, result, response.status)
         }
 
         if ('code' in result && typeof result.code === 'number' && result.code !== 200) {
-          return rejectBusinessError(response.config, result)
+          return rejectBusinessError(response.config, result, response.status)
         }
       }
 
@@ -55,7 +63,30 @@ export function setupInterceptors(instance: AxiosInstance) {
       const message = getErrorMessage(error.response?.status, error.message)
       notifyRequestError(error.config, message)
 
-      return Promise.reject(new Error(message))
+      const payload = error.response?.data
+      const code =
+        payload &&
+        typeof payload === 'object' &&
+        'code' in payload &&
+        typeof payload.code === 'number'
+          ? payload.code
+          : undefined
+      const traceId =
+        payload &&
+        typeof payload === 'object' &&
+        'traceId' in payload &&
+        typeof payload.traceId === 'string'
+          ? payload.traceId
+          : undefined
+
+      return Promise.reject(
+        new RequestError(message, {
+          status: error.response?.status,
+          code,
+          traceId,
+          cause: error,
+        }),
+      )
     },
   )
 }

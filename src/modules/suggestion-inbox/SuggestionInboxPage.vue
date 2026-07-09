@@ -1,25 +1,20 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import IconArrowLeft from '~icons/lucide/arrow-left'
 import IconMailbox from '~icons/lucide/mailbox'
-import IconRefreshCw from '~icons/lucide/refresh-cw'
 import IconSparkles from '~icons/lucide/sparkles'
-import {
-  loadSuggestions,
-  type SuggestionCategory,
-  type SuggestionRecord,
-} from '@/modules/home/dashboard/suggestion.service'
+import type { OpinionCategory } from '@/modules/home/dashboard/opinion-box.service'
 import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
 
 defineOptions({
   name: 'SuggestionInboxPage',
 })
 
-type FilterCategory = 'all' | SuggestionCategory
+type FilterCategory = 'all' | OpinionCategory
 
 const categoryMeta: Record<
-  SuggestionCategory,
+  OpinionCategory,
   { label: string; emoji: string; tone: string; soft: string; ink: string }
 > = {
   feature: {
@@ -61,107 +56,21 @@ const filterOptions: Array<{ value: FilterCategory; label: string; emoji?: strin
 ]
 
 const router = useRouter()
-const suggestions = ref<SuggestionRecord[]>([])
 const activeFilter = ref<FilterCategory>('all')
-const isLoading = ref(true)
-const loadError = ref('')
 
-const filteredSuggestions = computed(() => {
-  if (activeFilter.value === 'all') return suggestions.value
-  return suggestions.value.filter((item) => item.category === activeFilter.value)
-})
+const totalCount = computed(() => 0)
+const todayCount = computed(() => 0)
 
-const totalCount = computed(() => suggestions.value.length)
-
-const todayCount = computed(() => {
-  const today = new Date()
-  const todayKey = `${today.getFullYear()}-${today.getMonth()}-${today.getDate()}`
-
-  return suggestions.value.filter((item) => {
-    if (!item.createTime) return false
-    const date = new Date(item.createTime.replace(' ', 'T'))
-    if (Number.isNaN(date.getTime())) return false
-    const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
-    return key === todayKey
-  }).length
-})
-
-const categoryCounts = computed(() => {
-  const counts: Record<SuggestionCategory, number> = {
-    feature: 0,
-    experience: 0,
-    bug: 0,
-    other: 0,
-  }
-
-  suggestions.value.forEach((item) => {
-    counts[item.category] += 1
-  })
-
-  return counts
-})
-
-const pageStateType = computed(() => {
-  if (isLoading.value) return 'loading'
-  if (loadError.value) return 'error'
-  if (filteredSuggestions.value.length === 0) return 'empty'
-  return null
-})
-
-function formatSuggestionTime(value?: string) {
-  if (!value) return '刚刚投递'
-
-  const date = new Date(value.replace(' ', 'T'))
-  if (Number.isNaN(date.getTime())) return value
-
-  const diff = Date.now() - date.getTime()
-  const minute = 60_000
-  const hour = 60 * minute
-  const day = 24 * hour
-
-  if (diff < minute) return '刚刚'
-  if (diff < hour) return `${Math.floor(diff / minute)} 分钟前`
-  if (diff < day) return `${Math.floor(diff / hour)} 小时前`
-  if (diff < 7 * day) return `${Math.floor(diff / day)} 天前`
-
-  const month = date.getMonth() + 1
-  const dayOfMonth = date.getDate()
-  const hours = String(date.getHours()).padStart(2, '0')
-  const minutes = String(date.getMinutes()).padStart(2, '0')
-  return `${month}月${dayOfMonth}日 ${hours}:${minutes}`
-}
-
-function formatViewMode(viewMode?: SuggestionRecord['viewMode']) {
-  if (viewMode === 'simple') return '简约模式'
-  if (viewMode === 'detail') return '详细模式'
-  return '未知场景'
-}
-
-function getInitial(name: string) {
-  return name.trim().slice(0, 1) || '同'
-}
-
-async function refreshSuggestions() {
-  isLoading.value = true
-  loadError.value = ''
-
-  try {
-    suggestions.value = await loadSuggestions()
-  } catch (error) {
-    loadError.value = error instanceof Error ? error.message : '加载建议列表失败'
-    suggestions.value = []
-  } finally {
-    isLoading.value = false
-  }
-}
+const categoryCounts = computed(() => ({
+  feature: 0,
+  experience: 0,
+  bug: 0,
+  other: 0,
+}))
 
 function goHome() {
   void router.push({ name: 'Home' })
 }
-
-onMounted(() => {
-  void refreshSuggestions()
-})
 </script>
 
 <template>
@@ -209,7 +118,7 @@ onMounted(() => {
             <span>今日新增</span>
           </article>
           <article
-            v-for="category in (['feature', 'experience', 'bug', 'other'] as SuggestionCategory[])"
+            v-for="category in ['feature', 'experience', 'bug', 'other'] as OpinionCategory[]"
             :key="category"
             class="inbox-stat-card is-category"
             :style="{
@@ -241,75 +150,16 @@ onMounted(() => {
             <em v-else>{{ categoryCounts[option.value] }}</em>
           </button>
         </div>
-
-        <button
-          type="button"
-          class="inbox-refresh-btn"
-          :disabled="isLoading"
-          aria-label="刷新建议列表"
-          @click="refreshSuggestions"
-        >
-          <IconRefreshCw aria-hidden="true" :class="{ 'is-spinning': isLoading }" />
-          <span>{{ isLoading ? '刷新中…' : '刷新' }}</span>
-        </button>
       </section>
 
       <AppStateBlock
-        v-if="pageStateType"
         class="inbox-state"
-        :type="pageStateType"
-        :title="pageStateType === 'empty' ? '这个分类还没有心声' : undefined"
-        :description="
-          pageStateType === 'empty'
-            ? '换个筛选看看，或者等同事们投递第一条反馈。'
-            : loadError || undefined
-        "
-        :action-label="pageStateType === 'error' ? '重新加载' : undefined"
+        type="empty"
+        title="当前接口暂未提供心声列表"
+        description="意见箱目前仅支持提交意见与查询今日提交数量。待后端补充列表接口后，这里会展示同事们投递的反馈。"
         size="sm"
         variant="inline"
-        @action="refreshSuggestions"
       />
-
-      <section v-else class="inbox-feed" aria-label="反馈列表">
-        <article
-          v-for="(item, index) in filteredSuggestions"
-          :key="item.id"
-          class="inbox-letter"
-          :style="{
-            '--letter-accent': categoryMeta[item.category].tone,
-            '--letter-soft': categoryMeta[item.category].soft,
-            '--letter-ink': categoryMeta[item.category].ink,
-            '--letter-delay': `${Math.min(index, 8) * 40}ms`,
-          }"
-        >
-          <div class="inbox-letter__stamp" aria-hidden="true">
-            <span>{{ categoryMeta[item.category].emoji }}</span>
-            <em>VOICE</em>
-          </div>
-
-          <header class="inbox-letter__header">
-            <div class="inbox-letter__author">
-              <span class="inbox-letter__avatar">{{ getInitial(item.userName) }}</span>
-              <div>
-                <strong>{{ item.userName }}</strong>
-                <span>{{ item.department || '未填写部门' }}</span>
-              </div>
-            </div>
-
-            <div class="inbox-letter__meta">
-              <span class="inbox-letter__category">{{ categoryMeta[item.category].label }}</span>
-              <time>{{ formatSuggestionTime(item.createTime) }}</time>
-            </div>
-          </header>
-
-          <p class="inbox-letter__content">{{ item.content }}</p>
-
-          <footer class="inbox-letter__footer">
-            <span class="inbox-letter__chip">{{ formatViewMode(item.viewMode) }}</span>
-            <span v-if="item.pageUrl" class="inbox-letter__chip is-muted">来自当前页面场景</span>
-          </footer>
-        </article>
-      </section>
     </div>
   </main>
 </template>
@@ -319,8 +169,7 @@ onMounted(() => {
   position: relative;
   min-height: 100vh;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 12% 18%, rgba(255, 237, 213, 0.72), transparent 28%),
+  background: radial-gradient(circle at 12% 18%, rgba(255, 237, 213, 0.72), transparent 28%),
     radial-gradient(circle at 88% 12%, rgba(191, 219, 254, 0.58), transparent 24%),
     linear-gradient(180deg, #fffaf5 0%, #f8fbff 48%, #eef4ff 100%);
   color: #0f172a;
@@ -666,8 +515,7 @@ onMounted(() => {
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.88);
   border-radius: 24px;
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.94), var(--letter-soft)),
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), var(--letter-soft)),
     rgba(255, 255, 255, 0.88);
   padding: 22px 22px 18px;
   box-shadow:
@@ -736,7 +584,11 @@ onMounted(() => {
   width: 42px;
   height: 42px;
   border-radius: 14px;
-  background: linear-gradient(135deg, var(--letter-accent), color-mix(in srgb, var(--letter-accent) 42%, white));
+  background: linear-gradient(
+    135deg,
+    var(--letter-accent),
+    color-mix(in srgb, var(--letter-accent) 42%, white)
+  );
   color: #ffffff;
   display: inline-flex;
   align-items: center;

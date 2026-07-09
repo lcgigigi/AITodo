@@ -7,7 +7,12 @@ import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
-import { getTodoHourOptions, getTodoMinuteOptions, parseTodoTime } from './picker.helpers'
+import {
+  getTodoHourOptions,
+  getTodoMinuteOptions,
+  handlePickerPopoverOutside,
+  parseTodoTime,
+} from './picker.helpers'
 
 defineOptions({
   inheritAttrs: false,
@@ -78,6 +83,12 @@ function tryClosePopover() {
   }
 }
 
+function onTimePopoverOutside(event: { target?: EventTarget | null; preventDefault?: () => void }) {
+  handlePickerPopoverOutside(event, () => {
+    open.value = false
+  })
+}
+
 function syncPopoverWidth() {
   const trigger = rootRef.value?.querySelector('button')
   const width =
@@ -119,6 +130,9 @@ watch(open, (isOpen) => {
         align="start"
         :style="{ '--todo-time-popover-width': popoverWidth || undefined }"
         class="todo-time-popover gap-0 p-0"
+        @pointer-down-outside="onTimePopoverOutside"
+        @interact-outside="onTimePopoverOutside"
+        @focus-outside="onTimePopoverOutside"
       >
         <div class="todo-time-panel">
           <div class="todo-time-column" aria-label="小时">

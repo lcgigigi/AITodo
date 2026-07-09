@@ -79,9 +79,7 @@ describe('todo scope filters', () => {
 
   it('builds readable scope badges', () => {
     expect(
-      getTodoScopeBadge(
-        event({ scope: 'assigned_by_me', assigneeName: '张三', owner: '张三' }),
-      ),
+      getTodoScopeBadge(event({ scope: 'assigned_by_me', assigneeName: '张三', owner: '张三' })),
     ).toEqual({
       label: '我派发',
       tone: 'outgoing',

@@ -6,3 +6,9 @@ dist-ssr
 .env.local
 .env.*.local
 coverage
+.playwright-cli
+.pnpm-store
+output
+dist.zip
+verification-dashboard.png
+docs/.~*.docx

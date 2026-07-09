@@ -63,7 +63,10 @@ export function isPendingAcceptanceTask(task: CalendarEvent, currentUser: Calend
   )
 }
 
-export function getDetailStatusTone(event: CalendarEvent, currentUser: CalendarUser): DetailStatusTone {
+export function getDetailStatusTone(
+  event: CalendarEvent,
+  currentUser: CalendarUser,
+): DetailStatusTone {
   if (isPendingAcceptanceTask(event, currentUser)) return 'pending'
 
   const label = getBackendTodoStatusLabel(event)
@@ -92,7 +95,7 @@ function isCurrentUserTodoParticipant(event: CalendarEvent, currentUser: Calenda
 
 export function canDeleteTodoEvent(event: CalendarEvent, currentUser: CalendarUser) {
   if (isPendingAcceptanceTask(event, currentUser)) return false
-  if (Boolean(event.editable)) return true
+  if (event.editable) return true
   if (isRejectedTodo(event) && isCurrentUserTodoParticipant(event, currentUser)) return true
   if (isCompletedTodoEvent(event) && isCurrentUserTodoParticipant(event, currentUser)) return true
   return false
@@ -213,26 +216,20 @@ function compareAssigneeProgressItems(left: CalendarEvent, right: CalendarEvent)
 }
 
 export function buildAssigneeProgressItems(childTodos: CalendarEvent[]): AssigneeProgressItem[] {
-  return [...childTodos]
-    .sort(compareAssigneeProgressItems)
-    .map((child) => {
-      const note = getRejectedTodoMessage(child)
-      return {
-        id: child.id,
-        name: getAssigneeProgressDisplayName(child),
-        statusLabel: getAssigneeProgressStatusLabel(child),
-        statusTone: getAssigneeProgressStatusTone(child),
-        note: note || undefined,
-      }
-    })
+  return [...childTodos].sort(compareAssigneeProgressItems).map((child) => {
+    const note = getRejectedTodoMessage(child)
+    return {
+      id: child.id,
+      name: getAssigneeProgressDisplayName(child),
+      statusLabel: getAssigneeProgressStatusLabel(child),
+      statusTone: getAssigneeProgressStatusTone(child),
+      note: note || undefined,
+    }
+  })
 }
 
 function shouldShowAssigneeProgress(task: CalendarEvent, currentUser: CalendarUser) {
-  return Boolean(
-    currentUser.id &&
-      task.creatorId === currentUser.id &&
-      task.childTodos?.length,
-  )
+  return Boolean(currentUser.id && task.creatorId === currentUser.id && task.childTodos?.length)
 }
 
 export function buildTodoDetailPanelViewModel(

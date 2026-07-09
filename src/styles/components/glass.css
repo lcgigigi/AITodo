@@ -1,0 +1,20 @@
+/**
+ * 玻璃拟态基础原语（可复用视觉类）。
+ *
+ * 说明：
+ * - 仅提供一个自成一体的基础玻璃表面，依赖全局已定义的设计令牌
+ *   （--app-panel-bg / --app-shadow-soft），不耦合首页 useDashboardGlassSettings
+ *   动态注入的 --glass-* 变量，避免相互影响。
+ * - 现有各组件的玻璃样式取值大多各不相同，且首页玻璃已有动态令牌体系，
+ *   因此本轮不改写既有 scoped 规则，仅沉淀该原语供后续新组件或触达时逐步采用。
+ * - 采用 Tailwind components 层，未被使用时会被 content 扫描裁剪，不影响产物与现有视觉。
+ */
+@layer components {
+  .glass-surface {
+    background: var(--app-panel-bg);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.18));
+    box-shadow: var(--app-shadow-soft);
+  }
+}

@@ -61,22 +61,31 @@ interface CurrentUserTokenUsagePayload {
   trendList?: TokenUsageModulePayload[] | null
 }
 
-interface AdminTokenDeptPayload {
+interface AdminTokenTrendPayload {
+  period?: string | null
+  tokenUsage?: number | string | null
+}
+
+interface AdminTokenDeptDistributionPayload {
   deptId?: string | number | null
   deptName?: string | null
-  totalTokenUsage?: number | string | null
-  moduleList?: TokenUsageModulePayload[] | null
+  tokenUsage?: number | string | null
+}
+
+interface AdminTokenModuleDistributionPayload {
+  bizModule?: string | null
+  bizModuleName?: string | null
+  tokenUsage?: number | string | null
 }
 
 interface AdminTokenDashboardPayload {
   totalTokenUsage?: number | string | null
-  deptList?: AdminTokenDeptPayload[] | null
-}
-
-export interface TokenUsageModulePeriod {
-  periodCode: TokenUsagePeriodCode
-  periodName: string
-  tokenUsage: number
+  queryType?: AdminTokenQueryType | null
+  startPeriod?: string | null
+  endPeriod?: string | null
+  trendList?: AdminTokenTrendPayload[] | null
+  deptDistributionList?: AdminTokenDeptDistributionPayload[] | null
+  moduleDistributionList?: AdminTokenModuleDistributionPayload[] | null
 }
 
 export interface CurrentUserTokenUsageModule {
@@ -105,29 +114,38 @@ export interface CurrentUserTokenUsage {
   trendList: CurrentUserTokenUsageTrend[]
 }
 
-export interface AdminTokenUsageModule {
-  moduleCode: string
-  moduleName: string
-  totalTokenUsage: number
-  periodList: TokenUsageModulePeriod[]
-  dailyList: TokenUsageDailyPoint[]
+export type AdminTokenQueryType = 'month' | 'year'
+
+export interface LoadAdminTokenDashboardQuery {
+  queryType?: AdminTokenQueryType
+  month?: string
 }
 
-export interface AdminTokenUsageDept {
+export interface AdminTokenTrendPoint {
+  period: string
+  tokenUsage: number
+}
+
+export interface AdminTokenDeptDistribution {
   deptId: string
   deptName: string
-  totalTokenUsage: number
-  moduleList: AdminTokenUsageModule[]
+  tokenUsage: number
+}
+
+export interface AdminTokenModuleDistribution {
+  moduleCode: string
+  moduleName: string
+  tokenUsage: number
 }
 
 export interface AdminTokenUsageDashboard {
   totalTokenUsage: number
-  deptList: AdminTokenUsageDept[]
-}
-
-export interface TokenUsageDeptOption {
-  deptId: string
-  deptName: string
+  queryType: AdminTokenQueryType
+  startPeriod: string
+  endPeriod: string
+  trendList: AdminTokenTrendPoint[]
+  deptDistributionList: AdminTokenDeptDistribution[]
+  moduleDistributionList: AdminTokenModuleDistribution[]
 }
 
 function getResponseMessage(response: TokenUsageResponse, fallbackMessage: string) {
@@ -184,14 +202,6 @@ function normalizeDailyList(items?: TokenUsageDailyPayload[] | null): TokenUsage
     .sort((a, b) => a.usageDate.localeCompare(b.usageDate))
 }
 
-function normalizeModulePeriod(item: TokenUsagePeriodPayload): TokenUsageModulePeriod {
-  return {
-    periodCode: toText(item.periodCode),
-    periodName: toText(item.periodName) || toText(item.periodCode),
-    tokenUsage: toNumber(item.tokenUsage ?? item.totalTokenUsage),
-  }
-}
-
 function normalizeCurrentUserPeriod(item: TokenUsagePeriodPayload): CurrentUserTokenUsagePeriod {
   return {
     periodCode: toText(item.periodCode),
@@ -216,36 +226,62 @@ function normalizeCurrentUserTrend(item: TokenUsageModulePayload): CurrentUserTo
   }
 }
 
-function normalizeAdminModule(item: TokenUsageModulePayload): AdminTokenUsageModule {
+function normalizeAdminTrendPoint(item: AdminTokenTrendPayload): AdminTokenTrendPoint {
   return {
-    moduleCode: toText(item.moduleCode),
-    moduleName: toText(item.moduleName) || toText(item.moduleCode),
-    totalTokenUsage: toNumber(item.totalTokenUsage ?? item.tokenUsage),
-    periodList: (item.periodList ?? []).map(normalizeModulePeriod),
-    dailyList: normalizeDailyList(item.dailyList),
+    period: toText(item.period),
+    tokenUsage: toNumber(item.tokenUsage),
   }
 }
 
-function normalizeAdminDept(item: AdminTokenDeptPayload): AdminTokenUsageDept {
+function normalizeAdminDeptDistribution(
+  item: AdminTokenDeptDistributionPayload,
+): AdminTokenDeptDistribution {
   const deptId = toText(item.deptId)
 
   return {
     deptId,
     deptName: toText(item.deptName) || deptId || '未命名部门',
-    totalTokenUsage: toNumber(item.totalTokenUsage),
-    moduleList: (item.moduleList ?? [])
-      .map(normalizeAdminModule)
-      .filter((module) => module.moduleCode || module.moduleName),
+    tokenUsage: toNumber(item.tokenUsage),
   }
 }
 
-function normalizeDeptOption(item: AdminTokenDeptPayload): TokenUsageDeptOption {
-  const deptId = toText(item.deptId)
+function normalizeAdminModuleDistribution(
+  item: AdminTokenModuleDistributionPayload,
+): AdminTokenModuleDistribution {
+  const moduleCode = toText(item.bizModule)
 
   return {
-    deptId,
-    deptName: toText(item.deptName) || deptId || '未命名部门',
+    moduleCode,
+    moduleName: toText(item.bizModuleName) || moduleCode || '未命名模块',
+    tokenUsage: toNumber(item.tokenUsage),
   }
+}
+
+function normalizeAdminQueryType(value?: string | null): AdminTokenQueryType {
+  return value === 'year' ? 'year' : 'month'
+}
+
+export function getCurrentMonthKey(date = new Date()) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  return `${year}-${month}`
+}
+
+function normalizeMonthKey(value?: string | null) {
+  const normalized = toText(value)
+  return /^\d{4}-\d{2}$/.test(normalized) ? normalized : ''
+}
+
+function resolveAdminDashboardParams(query: LoadAdminTokenDashboardQuery = {}) {
+  const queryType = normalizeAdminQueryType(query.queryType)
+  const params: Record<string, string> = { queryType }
+
+  if (queryType === 'month') {
+    const month = normalizeMonthKey(query.month) || getCurrentMonthKey()
+    params.month = month
+  }
+
+  return { queryType, params }
 }
 
 export async function loadCurrentUserTokenUsage(
@@ -270,28 +306,29 @@ export async function loadCurrentUserTokenUsage(
 }
 
 export async function loadAdminTokenDashboard(
-  range: TokenUsageDateRange,
+  query: LoadAdminTokenDashboardQuery = {},
 ): Promise<AdminTokenUsageDashboard> {
+  const { queryType, params } = resolveAdminDashboardParams(query)
   const payload = await requestTokenUsageData<AdminTokenDashboardPayload>(
     '/token-usage/admin-dashboard',
     '查询管理员 Token 看板失败',
-    {
-      startDate: range.startDate,
-      endDate: range.endDate,
-    },
+    params,
   )
 
   return {
     totalTokenUsage: toNumber(payload.totalTokenUsage),
-    deptList: (payload.deptList ?? []).map(normalizeAdminDept),
+    queryType: normalizeAdminQueryType(payload.queryType) || queryType,
+    startPeriod: toText(payload.startPeriod),
+    endPeriod: toText(payload.endPeriod),
+    trendList: (payload.trendList ?? [])
+      .map(normalizeAdminTrendPoint)
+      .filter((item) => item.period)
+      .sort((a, b) => a.period.localeCompare(b.period)),
+    deptDistributionList: (payload.deptDistributionList ?? [])
+      .map(normalizeAdminDeptDistribution)
+      .filter((item) => item.deptId || item.deptName),
+    moduleDistributionList: (payload.moduleDistributionList ?? [])
+      .map(normalizeAdminModuleDistribution)
+      .filter((item) => item.moduleCode || item.moduleName),
   }
-}
-
-export async function loadTokenUsageDeptList(): Promise<TokenUsageDeptOption[]> {
-  const payload = await requestTokenUsageData<AdminTokenDeptPayload[]>(
-    '/token-usage/dept-list',
-    '查询二级部门列表失败',
-  )
-
-  return (payload ?? []).map(normalizeDeptOption).filter((dept) => dept.deptId || dept.deptName)
 }

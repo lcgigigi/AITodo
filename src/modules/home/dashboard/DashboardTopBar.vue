@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import IconChevronDown from '~icons/lucide/chevron-down'
 import IconLayoutDashboard from '~icons/lucide/layout-dashboard'
@@ -82,10 +82,6 @@ const settingsMenuPanelStyle = computed(() => {
 
 function closeNotificationPanel() {
   isNotificationPanelOpen.value = false
-}
-
-function closeSuggestionBox() {
-  isSuggestionBoxOpen.value = false
 }
 
 function openSuggestionBox() {
@@ -172,14 +168,14 @@ function openLeaderBoard() {
   closeNotificationPanel()
   closeUserMenu()
   closeSettingsMenu()
-  void router.push({ name: 'LeaderBoard' })
+  void router.push({ name: 'LeaderBoard' }).catch(() => router.push('/leader-board'))
 }
 
 function openSuggestionInbox() {
   closeNotificationPanel()
   closeUserMenu()
   closeSettingsMenu()
-  void router.push({ name: 'SuggestionInbox' })
+  void router.push({ name: 'SuggestionInbox' }).catch(() => router.push('/suggestion-inbox'))
 }
 
 async function handleLogout() {
@@ -205,7 +201,6 @@ async function handleLogout() {
 
 function handleDocumentPointerDown(event: PointerEvent) {
   const target = event.target as Node
-  const settingsMenuElement = settingsMenuPanelRef.value
 
   if (isUserMenuOpen.value) {
     const insideUserMenu = userMenuPanelRef.value?.contains(target)
@@ -213,6 +208,11 @@ function handleDocumentPointerDown(event: PointerEvent) {
       closeUserMenu()
     }
   }
+}
+
+function handleDocumentClick(event: MouseEvent) {
+  const target = event.target as Node
+  const settingsMenuElement = settingsMenuPanelRef.value
 
   const insideSettingsMenu =
     settingsMenuWrapRef.value?.contains(target) || settingsMenuElement?.contains(target)
@@ -230,14 +230,40 @@ function handleDocumentKeydown(event: KeyboardEvent) {
   }
 }
 
-onMounted(() => {
+let topbarDocumentListenersBound = false
+
+function bindTopbarDocumentListeners() {
+  if (topbarDocumentListenersBound) return
+
+  topbarDocumentListenersBound = true
   document.addEventListener('pointerdown', handleDocumentPointerDown)
+  document.addEventListener('click', handleDocumentClick)
   document.addEventListener('keydown', handleDocumentKeydown)
+}
+
+function unbindTopbarDocumentListeners() {
+  if (!topbarDocumentListenersBound) return
+
+  topbarDocumentListenersBound = false
+  document.removeEventListener('pointerdown', handleDocumentPointerDown)
+  document.removeEventListener('click', handleDocumentClick)
+  document.removeEventListener('keydown', handleDocumentKeydown)
+}
+
+onMounted(() => {
+  bindTopbarDocumentListeners()
+})
+
+onActivated(() => {
+  bindTopbarDocumentListeners()
+})
+
+onDeactivated(() => {
+  unbindTopbarDocumentListeners()
 })
 
 onBeforeUnmount(() => {
-  document.removeEventListener('pointerdown', handleDocumentPointerDown)
-  document.removeEventListener('keydown', handleDocumentKeydown)
+  unbindTopbarDocumentListeners()
 })
 </script>
 
@@ -326,6 +352,7 @@ onBeforeUnmount(() => {
               :style="settingsMenuPanelStyle"
               aria-label="设置菜单"
               @click.stop
+              @pointerdown.stop
             >
               <span v-if="!props.embedded" class="settings-menu-panel__arrow" aria-hidden="true" />
               <button

@@ -1,21 +1,27 @@
 export const storage = {
   get<T>(key: string, fallback: T): T {
-    const value = localStorage.getItem(key)
-
-    if (!value) {
-      return fallback
-    }
-
     try {
+      const value = localStorage.getItem(key)
+      if (!value) return fallback
       return JSON.parse(value) as T
     } catch {
       return fallback
     }
   },
   set<T>(key: string, value: T) {
-    localStorage.setItem(key, JSON.stringify(value))
+    try {
+      localStorage.setItem(key, JSON.stringify(value))
+      return true
+    } catch {
+      return false
+    }
   },
   remove(key: string) {
-    localStorage.removeItem(key)
+    try {
+      localStorage.removeItem(key)
+      return true
+    } catch {
+      return false
+    }
   },
 }

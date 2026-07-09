@@ -14,15 +14,12 @@ import {
   type TodoDateRange,
   updateTodoStatus as serviceUpdateTodoStatus,
 } from '@/modules/home/dashboard/todo.service'
+import { isUnauthorizedRequestError } from '@/shared/request/request-error'
 import { useUserStore } from '@/stores/user.store'
 
 type LoadRangeOptions = {
   force?: boolean
   onUnauthorized?: () => void
-}
-
-function isUnauthorizedError(message: string) {
-  return message.includes('登录状态') || message.includes('401')
 }
 
 function mergeTodoDateRange(current: TodoDateRange | null, next: TodoDateRange): TodoDateRange {
@@ -49,6 +46,7 @@ export const useDashboardTodosStore = defineStore('dashboard-todos', () => {
   const loadedRange = ref<TodoDateRange | null>(null)
   const statusUpdatingIds = ref<Set<string>>(new Set())
   const statusUpdateOperations = new Map<string, symbol>()
+  let loadOperation = 0
 
   const currentUser = computed<CalendarUser>(() => ({
     id: userStore.profile?.id ?? '',
@@ -86,6 +84,7 @@ export const useDashboardTodosStore = defineStore('dashboard-todos', () => {
   })
 
   function reset() {
+    loadOperation += 1
     allEvents.value = []
     backendAssignableUsers.value = []
     isLoading.value = false
@@ -135,20 +134,10 @@ export const useDashboardTodosStore = defineStore('dashboard-todos', () => {
     )
   }
 
-  async function refreshAssignableUsers() {
-    backendAssignableUsers.value = await loadAssignableUsers()
-  }
-
-  async function fetchTodosForRange(range: TodoDateRange) {
-    if (!currentUser.value.id) return
-
-    allEvents.value = await loadTodos(currentUser.value, assignableUsers.value, range)
-    loadedRange.value = range
-    isInitialized.value = true
-  }
-
   async function loadForRange(range: TodoDateRange | undefined, options: LoadRangeOptions = {}) {
     if (!range) return false
+
+    const operation = ++loadOperation
 
     if (
       !options.force &&
@@ -156,6 +145,8 @@ export const useDashboardTodosStore = defineStore('dashboard-todos', () => {
       loadedRange.value &&
       rangeContains(loadedRange.value, range)
     ) {
+      isLoading.value = false
+      loadError.value = ''
       return true
     }
 
@@ -175,20 +166,32 @@ export const useDashboardTodosStore = defineStore('dashboard-todos', () => {
 
       if (!userStore.profile) {
         const profile = await loadCurrentUser()
+        if (operation !== loadOperation) return false
         userStore.setProfile(profile)
       }
 
       if (!backendAssignableUsers.value.length) {
-        await refreshAssignableUsers()
+        const users = await loadAssignableUsers()
+        if (operation !== loadOperation) return false
+        backendAssignableUsers.value = users
       }
 
-      await fetchTodosForRange(nextRange)
+      const nextEvents = currentUser.value.id
+        ? await loadTodos(currentUser.value, assignableUsers.value, nextRange)
+        : []
+      if (operation !== loadOperation) return false
+
+      allEvents.value = nextEvents
+      loadedRange.value = nextRange
+      isInitialized.value = true
       return true
     } catch (error) {
+      if (operation !== loadOperation) return false
+
       const message = error instanceof Error ? error.message : '加载待办数据失败'
       loadError.value = message
 
-      if (isUnauthorizedError(message)) {
+      if (isUnauthorizedRequestError(error)) {
         reset()
         userStore.logout()
         options.onUnauthorized?.()
@@ -196,7 +199,7 @@ export const useDashboardTodosStore = defineStore('dashboard-todos', () => {
 
       return false
     } finally {
-      if (showBlockingLoading) {
+      if (showBlockingLoading && operation === loadOperation) {
         isLoading.value = false
       }
     }

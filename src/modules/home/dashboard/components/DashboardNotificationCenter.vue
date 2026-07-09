@@ -90,7 +90,6 @@ const {
   togglePendingAction,
   handleAcceptTodo,
   handleRejectTodo,
-  initializeNotifications,
   refreshNotificationsOnOpen,
 } = useDashboardNotifications({
   onCalendarRefresh: () => emit('calendar-refresh'),
@@ -103,7 +102,11 @@ const isPopoverOpen = computed(() => (isEmbedded.value ? true : props.open))
 
 function shouldShowInboxSummary(item: InboxItem) {
   if (item.kind === 'todo_pending') return Boolean(item.summary)
-  return Boolean(item.summary && item.summary !== '暂无消息内容')
+  return Boolean(item.summary)
+}
+
+function shouldShowInboxDetails(item: InboxItem) {
+  return item.details.length > 0
 }
 
 const scopedBackdropStyle = computed(() => {
@@ -415,22 +418,35 @@ defineExpose({
                 aria-hidden="true"
               />
               <div class="notification-item__content">
-                <div class="notification-item__title-row">
-                  <div class="notification-item__title-group">
-                    <strong>{{ item.title }}</strong>
-                    <span
-                      class="notification-item__tag"
-                      :class="{
-                        'is-pending': item.kind === 'todo_pending',
-                        'is-meeting': item.kind === 'meeting',
-                      }"
-                    >
-                      {{ item.statusLabel }}
-                    </span>
-                  </div>
+                <div class="notification-item__meta-row">
+                  <span
+                    class="notification-item__tag"
+                    :class="{
+                      'is-pending': item.kind === 'todo_pending',
+                      'is-meeting': item.kind === 'meeting',
+                    }"
+                  >
+                    {{ item.statusLabel }}
+                  </span>
                   <time>{{ formatInboxTime(item.createTime) }}</time>
                 </div>
-                <p v-if="shouldShowInboxSummary(item)">{{ item.summary }}</p>
+
+                <strong class="notification-item__title">{{ item.title }}</strong>
+
+                <p v-if="shouldShowInboxSummary(item)" class="notification-item__summary">
+                  {{ item.summary }}
+                </p>
+
+                <dl v-if="shouldShowInboxDetails(item)" class="notification-item__details">
+                  <div
+                    v-for="detail in item.details"
+                    :key="`${item.id}-${detail.label}`"
+                    class="notification-item__detail"
+                  >
+                    <dt>{{ detail.label }}</dt>
+                    <dd>{{ detail.value }}</dd>
+                  </div>
+                </dl>
 
                 <div class="notification-item__actions" @click.stop>
                   <template v-if="item.kind === 'todo_pending'">
@@ -1102,10 +1118,10 @@ defineExpose({
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
-.notification-item__title-row {
+.notification-item__meta-row {
   min-width: 0;
   display: flex;
   align-items: center;
@@ -1113,20 +1129,12 @@ defineExpose({
   gap: 10px;
 }
 
-.notification-item__title-group {
-  min-width: 0;
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.notification-item__title-row strong {
+.notification-item__title {
   min-width: 0;
   overflow: hidden;
   color: #0f172a;
   font-size: 13px;
-  line-height: 1.25;
+  line-height: 1.35;
   font-weight: 900;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1153,7 +1161,7 @@ defineExpose({
   color: #15803d;
 }
 
-.notification-item__title-row time {
+.notification-item__meta-row time {
   flex: 0 0 auto;
   color: #94a3b8;
   font-size: 11px;
@@ -1161,16 +1169,52 @@ defineExpose({
   font-weight: 800;
 }
 
-.notification-item p {
+.notification-item__summary {
   display: -webkit-box;
   overflow: hidden;
   margin: 0;
-  color: #64748b;
+  color: #475569;
   font-size: 12px;
   line-height: 1.45;
-  font-weight: 650;
+  font-weight: 700;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.notification-item__details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(226, 232, 240, 0.72);
+}
+
+.notification-item__detail {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.notification-item__detail dt {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 11px;
+  line-height: 1.4;
+  font-weight: 800;
+}
+
+.notification-item__detail dd {
+  margin: 0;
+  min-width: 0;
+  color: #334155;
+  font-size: 11px;
+  line-height: 1.4;
+  font-weight: 700;
+  word-break: break-word;
 }
 
 .notification-state {
@@ -1185,7 +1229,9 @@ defineExpose({
 }
 
 .notification-item__actions {
-  margin-top: 2px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(226, 232, 240, 0.72);
 }
 
 .notification-item__form {

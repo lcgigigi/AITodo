@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { buildTodoDetailPanelViewModel, buildDispatchProgressSummary, mergeCalendarEventWithDetail } from './todoDetailPanel.helpers'
+import {
+  buildTodoDetailPanelViewModel,
+  buildDispatchProgressSummary,
+  mergeCalendarEventWithDetail,
+} from './todoDetailPanel.helpers'
 import type { CalendarEvent, CalendarUser } from './types'
 
 const creator: CalendarUser = {

@@ -2,7 +2,7 @@
 import type { Component } from 'vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import * as echarts from 'echarts'
+import * as echarts from 'echarts/core'
 import IconBot from '~icons/lucide/bot'
 import IconBox from '~icons/lucide/box'
 import IconChevronDown from '~icons/lucide/chevron-down'
@@ -25,7 +25,9 @@ import {
   type CurrentUserTokenUsage,
   type TokenUsagePeriodCode,
 } from '@/modules/token-usage/token-usage.service'
+import { formatTokenCompact, formatTokenNumber } from '@/modules/token-usage/token-usage.formatters'
 import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
+import { useECharts } from '@/shared/composables/useECharts'
 import { openUrlInNewTab } from './links'
 import { agents, getAgentByKey, permissionLabels } from './mock'
 import type { AgentCatalogItem, AgentCategory } from './types'
@@ -99,24 +101,13 @@ const tokenPeriodOptions: TokenRangeTab[] = [
 
 const usageTrendChartRef = ref<HTMLElement | null>(null)
 
-const chartInstances = new Set<echarts.ECharts>()
+const { getChart, resizeCharts, disposeCharts } = useECharts()
 let chartResizeObserver: ResizeObserver | null = null
 
 const chartTextStyle = {
   color: '#71819c',
   fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif',
   fontWeight: 500,
-}
-
-function formatTokenNumber(value: number) {
-  return Math.round(value).toLocaleString('zh-CN')
-}
-
-function formatTokenCompact(value: number) {
-  return new Intl.NumberFormat('zh-CN', {
-    notation: 'compact',
-    maximumFractionDigits: 1,
-  }).format(value)
 }
 
 function formatTrendDateLabel(date: string) {
@@ -240,14 +231,6 @@ async function refreshTokenUsage() {
   }
 }
 
-function getChart(el: HTMLElement | null) {
-  if (!el) return null
-
-  const chart = echarts.getInstanceByDom(el) ?? echarts.init(el, undefined, { renderer: 'canvas' })
-  chartInstances.add(chart)
-  return chart
-}
-
 function renderUsageTrendChart() {
   const chart = getChart(usageTrendChartRef.value)
   if (!chart) return
@@ -343,17 +326,13 @@ function renderUsageTrendChart() {
           },
         },
       ],
-    } satisfies echarts.EChartsOption,
+    } satisfies echarts.EChartsCoreOption,
     true,
   )
 }
 
 function renderAllCharts() {
   renderUsageTrendChart()
-}
-
-function resizeCharts() {
-  chartInstances.forEach((chart) => chart.resize())
 }
 
 const agentVisualMap: Record<string, AgentVisual> = {
@@ -373,7 +352,9 @@ const defaultAgentVisual: AgentVisual = {
 }
 
 const visibleAgents = computed(() =>
-  agents.filter((agent) => activeCategory.value === '全部' || agent.category === activeCategory.value),
+  agents.filter(
+    (agent) => activeCategory.value === '全部' || agent.category === activeCategory.value,
+  ),
 )
 
 function getAgentVisual(agent: AgentCatalogItem) {
@@ -454,8 +435,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', resizeCharts)
   chartResizeObserver?.disconnect()
-  chartInstances.forEach((chart) => chart.dispose())
-  chartInstances.clear()
+  disposeCharts()
 })
 
 watch(selectedTokenPeriodCode, () => {
@@ -488,12 +468,8 @@ watch(selectedTokenPeriodCode, () => {
       <section class="agent-main">
         <section class="agent-hero-row">
           <section class="agent-welcome" aria-label="欢迎语">
-            <h1 class="welcome-title">
-              AI Agent <span>应用广场</span>
-            </h1>
-            <p class="welcome-subtitle">
-              一站式企业级 AI 应用平台，赋能高效协作与智能创新
-            </p>
+            <h1 class="welcome-title">AI Agent <span>应用广场</span></h1>
+            <p class="welcome-subtitle">一站式企业级 AI 应用平台，赋能高效协作与智能创新</p>
 
             <div class="welcome-features">
               <article
@@ -523,7 +499,11 @@ watch(selectedTokenPeriodCode, () => {
                 <span class="sr-only">选择统计周期</span>
                 <select
                   :value="selectedTokenPeriodCode"
-                  @change="selectTokenPeriod(($event.target as HTMLSelectElement).value as TokenUsagePeriodCode)"
+                  @change="
+                    selectTokenPeriod(
+                      ($event.target as HTMLSelectElement).value as TokenUsagePeriodCode,
+                    )
+                  "
                 >
                   <option
                     v-for="option in tokenPeriodOptions"
@@ -568,10 +548,7 @@ watch(selectedTokenPeriodCode, () => {
                   今日消耗
                   <strong>{{ formatTokenNumber(tokenTodayConsumption) }} Token</strong>
                 </p>
-                <p
-                  class="token-day-change"
-                  :class="tokenDayChangeIsDown ? 'is-down' : 'is-up'"
-                >
+                <p class="token-day-change" :class="tokenDayChangeIsDown ? 'is-down' : 'is-up'">
                   较昨日
                   <component
                     :is="tokenDayChangeIsDown ? IconTrendingDown : IconTrendingUp"

@@ -37,7 +37,11 @@ export function resolveTokenUsageDateRange(
   periodCode: TokenUsagePeriodCode,
   referenceDate: Date = new Date(),
 ): TokenUsageDateRange {
-  const end = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate())
+  const end = new Date(
+    referenceDate.getFullYear(),
+    referenceDate.getMonth(),
+    referenceDate.getDate(),
+  )
   const dayCount = getTokenUsagePeriodDayCount(periodCode)
   const start = new Date(end)
   start.setDate(start.getDate() - (dayCount - 1))

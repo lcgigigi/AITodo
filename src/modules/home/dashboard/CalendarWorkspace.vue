@@ -33,6 +33,7 @@ import {
 import { navigateDashboardTool, type DashboardToolTarget } from './dashboardTools'
 import { resolveHomeGreetingText } from './homeTimeOfDay'
 import { DASHBOARD_ONBOARDING_TOUR_CLOSE_DAY_PREVIEW_EVENT } from './onboardingTour'
+import { specialDays } from './calendar-special-days/2026'
 import type {
   CalendarEvent,
   CalendarEventStatus,
@@ -50,6 +51,7 @@ import {
   isRejectedTodo,
   isRangeEvent,
   isSameDayRangeEvent,
+  ymd,
 } from './todoDisplay'
 import {
   buildTodoDetailPanelViewModel,
@@ -71,6 +73,7 @@ import {
   updateTodo as serviceUpdateTodo,
 } from './todo.service'
 import { useDashboardTodos } from './useDashboardTodos'
+import { runDashboardTodoAction } from './dashboardTodoActions'
 import { useDashboardGlassSettings } from './useDashboardGlassSettings'
 
 type HomePanelMode = 'view' | 'edit' | 'create'
@@ -157,76 +160,6 @@ onBeforeUnmount(() => {
 })
 
 let hasInitializedTodoRange = false
-
-const specialDays: CalendarSpecialDay[] = [
-  { date: '2026-01-01', name: '元旦', type: 'holiday' },
-  { date: '2026-01-02', name: '元旦假期', type: 'holiday' },
-  { date: '2026-01-03', name: '元旦假期', type: 'holiday' },
-  { date: '2026-01-04', name: '调休上班', type: 'workday' },
-  { date: '2026-02-14', name: '调休上班', type: 'workday' },
-  { date: '2026-02-15', name: '春节假期', type: 'holiday' },
-  { date: '2026-02-16', name: '春节假期', type: 'holiday' },
-  { date: '2026-02-17', name: '春节', type: 'holiday' },
-  { date: '2026-02-18', name: '春节假期', type: 'holiday' },
-  { date: '2026-02-19', name: '春节假期', type: 'holiday' },
-  { date: '2026-02-20', name: '春节假期', type: 'holiday' },
-  { date: '2026-02-21', name: '春节假期', type: 'holiday' },
-  { date: '2026-02-22', name: '春节假期', type: 'holiday' },
-  { date: '2026-02-23', name: '春节假期', type: 'holiday' },
-  { date: '2026-02-28', name: '调休上班', type: 'workday' },
-  { date: '2026-04-04', name: '清明节', type: 'holiday' },
-  { date: '2026-04-05', name: '清明假期', type: 'holiday' },
-  { date: '2026-04-06', name: '清明假期', type: 'holiday' },
-  { date: '2026-05-01', name: '劳动节', type: 'holiday' },
-  { date: '2026-05-02', name: '劳动节假期', type: 'holiday' },
-  { date: '2026-05-03', name: '劳动节假期', type: 'holiday' },
-  { date: '2026-05-04', name: '劳动节假期', type: 'holiday' },
-  { date: '2026-05-05', name: '劳动节假期', type: 'holiday' },
-  { date: '2026-05-09', name: '调休上班', type: 'workday' },
-  { date: '2026-06-19', name: '端午节', type: 'holiday' },
-  { date: '2026-06-20', name: '端午假期', type: 'holiday' },
-  { date: '2026-06-21', name: '端午假期', type: 'holiday' },
-  { date: '2026-09-20', name: '调休上班', type: 'workday' },
-  { date: '2026-09-25', name: '中秋节', type: 'holiday' },
-  { date: '2026-09-26', name: '中秋假期', type: 'holiday' },
-  { date: '2026-09-27', name: '中秋假期', type: 'holiday' },
-  { date: '2026-10-01', name: '国庆节', type: 'holiday' },
-  { date: '2026-10-02', name: '国庆假期', type: 'holiday' },
-  { date: '2026-10-03', name: '国庆假期', type: 'holiday' },
-  { date: '2026-10-04', name: '国庆假期', type: 'holiday' },
-  { date: '2026-10-05', name: '国庆假期', type: 'holiday' },
-  { date: '2026-10-06', name: '国庆假期', type: 'holiday' },
-  { date: '2026-10-07', name: '国庆假期', type: 'holiday' },
-  { date: '2026-10-10', name: '调休上班', type: 'workday' },
-  { date: '2026-01-05', name: '小寒', type: 'solar-term' },
-  { date: '2026-01-20', name: '大寒', type: 'solar-term' },
-  { date: '2026-02-04', name: '立春', type: 'solar-term' },
-  { date: '2026-02-18', name: '雨水', type: 'solar-term' },
-  { date: '2026-03-05', name: '惊蛰', type: 'solar-term' },
-  { date: '2026-03-20', name: '春分', type: 'solar-term' },
-  { date: '2026-04-05', name: '清明', type: 'solar-term' },
-  { date: '2026-04-20', name: '谷雨', type: 'solar-term' },
-  { date: '2026-05-05', name: '立夏', type: 'solar-term' },
-  { date: '2026-05-21', name: '小满', type: 'solar-term' },
-  { date: '2026-06-05', name: '芒种', type: 'solar-term' },
-  { date: '2026-06-21', name: '夏至', type: 'solar-term' },
-  { date: '2026-07-07', name: '小暑', type: 'solar-term' },
-  { date: '2026-07-23', name: '大暑', type: 'solar-term' },
-  { date: '2026-08-07', name: '立秋', type: 'solar-term' },
-  { date: '2026-08-23', name: '处暑', type: 'solar-term' },
-  { date: '2026-09-07', name: '白露', type: 'solar-term' },
-  { date: '2026-09-23', name: '秋分', type: 'solar-term' },
-  { date: '2026-10-08', name: '寒露', type: 'solar-term' },
-  { date: '2026-10-23', name: '霜降', type: 'solar-term' },
-  { date: '2026-11-07', name: '立冬', type: 'solar-term' },
-  { date: '2026-11-22', name: '小雪', type: 'solar-term' },
-  { date: '2026-12-07', name: '大雪', type: 'solar-term' },
-  { date: '2026-12-22', name: '冬至', type: 'solar-term' },
-]
-
-function ymd(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-}
 
 const specialDayMap = computed(() => {
   const map = new Map<string, CalendarSpecialDay[]>()
@@ -917,19 +850,17 @@ function openHomePanelTool(tool: DashboardToolTarget) {
 }
 
 async function createTodo(payload: CalendarTodoDraft) {
-  try {
+  await runDashboardTodoAction(async () => {
     await serviceCreateTodo(payload)
     await refreshTodos()
     selectDate(payload.date)
     closeDayPreview()
     showToast('待办已创建')
-  } catch {
-    // 全局拦截器已统一提示错误
-  }
+  })
 }
 
 async function updateTodo(payload: CalendarTodoUpdate) {
-  try {
+  await runDashboardTodoAction(async () => {
     await serviceUpdateTodo(payload)
     await refreshTodos()
     isDayPreviewFormDirty.value = false
@@ -942,33 +873,25 @@ async function updateTodo(payload: CalendarTodoUpdate) {
       }
     }
     showToast('待办已保存')
-  } catch {
-    // 全局拦截器已统一提示错误
-  }
+  })
 }
 
 async function updateTodoStatus(id: string, status: CalendarEventStatus) {
-  try {
+  return runDashboardTodoAction(async () => {
     const updated = await updateTodoStatusOptimistically(id, status)
-    if (!updated) return false
+    if (!updated) throw new Error('待办状态正在更新')
 
     showToast(status === 'done' ? '已标记完成' : '已撤销完成')
-    return true
-  } catch {
-    // 全局拦截器已统一提示错误
-    return false
-  }
+  })
 }
 
 async function deleteTodo(id: string) {
   isDayPreviewFormDirty.value = false
-  try {
+  await runDashboardTodoAction(async () => {
     await serviceDeleteTodo(id)
     await refreshTodos()
     showToast('待办已删除')
-  } catch {
-    // 全局拦截器已统一提示错误
-  }
+  })
 }
 
 async function openTodoFromNotification(payload: { id: string; date?: string }) {
@@ -1263,7 +1186,9 @@ defineExpose({
               <button
                 type="button"
                 class="home-todo-stat all-stat"
-                :class="{ active: homeTodoCategoryFilter === 'all' && homeTodoScopeFilter === 'all' }"
+                :class="{
+                  active: homeTodoCategoryFilter === 'all' && homeTodoScopeFilter === 'all',
+                }"
                 :aria-pressed="homeTodoCategoryFilter === 'all' && homeTodoScopeFilter === 'all'"
                 :aria-label="`${isSelectedToday ? '今日' : homeFooterDateLabel}全部待办`"
                 @click.stop="selectHomeTodoCategoryFilter('all')"
@@ -1300,7 +1225,9 @@ defineExpose({
                 :class="{
                   active: homeTodoCategoryFilter === 'meeting' && homeTodoScopeFilter === 'all',
                 }"
-                :aria-pressed="homeTodoCategoryFilter === 'meeting' && homeTodoScopeFilter === 'all'"
+                :aria-pressed="
+                  homeTodoCategoryFilter === 'meeting' && homeTodoScopeFilter === 'all'
+                "
                 :aria-label="`${isSelectedToday ? '今日' : homeFooterDateLabel}会议信息`"
                 @click.stop="selectHomeTodoCategoryFilter('meeting')"
               >
@@ -1432,7 +1359,7 @@ defineExpose({
                 <div class="home-todo-item-aside">
                   <div class="home-todo-item-actions" @click.stop>
                     <template v-if="pendingDeleteListTaskId === task.id">
-                      <span class="home-todo-delete-confirm">确定删除？</span>
+                      <span class="home-todo-delete-prompt">确定删除？</span>
                       <button
                         type="button"
                         class="home-todo-action"
@@ -1472,7 +1399,10 @@ defineExpose({
                   <span v-if="isRejectedTodo(task)" class="home-todo-status-tag is-rejected">
                     已拒绝
                   </span>
-                  <span v-else-if="task.status === 'done'" class="home-todo-status-tag">
+                  <span
+                    v-else-if="task.status === 'done' && pendingDeleteListTaskId !== task.id"
+                    class="home-todo-status-tag"
+                  >
                     <IconCheck aria-hidden="true" />
                     已完成
                   </span>
@@ -1528,9 +1458,7 @@ defineExpose({
   user-select: none;
   --time-mark-fill: #ffffff;
   --time-mark-fill-soft: rgba(255, 255, 255, 0.9);
-  --time-mark-shadow:
-    0 1px 2px rgba(10, 20, 38, 0.22),
-    0 4px 12px rgba(10, 20, 38, 0.18),
+  --time-mark-shadow: 0 1px 2px rgba(10, 20, 38, 0.22), 0 4px 12px rgba(10, 20, 38, 0.18),
     0 12px 32px rgba(10, 20, 38, 0.12);
 }
 
@@ -2102,6 +2030,18 @@ defineExpose({
   gap: 8px;
 }
 
+.home-todo-item.is-delete-confirm {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.home-todo-item.is-delete-confirm .home-todo-item-main {
+  display: none;
+}
+
+.home-todo-item.is-delete-confirm .home-todo-item-aside {
+  justify-content: flex-end;
+}
+
 .home-todo-item-aside {
   flex: 0 0 auto;
   display: flex;
@@ -2109,6 +2049,17 @@ defineExpose({
   justify-content: flex-end;
   gap: 4px;
   min-width: 0;
+  overflow: hidden;
+}
+
+.home-todo-delete-prompt {
+  flex: 0 0 auto;
+  margin: 0;
+  color: #b45309;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .home-todo-item-actions {
@@ -2137,7 +2088,8 @@ defineExpose({
 }
 
 .home-todo-item.is-delete-confirm .home-todo-item-actions {
-  max-width: 240px;
+  max-width: 220px;
+  gap: 4px;
 }
 
 .home-todo-item.is-done:hover .home-todo-item-actions,
@@ -2148,7 +2100,7 @@ defineExpose({
 }
 
 .home-todo-item.is-done.is-delete-confirm .home-todo-item-actions {
-  max-width: 240px;
+  max-width: 220px;
 }
 
 .home-todo-action {
@@ -2194,14 +2146,6 @@ defineExpose({
   color: #b91c1c;
 }
 
-.home-todo-delete-confirm {
-  flex: 0 0 auto;
-  color: #b45309;
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
 .home-todo-item-title {
   flex: 1 1 0;
   min-width: 3.5rem;
@@ -2227,7 +2171,9 @@ defineExpose({
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   line-height: 1.2;
-  transition: color 0.22s ease, opacity 0.2s ease;
+  transition:
+    color 0.22s ease,
+    opacity 0.2s ease;
 }
 
 .home-todo-item-time.is-range {
