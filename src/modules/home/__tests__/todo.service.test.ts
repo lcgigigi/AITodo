@@ -3,7 +3,6 @@ import { httpClient } from '@/shared/request/http'
 import {
   acceptTodos,
   analyzeTodoText,
-  analyzeTodoTextByGet,
   completeTodo,
   createTodo,
   deleteTodo,
@@ -11,7 +10,6 @@ import {
   loadAssignableUsers,
   loadCurrentUser,
   loadPendingTodos,
-  loadTodayTodos,
   loadTodoDetail,
   getTodoMonthRange,
   getTodoWeekRange,
@@ -25,8 +23,8 @@ import {
   transferTodos,
   updateTodo,
   updateTodoStatus,
-} from './todo.service'
-import type { CalendarUser } from './types'
+} from '../dashboard/services/todo.service'
+import type { CalendarUser } from '../dashboard/config/types'
 
 vi.mock('@/shared/request/http', () => ({
   httpClient: {
@@ -132,7 +130,7 @@ describe('todo.service real backend adapter', () => {
     )
   })
 
-  it('wires the 13 smart-todo endpoints and normalizes list data for the page', async () => {
+  it('wires the active smart-todo endpoints and normalizes list data for the page', async () => {
     const calls: Array<{ method?: string; url?: string }> = []
 
     vi.mocked(httpClient.request).mockImplementation((config) => {
@@ -163,23 +161,6 @@ describe('todo.service real backend adapter', () => {
             status: 0,
             assigneeId: '1102080',
             creatorId: '1102080',
-          },
-        ]) as never
-      }
-
-      if (config.url === '/smart-todo/today-list') {
-        return backendResponse([
-          {
-            id: 456,
-            title: '今日复盘',
-            timeType: 1,
-            startDate: '2026-06-22T17:00:00',
-            startDateShow: '2026-06-22 17:00:00',
-            status: 3,
-            assigneeIds: '1102080',
-            handlerId: '1102080',
-            creatorId: '1101001',
-            type: 1,
           },
         ]) as never
       }
@@ -230,10 +211,6 @@ describe('todo.service real backend adapter', () => {
       assigneeId: '1102080',
       type: 1,
     })
-    await analyzeTodoTextByGet('明天下午5点项目复盘', currentUser, assignableUsers, {
-      date: '2026-06-06',
-      title: '',
-    })
     await expect(loadAssignableUsers()).resolves.toEqual([
       { id: '1102080', name: '李四', role: 'employee' },
     ])
@@ -248,19 +225,6 @@ describe('todo.service real backend adapter', () => {
       },
     ])
     await expect(loadPendingTodos(currentUser, assignableUsers)).resolves.toHaveLength(1)
-    await expect(
-      loadTodayTodos(currentUser, assignableUsers, { status: 3, type: 1 }),
-    ).resolves.toMatchObject([
-      {
-        id: '456',
-        date: '2026-06-22',
-        time: '17:00',
-        title: '今日复盘',
-        assigneeId: '1102080',
-        assigneeName: '李四',
-        completable: true,
-      },
-    ])
     await expect(loadTodoDetail('123', currentUser, assignableUsers)).resolves.toMatchObject({
       id: '123',
       assigneeName: '李四',
@@ -301,11 +265,9 @@ describe('todo.service real backend adapter', () => {
     expect(calls).toEqual(
       expect.arrayContaining([
         { method: 'POST', url: '/smart-todo/analyze' },
-        { method: 'GET', url: '/smart-todo/analyze' },
         { method: 'GET', url: '/smart-todo/user-list' },
         { method: 'GET', url: '/smart-todo/month-list' },
         { method: 'GET', url: '/smart-todo/pending-list' },
-        { method: 'GET', url: '/smart-todo/today-list' },
         { method: 'GET', url: '/smart-todo/123' },
         { method: 'POST', url: '/smart-todo/create' },
         { method: 'PUT', url: '/smart-todo' },

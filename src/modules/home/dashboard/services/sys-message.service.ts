@@ -1,10 +1,14 @@
 import { httpClient } from '@/shared/request/http'
+import {
+  SMART_TODO_REQUEST_TIMEOUT,
+  toId,
+  type SmartTodoResponse,
+  unwrapSmartTodoResponse,
+} from '@/shared/request/smart-todo-client'
 
-const SYS_MESSAGE_REQUEST_TIMEOUT = 60_000
 const SYS_MESSAGE_WS_PATH = '/websocket'
 
 export type SysMessageStatus = 0 | 1
-export type SysMessageFilter = 'unread' | 'all'
 
 export interface SysMessage {
   id: string
@@ -50,14 +54,6 @@ export interface SysMessagePushPayload {
   createTime?: string
 }
 
-interface SysMessageResponse<T = unknown> {
-  code?: number
-  msg?: string
-  message?: string
-  data?: T | null
-  success?: boolean
-}
-
 interface SysMessageBackendItem {
   id?: string | number
   msgSubject?: string | null
@@ -84,42 +80,18 @@ export interface SysMessageLocationLike {
   host: string
 }
 
-function getResponseMessage(response: SysMessageResponse, fallbackMessage: string) {
-  return response.msg || response.message || fallbackMessage
-}
-
-function unwrapSysMessageResponse<T>(response: SysMessageResponse<T>, fallbackMessage: string): T {
-  if (response.success === false) {
-    throw new Error(getResponseMessage(response, fallbackMessage))
-  }
-
-  if (typeof response.code === 'number' && response.code !== 200) {
-    throw new Error(getResponseMessage(response, fallbackMessage))
-  }
-
-  if (response.data === null || response.data === undefined) {
-    throw new Error(getResponseMessage(response, fallbackMessage))
-  }
-
-  return response.data
-}
-
 async function requestSysMessageData<T>(config: {
   method: 'GET' | 'PUT' | 'DELETE'
   url: string
   params?: Record<string, unknown>
   data?: unknown
 }) {
-  const response = await httpClient.request<SysMessageResponse<T>>({
-    timeout: SYS_MESSAGE_REQUEST_TIMEOUT,
+  const response = await httpClient.request<SmartTodoResponse<T>>({
+    timeout: SMART_TODO_REQUEST_TIMEOUT,
     ...config,
   })
 
-  return unwrapSysMessageResponse(response.data, '站内消息请求失败')
-}
-
-function toId(value?: string | number | null) {
-  return value === null || value === undefined ? '' : String(value).trim()
+  return unwrapSmartTodoResponse(response.data, '站内消息请求失败')
 }
 
 function toNumber(value: unknown, fallback = 0) {

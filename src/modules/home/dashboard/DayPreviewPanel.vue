@@ -19,7 +19,7 @@ import type {
   CalendarTodoForm,
   CalendarTodoUpdate,
   CalendarUser,
-} from './types'
+} from './config/types'
 import EventScheduleTime from './components/EventScheduleTime.vue'
 import {
   eventTypeLabel,
@@ -36,7 +36,7 @@ import {
   type TodoScopeFilter,
   type TodoStatusFilter,
   type TodoTypeFilter,
-} from './dayPreviewPanel.helpers'
+} from './helpers/dayPreviewPanel.helpers'
 import {
   addDays,
   getRejectedTodoMessage,
@@ -46,8 +46,8 @@ import {
   isRejectedTodo,
   parseDate,
   ymd,
-} from './todoDisplay'
-import { loadTodoDetail, parseTodoText as serviceParseTodoText } from './todo.service'
+} from './helpers/todoDisplay'
+import { loadTodoDetail, parseTodoText as serviceParseTodoText } from './services/todo.service'
 
 const props = defineProps<{
   date: string
@@ -937,7 +937,7 @@ defineExpose({
                   </span>
                   <span
                     v-if="getTodoScopeBadge(event)"
-                    class="scope-badge"
+                    class="todo-scope-badge scope-badge"
                     :class="`tone-${getTodoScopeBadge(event)!.tone}`"
                   >
                     {{ getTodoScopeBadge(event)!.label }}
@@ -1079,7 +1079,7 @@ defineExpose({
                 type="text"
                 :disabled="isParsing"
                 :aria-describedby="isParsing ? 'ai-parse-status-title' : undefined"
-                placeholder="例如：明天下午给刘畅布置一项开发公司官方网站的任务"
+                placeholder="例如：明天下午给XXX布置一项开发公司官方网站的任务"
               />
               <Button
                 type="button"
@@ -2043,18 +2043,6 @@ defineExpose({
   font-weight: 800;
   line-height: 1.2;
   white-space: nowrap;
-}
-
-.scope-badge.tone-outgoing {
-  color: #0e7490;
-  background: rgba(207, 250, 254, 0.92);
-  box-shadow: inset 0 0 0 1px rgba(14, 116, 144, 0.16);
-}
-
-.scope-badge.tone-incoming {
-  color: #b45309;
-  background: rgba(254, 243, 199, 0.96);
-  box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.18);
 }
 
 .timeline-item.scope-assigned_by_me {

@@ -1,7 +1,8 @@
-import type { CalendarEvent, CalendarSpecialDay } from './types'
+import type { CalendarEvent, CalendarSpecialDay } from '../config/types'
 import {
   getRejectedTodoMessage,
   getTodoStatusLabel,
+  isMeetingTodoEvent,
   isRejectedTodo,
   matchesTodoScopeFilter,
   type TodoScopeFilter,
@@ -33,9 +34,7 @@ export const specialText: Record<CalendarSpecialDay['type'], string> = {
   'solar-term': '节气',
 }
 
-export function isMeetingEvent(event: CalendarEvent) {
-  return event.type === 'meeting'
-}
+export const isMeetingEvent = isMeetingTodoEvent
 
 function matchesStatusFilter(event: CalendarEvent, filter: TodoStatusFilter) {
   if (filter === 'all') return true
@@ -69,6 +68,4 @@ export function shouldShowEventMeta(event: CalendarEvent) {
   return Boolean(event.source) || (isRejectedTodo(event) && Boolean(getRejectedTodoMessage(event)))
 }
 
-export function statusText(event: CalendarEvent) {
-  return getTodoStatusLabel(event)
-}
+export const statusText = getTodoStatusLabel

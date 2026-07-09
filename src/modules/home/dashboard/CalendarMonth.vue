@@ -2,7 +2,7 @@
 import { computed, onUnmounted, ref } from 'vue'
 import IconChevronLeft from '~icons/lucide/chevron-left'
 import IconChevronRight from '~icons/lucide/chevron-right'
-import type { CalendarDay, CalendarEvent } from './types'
+import type { CalendarDay, CalendarEvent } from './config/types'
 import {
   compareCalendarRangeBarEvents,
   formatEventTime,
@@ -12,7 +12,7 @@ import {
   isAllDayEvent,
   isRangeEvent,
   isRejectedTodo,
-} from './todoDisplay'
+} from './helpers/todoDisplay'
 
 type CalendarViewMode = 'month' | 'week'
 type MonthRangeDisplayMode = 'daily' | 'bar'

@@ -4,7 +4,7 @@ import IconTag from '~icons/lucide/tag'
 import IconUser from '~icons/lucide/user'
 import IconUserCheck from '~icons/lucide/user-check'
 import IconX from '~icons/lucide/x'
-import type { TodoDetailPanelViewModel } from '../todoDetailPanel.helpers'
+import type { TodoDetailPanelViewModel } from '../helpers/todoDetailPanel.helpers'
 
 defineProps<{
   panel: TodoDetailPanelViewModel | null

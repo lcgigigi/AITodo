@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import IconArrowLeft from '~icons/lucide/arrow-left'
 import IconChevronDown from '~icons/lucide/chevron-down'
 import IconLayoutDashboard from '~icons/lucide/layout-dashboard'
 import IconLogOut from '~icons/lucide/log-out'
@@ -16,16 +17,17 @@ import DashboardViewModeSwitch, {
 import TopbarToolDock from '@/modules/home/dashboard/components/TopbarToolDock.vue'
 import homeCardLogoImage from '@/assets/logo.png'
 import { routeConfig } from '@/config/route.config'
-import type { DashboardToolTarget } from '@/modules/home/dashboard/dashboardTools'
-import { logoutSmartTodo, syncCalendar } from '@/modules/home/dashboard/todo.service'
-import { useDashboardGlassSettings } from '@/modules/home/dashboard/useDashboardGlassSettings'
+import type { DashboardToolTarget } from '@/modules/home/dashboard/config/dashboardTools'
+import type { TodoOpenSource } from '@/modules/home/dashboard/config/types'
+import { logoutSmartTodo, syncCalendar } from '@/modules/home/dashboard/services/todo.service'
+import { useDashboardGlassSettings } from '@/modules/home/dashboard/composables/useDashboardGlassSettings'
 import { useDashboardTodosStore } from '@/stores/dashboard-todos.store'
 import { useFeedbackStore } from '@/stores/feedback.store'
 import { DEFAULT_USER_AVATAR, useUserStore } from '@/stores/user.store'
 
 const emit = defineEmits<{
   'calendar-refresh': []
-  'open-todo': [payload: { id: string; date?: string }]
+  'open-todo': [payload: { id: string; date?: string; source?: TodoOpenSource }]
   'start-onboarding': []
   'switch-mode': [mode: 'simple' | 'detail']
   'select-tool': [payload: DashboardToolTarget]
@@ -38,6 +40,8 @@ const props = withDefaults(
     showToolDock?: boolean
     portalTarget?: HTMLElement | null
     viewMode?: DashboardViewMode | null
+    pageTitle?: string | null
+    backLabel?: string
   }>(),
   {
     embedded: false,
@@ -45,6 +49,8 @@ const props = withDefaults(
     showToolDock: false,
     portalTarget: null,
     viewMode: null,
+    pageTitle: null,
+    backLabel: '首页',
   },
 )
 
@@ -69,6 +75,8 @@ const displayName = computed(() => userStore.profile?.name ?? '刘美华')
 const department = computed(() => userStore.profile?.department ?? '信息技术部')
 const avatarUrl = computed(() => userStore.profile?.avatar ?? DEFAULT_USER_AVATAR)
 const isAdminUser = computed(() => userStore.isAdmin)
+
+const hasContextualNav = computed(() => Boolean(props.pageTitle?.trim()) && !props.embedded)
 
 const settingsMenuPanelStyle = computed(() => {
   if (!props.embedded) return undefined
@@ -103,6 +111,10 @@ function closeUserMenu() {
 
 function closeSettingsMenu() {
   isSettingsMenuOpen.value = false
+}
+
+function goHome() {
+  void router.push({ name: 'Home' }).catch(() => router.push('/'))
 }
 
 watch(isNotificationPanelOpen, (open) => {
@@ -273,13 +285,26 @@ onBeforeUnmount(() => {
     :class="{
       'is-embedded': props.embedded,
       'has-tool-dock': props.showToolDock && !props.embedded,
+      'has-contextual-nav': hasContextualNav,
       'notification-open': props.embedded && isNotificationPanelOpen,
     }"
     :style="props.embedded ? undefined : glassStyle"
     aria-label="顶部导航"
     data-tour-target="dashboard-topbar"
   >
-    <div class="brand-block" :class="{ 'is-embedded': props.embedded }" aria-label="AI办公平台">
+    <div
+      v-if="hasContextualNav"
+      class="brand-block brand-block--contextual"
+      aria-label="页面导航"
+    >
+      <button type="button" class="contextual-back-btn" @click="goHome">
+        <IconArrowLeft aria-hidden="true" />
+        <span>{{ props.backLabel }}</span>
+      </button>
+      <span class="contextual-divider" aria-hidden="true" />
+      <h1 class="contextual-page-title">{{ props.pageTitle }}</h1>
+    </div>
+    <div v-else class="brand-block" :class="{ 'is-embedded': props.embedded }" aria-label="AI办公平台">
       <img class="brand-logo" :src="homeCardLogoImage" alt="" />
       <span class="brand-title">AI办公平台</span>
     </div>
@@ -992,6 +1017,64 @@ onBeforeUnmount(() => {
 }
 
 .brand-title {
+  color: #13203a;
+  font-size: 18px;
+  font-weight: 950;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.brand-block--contextual {
+  gap: 12px;
+}
+
+.contextual-back-btn {
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.62);
+  color: #334155;
+  padding: 6px 12px 6px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.contextual-back-btn:hover,
+.contextual-back-btn:focus-visible {
+  border-color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.9);
+  color: #0f172a;
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.contextual-back-btn svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2.5;
+}
+
+.contextual-divider {
+  width: 1px;
+  height: 18px;
+  flex: 0 0 auto;
+  background: rgba(148, 163, 184, 0.42);
+}
+
+.contextual-page-title {
+  margin: 0;
   color: #13203a;
   font-size: 18px;
   font-weight: 950;

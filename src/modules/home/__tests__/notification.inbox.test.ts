@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { SysMessage } from '@/modules/home/dashboard/sys-message.service'
-import type { CalendarEvent, CalendarUser } from '@/modules/home/dashboard/types'
+import type { SysMessage } from '@/modules/home/dashboard/services/sys-message.service'
+import type { CalendarEvent, CalendarUser } from '@/modules/home/dashboard/config/types'
 import {
   buildInboxItems,
   countActionableInboxItems,
   filterInboxItems,
   findRelatedUnreadMessages,
-} from './notification.inbox'
+} from '../dashboard/services/notification.inbox'
 
 const pendingTodo: CalendarEvent = {
   id: '458',

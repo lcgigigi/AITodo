@@ -1,7 +1,7 @@
 import { storeToRefs } from 'pinia'
 import { useDashboardTodosStore } from '@/stores/dashboard-todos.store'
-import type { CalendarEventStatus } from './types'
-import type { TodoDateRange } from './todo.service'
+import type { CalendarEventStatus } from '../config/types'
+import type { TodoDateRange } from '../services/todo.service'
 
 type UseDashboardTodosOptions = {
   getLoadRange: () => TodoDateRange | undefined

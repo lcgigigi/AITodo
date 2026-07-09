@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { SysMessage } from './sys-message.service'
+import type { SysMessage } from '../dashboard/services/sys-message.service'
 import {
   countUnreadSysMessages,
   hasSysMessage,
@@ -7,7 +7,7 @@ import {
   markSysMessageIdsReadInList,
   mergeSysMessages,
   removeSysMessageIdsFromList,
-} from './sys-message.state'
+} from '../dashboard/services/sys-message.state'
 
 function message(id: string | number, msgStatus: 0 | 1 = 0): SysMessage {
   return {

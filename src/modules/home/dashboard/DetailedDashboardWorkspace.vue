@@ -9,25 +9,27 @@ import CalendarMonth from './CalendarMonth.vue'
 import TodoQuickCreateBar from './components/TodoQuickCreateBar.vue'
 import TodoDetailViewPanel from './components/TodoDetailViewPanel.vue'
 import DayPreviewPanel from './DayPreviewPanel.vue'
-import type { CalendarDay, CalendarEvent, CalendarTodoDraft, CalendarTodoUpdate } from './types'
+import type { CalendarDay, CalendarEvent, CalendarTodoDraft, CalendarTodoUpdate, TodoOpenSource } from './config/types'
 import {
   compareEvents,
+  countTodoScopeEvents,
   formatEventTime,
+  getBackendTodoStatusLabel,
   getEventScheduleDisplay,
+  getTodoListDisplayText,
+  getTodoScopeBadge,
+  isAllDayEvent,
+  isMeetingTodoEvent as isMeetingEvent,
+  isRangeEvent,
   isRejectedTodo,
   matchesDetailCategoryFilter,
   matchesDetailStatusFilter,
   matchesTodoScopeFilter,
-  isAllDayEvent,
-  isRangeEvent,
   ymd,
-  getTodoScopeBadge,
-  countTodoScopeEvents,
-  getTodoListDisplayText,
   type DetailCategoryFilter,
   type DetailStatusFilter,
   type TodoScopeFilter,
-} from './todoDisplay'
+} from './helpers/todoDisplay'
 import {
   buildTodoDetailPanelViewModel,
   canDeleteTodoEvent,
@@ -37,7 +39,7 @@ import {
   mergeCalendarEventWithDetail,
   resolveCalendarEventDetail,
   storeCalendarEventDetail,
-} from './todoDetailPanel.helpers'
+} from './helpers/todoDetailPanel.helpers'
 import {
   acceptTodos,
   createTodo as serviceCreateTodo,
@@ -47,9 +49,10 @@ import {
   loadTodoDetail,
   rejectTodo,
   updateTodo as serviceUpdateTodo,
-} from './todo.service'
-import { useDashboardTodos } from './useDashboardTodos'
-import { runDashboardTodoAction } from './dashboardTodoActions'
+} from './services/todo.service'
+import { useDashboardTodos } from './composables/useDashboardTodos'
+import { runDashboardTodoAction } from './helpers/dashboardTodoActions'
+import { useTodoDetailCache } from './composables/useTodoDetailCache'
 
 type DayPreviewPanelExpose = {
   openCreateForm: () => void
@@ -89,12 +92,10 @@ const now = ref(new Date())
 const todayDate = computed(() => ymd(now.value))
 const currentMonth = ref(new Date(now.value.getFullYear(), now.value.getMonth(), 1))
 const calendarViewMode = ref<'month' | 'week'>('month')
-const taskDetails = ref<Record<string, CalendarEvent>>({})
 const categoryFilter = ref<DetailCategoryFilter>(DEFAULT_CATEGORY_FILTER)
 const statusFilter = ref<DetailStatusFilter>('all')
 const scopeFilter = ref<TodoScopeFilter>('all')
 const activeTaskId = ref('')
-const detailLoadingId = ref('')
 const quickCreateText = ref('')
 const leftPanelMode = ref<LeftPanelMode>('tools')
 const isCreateFormDirty = ref(false)
@@ -104,7 +105,7 @@ const dayPreviewPanelRef = ref<DayPreviewPanelExpose | null>(null)
 const dayPreviewEditPanelRef = ref<DayPreviewPanelExpose | null>(null)
 const isEditFormDirty = ref(false)
 const pendingActionProcessing = ref(false)
-const pendingInboxDetailActive = ref(false)
+const todoDetailOpenSource = ref<TodoOpenSource>('calendar')
 const pendingDeleteTaskId = ref('')
 const deleteActionProcessing = ref(false)
 
@@ -128,6 +129,16 @@ const {
   getLoadRange: getActiveTodoLoadRange,
   loadErrorFallback: '加载待办数据失败',
   onUnauthorized: redirectToLogin,
+})
+
+const {
+  taskDetails,
+  detailLoadingId,
+  loadTaskDetail: loadCachedTaskDetail,
+} = useTodoDetailCache({
+  currentUser,
+  assignableUsers,
+  onError: () => feedbackStore.error('查询待办详情失败'),
 })
 
 let hasInitializedTodoRange = false
@@ -306,8 +317,15 @@ const activeTask = computed(() => {
 
 const showPendingInboxActions = computed(() => {
   if (!activeTask.value) return false
-  if (pendingInboxDetailActive.value) return true
   return isPendingAcceptanceTask(getTaskDetail(activeTask.value), currentUser.value)
+})
+
+const showDetailFooter = computed(() => {
+  if (todoDetailOpenSource.value === 'notification') return false
+  if (todoDetailOpenSource.value === 'pending-inbox' && !showPendingInboxActions.value) {
+    return false
+  }
+  return true
 })
 
 const taskDetailPanel = computed(() => {
@@ -399,8 +417,6 @@ async function refreshTodos() {
 
   if (!preserveDetailId) return
 
-  pendingInboxDetailActive.value = false
-
   const updatedTask = findEventById(preserveDetailId)
   if (updatedTask) {
     if (preservedDetail) {
@@ -443,7 +459,7 @@ function findEventById(id: string) {
 async function openTodoFromNotification(payload: {
   id: string
   date?: string
-  source?: 'pending-inbox'
+  source?: TodoOpenSource
 }) {
   if (leftPanelMode.value === 'create') {
     if (isCreateFormDirty.value) {
@@ -460,12 +476,12 @@ async function openTodoFromNotification(payload: {
   try {
     const detailEvent = await loadTodoDetail(payload.id, currentUser.value, assignableUsers.value)
     taskDetails.value = storeCalendarEventDetail(taskDetails.value, detailEvent, payload.id)
-    pendingInboxDetailActive.value = payload.source === 'pending-inbox'
+    todoDetailOpenSource.value = payload.source ?? 'notification'
     leftPanelMode.value = 'detail'
     activeTaskId.value = detailEvent.id
     pendingDeleteTaskId.value = ''
   } catch {
-    pendingInboxDetailActive.value = false
+    todoDetailOpenSource.value = 'calendar'
     feedbackStore.error('查询待办详情失败')
   } finally {
     detailLoadingId.value = ''
@@ -630,7 +646,7 @@ async function openTaskDetail(task: CalendarEvent) {
     return
   }
 
-  pendingInboxDetailActive.value = false
+  todoDetailOpenSource.value = 'calendar'
   leftPanelMode.value = 'detail'
   activeTaskId.value = task.id
   pendingDeleteTaskId.value = ''
@@ -687,7 +703,7 @@ async function handleUpdateTodo(payload: CalendarTodoUpdate) {
 
 function closeTaskDetail() {
   activeTaskId.value = ''
-  pendingInboxDetailActive.value = false
+  todoDetailOpenSource.value = 'calendar'
   pendingDeleteTaskId.value = ''
   if (leftPanelMode.value === 'detail' || leftPanelMode.value === 'edit') {
     leftPanelMode.value = 'tools'
@@ -695,25 +711,10 @@ function closeTaskDetail() {
 }
 
 async function loadTaskDetail(task: CalendarEvent, force = false, options?: { silent?: boolean }) {
-  if (!currentUser.value.id || (!force && taskDetails.value[task.id])) return
-
-  const silent = options?.silent ?? false
-  if (!silent) {
-    detailLoadingId.value = task.id
-  }
-
-  try {
-    const detail = await loadTodoDetail(task.id, currentUser.value, assignableUsers.value)
-    taskDetails.value = storeCalendarEventDetail(taskDetails.value, detail, task.id)
-  } catch {
-    if (!silent) {
-      feedbackStore.error('查询待办详情失败')
-    }
-  } finally {
-    if (!silent) {
-      detailLoadingId.value = ''
-    }
-  }
+  await loadCachedTaskDetail(task, {
+    force,
+    silent: options?.silent,
+  })
 }
 
 async function toggleTaskStatus(task: CalendarEvent) {
@@ -814,11 +815,8 @@ async function toggleDetailTaskStatus() {
 }
 
 function getTaskStatusLabel(task: CalendarEvent) {
-  if (task.backendStatus === 6 || task.status === 'done') return '已完成'
-  if (task.backendStatus === 9) return '已拒绝'
-  if (task.backendStatus === 3) return '已接受'
   if (isPendingAcceptanceTask(task, currentUser.value)) return '待接受'
-  return '待处理'
+  return getBackendTodoStatusLabel(task)
 }
 
 async function handleAcceptPendingTodo() {
@@ -828,7 +826,6 @@ async function handleAcceptPendingTodo() {
   pendingActionProcessing.value = true
   try {
     await acceptTodos(task.id)
-    pendingInboxDetailActive.value = false
     closeTaskDetail()
     await refreshTodos()
     feedbackStore.success('已接受待办')
@@ -846,7 +843,6 @@ async function handleRejectPendingTodo() {
   pendingActionProcessing.value = true
   try {
     await rejectTodo(task.id, '暂不处理')
-    pendingInboxDetailActive.value = false
     closeTaskDetail()
     await refreshTodos()
     feedbackStore.success('已拒绝待办')
@@ -883,10 +879,6 @@ async function confirmDeleteActiveTask() {
     feedbackStore.success('待办已删除')
   })
   deleteActionProcessing.value = false
-}
-
-function isMeetingEvent(event: CalendarEvent) {
-  return event.type === 'meeting'
 }
 
 function compareTaskListEvents(a: CalendarEvent, b: CalendarEvent) {
@@ -1219,7 +1211,7 @@ function weekRangeLabel(anchorDate: string) {
                         </span>
                         <span
                           v-if="getTodoScopeBadge(task)"
-                          class="task-scope-badge"
+                          class="todo-scope-badge task-scope-badge"
                           :class="`tone-${getTodoScopeBadge(task)!.tone}`"
                         >
                           {{ getTodoScopeBadge(task)!.label }}
@@ -1314,7 +1306,7 @@ function weekRangeLabel(anchorDate: string) {
             :loading="isActiveDetailLoading"
             @close="closeTaskDetail"
           >
-            <template v-if="activeTask" #footer>
+            <template v-if="showDetailFooter" #footer>
               <div
                 class="detail-panel-actions"
                 :class="{
@@ -1440,15 +1432,6 @@ function weekRangeLabel(anchorDate: string) {
   overflow: hidden;
 }
 
-.glass-panel {
-  border: 1px solid var(--home-glass-border);
-  border-radius: var(--home-glass-radius);
-  background: var(--home-glass-bg);
-  box-shadow: var(--home-glass-shadow);
-  backdrop-filter: var(--home-glass-blur);
-  -webkit-backdrop-filter: var(--home-glass-blur);
-}
-
 .detail-board {
   position: relative;
   min-width: 0;
@@ -1568,278 +1551,6 @@ function weekRangeLabel(anchorDate: string) {
   min-height: 0;
 }
 
-.left-panel-detail {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  border-radius: 22px;
-  background: linear-gradient(165deg, rgba(255, 255, 255, 0.78), rgba(246, 250, 255, 0.56));
-  border: 1px solid rgba(255, 255, 255, 0.82);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.92),
-    0 18px 36px -28px rgba(38, 67, 109, 0.22);
-  overflow: hidden;
-  box-sizing: border-box;
-}
-
-.detail-panel-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 18px 20px 16px;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.72);
-  background: rgba(255, 255, 255, 0.42);
-}
-
-.detail-panel-head-main {
-  min-width: 0;
-}
-
-.detail-panel-kicker {
-  display: block;
-  color: var(--detail-blue);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 1.1px;
-}
-
-.detail-panel-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.detail-type-badge,
-.detail-status-badge {
-  display: inline-flex;
-  align-items: center;
-  height: 26px;
-  padding: 0 11px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.detail-type-badge.meeting {
-  color: #1d4fbf;
-  background: rgba(47, 124, 255, 0.12);
-  border: 1px solid rgba(47, 124, 255, 0.16);
-}
-
-.detail-type-badge.todo {
-  color: #5b49d6;
-  background: rgba(109, 92, 255, 0.12);
-  border: 1px solid rgba(109, 92, 255, 0.16);
-}
-
-.detail-status-badge.accepted {
-  color: #1d4fbf;
-  background: rgba(219, 234, 254, 0.92);
-}
-
-.detail-status-badge.done {
-  color: #166534;
-  background: rgba(220, 252, 231, 0.94);
-  border: 1px solid rgba(22, 163, 74, 0.22);
-}
-
-.detail-status-badge.done::before {
-  content: '✓';
-  margin-right: 5px;
-  font-weight: 900;
-}
-
-.detail-status-badge.rejected {
-  color: #b91c1c;
-  background: rgba(254, 226, 226, 0.92);
-}
-
-.detail-status-badge.pending {
-  color: #b45309;
-  background: rgba(254, 243, 199, 0.96);
-}
-
-.detail-status-badge.waiting {
-  color: #475569;
-  background: rgba(241, 245, 249, 0.96);
-}
-
-.detail-panel-close {
-  flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
-  border: 1px solid rgba(226, 232, 240, 0.9);
-  border-radius: 12px;
-  color: #60708d;
-  background: rgba(255, 255, 255, 0.82);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  transition:
-    background 0.18s ease,
-    border-color 0.18s ease,
-    transform 0.18s ease;
-}
-
-.detail-panel-close:hover {
-  background: #fff;
-  border-color: rgba(47, 124, 255, 0.18);
-  transform: translateY(-1px);
-}
-
-.detail-panel-close svg {
-  width: 18px;
-  height: 18px;
-}
-
-.detail-panel-body {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 18px 20px 12px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-}
-
-.detail-panel-title {
-  margin: 0;
-  font-size: 24px;
-  line-height: 1.42;
-  letter-spacing: -0.35px;
-  color: #101936;
-  font-weight: 800;
-}
-
-.detail-panel-desc {
-  margin: -6px 0 0;
-  color: #5c6b82;
-  font-size: 14px;
-  line-height: 1.75;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.detail-field-label {
-  display: block;
-  margin-bottom: 6px;
-  color: #8795aa;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-}
-
-.detail-time-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  padding: 15px 16px;
-  border-radius: 16px;
-  background: linear-gradient(135deg, rgba(47, 124, 255, 0.1), rgba(47, 124, 255, 0.03));
-  border: 1px solid rgba(47, 124, 255, 0.12);
-}
-
-.detail-time-icon {
-  flex: 0 0 auto;
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
-  color: var(--detail-blue);
-  background: rgba(255, 255, 255, 0.78);
-  display: grid;
-  place-items: center;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92);
-}
-
-.detail-time-icon svg {
-  width: 18px;
-  height: 18px;
-}
-
-.detail-time-main {
-  min-width: 0;
-  flex: 1;
-}
-
-.detail-time-lines {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-.detail-time-line {
-  color: #101936;
-  font-size: 15px;
-  font-weight: 700;
-  line-height: 1.45;
-}
-
-.detail-time-separator {
-  color: #94a3b8;
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.detail-meta-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.detail-meta-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  min-width: 0;
-  padding: 14px;
-  border-radius: 15px;
-  background: rgba(255, 255, 255, 0.58);
-  border: 1px solid rgba(255, 255, 255, 0.78);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
-}
-
-.detail-meta-icon {
-  flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  color: #60708d;
-  background: rgba(241, 245, 249, 0.92);
-  display: grid;
-  place-items: center;
-}
-
-.detail-meta-icon svg {
-  width: 15px;
-  height: 15px;
-}
-
-.detail-meta-copy {
-  min-width: 0;
-}
-
-.detail-meta-copy strong {
-  display: block;
-  color: #101936;
-  font-size: 14px;
-  font-weight: 700;
-  line-height: 1.45;
-  word-break: break-word;
-}
-
-.detail-panel-footer {
-  flex: 0 0 auto;
-  padding: 14px 20px 18px;
-  border-top: 1px solid rgba(226, 232, 240, 0.72);
-  background: rgba(255, 255, 255, 0.48);
-}
-
 .detail-panel-actions {
   display: grid;
   grid-template-columns: 1fr;
@@ -1930,264 +1641,6 @@ function weekRangeLabel(anchorDate: string) {
 .detail-action.is-syncing:disabled {
   opacity: 0.72;
   cursor: wait;
-}
-
-.detail-panel-body.is-loading {
-  pointer-events: none;
-}
-
-.detail-panel-skeleton {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.detail-skeleton-block {
-  border-radius: 10px;
-  background: linear-gradient(
-    90deg,
-    rgba(226, 232, 240, 0.52) 0%,
-    rgba(248, 250, 252, 0.96) 50%,
-    rgba(226, 232, 240, 0.52) 100%
-  );
-  background-size: 240px 100%;
-  animation: detail-skeleton-shimmer 1.15s ease-in-out infinite;
-}
-
-.detail-skeleton-title {
-  width: 58%;
-  height: 28px;
-  border-radius: 12px;
-}
-
-.detail-skeleton-desc {
-  width: 100%;
-  height: 14px;
-}
-
-.detail-skeleton-desc.is-short {
-  width: 72%;
-}
-
-.detail-skeleton-time-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  padding: 15px 16px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.42);
-  border: 1px solid rgba(226, 232, 240, 0.72);
-}
-
-.detail-skeleton-icon {
-  flex: 0 0 auto;
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
-}
-
-.detail-skeleton-time-copy,
-.detail-skeleton-meta-copy {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-top: 2px;
-}
-
-.detail-skeleton-label {
-  width: 56px;
-  height: 10px;
-  border-radius: 6px;
-}
-
-.detail-skeleton-line {
-  width: 78%;
-  height: 16px;
-  border-radius: 8px;
-}
-
-.detail-skeleton-meta-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.detail-skeleton-meta-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  min-width: 0;
-  padding: 14px;
-  border-radius: 15px;
-  background: rgba(255, 255, 255, 0.42);
-  border: 1px solid rgba(255, 255, 255, 0.72);
-}
-
-.detail-skeleton-meta-item .detail-skeleton-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-}
-
-.detail-skeleton-meta-item .detail-skeleton-line {
-  width: 64%;
-  height: 14px;
-}
-
-@keyframes detail-skeleton-shimmer {
-  0% {
-    background-position: -240px 0;
-  }
-
-  100% {
-    background-position: calc(240px + 100%) 0;
-  }
-}
-
-.side-card {
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.44);
-  border: 1px solid rgba(255, 255, 255, 0.64);
-  padding: 16px;
-}
-
-.panel-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-.panel-title h2 {
-  margin: 0;
-  font-size: 17px;
-  font-weight: 700;
-  color: #14213d;
-}
-
-.panel-title small {
-  color: #8795aa;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.panel-mini-btn {
-  height: 30px;
-  padding: 0 10px;
-  border-radius: 10px;
-  border: 0;
-  color: #52627b;
-  background: rgba(255, 255, 255, 0.6);
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.panel-mini-btn:hover {
-  background: rgba(255, 255, 255, 0.86);
-}
-
-.tool-list {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
-.tool-item {
-  width: 100%;
-  min-height: 88px;
-  padding: 12px 10px;
-  display: grid;
-  justify-items: center;
-  align-content: center;
-  gap: 10px;
-  border-radius: 18px;
-  color: #14213d;
-  background: rgba(255, 255, 255, 0.65);
-  border: 1px solid rgba(255, 255, 255, 0.7);
-  cursor: pointer;
-  text-align: center;
-  font: inherit;
-  transition: 0.2s ease;
-}
-
-.tool-item:hover,
-.tool-item.active {
-  background: rgba(255, 255, 255, 0.92);
-  border-color: rgba(76, 133, 235, 0.18);
-  transform: translateY(-2px);
-  box-shadow: 0 12px 24px rgba(43, 82, 132, 0.08);
-}
-
-.tool-icon {
-  flex: 0 0 auto;
-  width: 38px;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  border-radius: 13px;
-  background: rgba(52, 120, 246, 0.08);
-  color: #3478f6;
-}
-
-.tool-icon svg {
-  width: 18px;
-  height: 18px;
-}
-
-.tool-name {
-  font-size: 14px;
-  font-weight: 650;
-  line-height: 1.2;
-}
-
-.side-note {
-  margin-top: 10px;
-  padding: 14px;
-  border-radius: 16px;
-  background: linear-gradient(180deg, rgba(52, 120, 246, 0.06), rgba(52, 120, 246, 0.03));
-  border: 1px solid rgba(52, 120, 246, 0.08);
-}
-
-.side-note h3 {
-  margin: 0 0 8px;
-  font-size: 15px;
-  font-weight: 700;
-  color: #14213d;
-}
-
-.side-note p {
-  margin: 0;
-  color: #52627b;
-  font-size: 12px;
-  line-height: 1.7;
-}
-
-.customize {
-  margin-top: auto;
-  padding: 0 2px 2px;
-}
-
-.customize button {
-  width: 100%;
-  height: 42px;
-  border-radius: 13px;
-  color: #52627b;
-  background: rgba(255, 255, 255, 0.45);
-  cursor: pointer;
-  border: 1px dashed rgba(108, 137, 174, 0.25);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.customize button:hover {
-  background: rgba(255, 255, 255, 0.72);
-  border-color: rgba(108, 137, 174, 0.36);
 }
 
 .detail-main-header {
@@ -2538,18 +1991,6 @@ function weekRangeLabel(anchorDate: string) {
   font-weight: 800;
   line-height: 1.2;
   white-space: nowrap;
-}
-
-.task-scope-badge.tone-outgoing {
-  color: #0e7490;
-  background: rgba(207, 250, 254, 0.92);
-  box-shadow: inset 0 0 0 1px rgba(14, 116, 144, 0.16);
-}
-
-.task-scope-badge.tone-incoming {
-  color: #b45309;
-  background: rgba(254, 243, 199, 0.96);
-  box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.18);
 }
 
 .task-card.todo {

@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   buildTodoDetailPanelViewModel,
   buildDispatchProgressSummary,
+  isPendingAcceptanceTask,
   mergeCalendarEventWithDetail,
-} from './todoDetailPanel.helpers'
-import type { CalendarEvent, CalendarUser } from './types'
+} from '../dashboard/helpers/todoDetailPanel.helpers'
+import type { CalendarEvent, CalendarUser } from '../dashboard/config/types'
 
 const creator: CalendarUser = {
   id: '1110691',
@@ -113,5 +114,55 @@ describe('buildTodoDetailPanelViewModel assignee progress', () => {
     expect(panel.meta).toEqual(
       expect.arrayContaining([expect.objectContaining({ key: 'receiver', label: '接受人' })]),
     )
+  })
+})
+
+describe('isPendingAcceptanceTask', () => {
+  it('returns true only when assignee still needs to accept', () => {
+    expect(
+      isPendingAcceptanceTask(
+        buildTask({
+          scope: 'assigned_to_me',
+          assigneeId: '1102080',
+          receiveStatus: 2,
+        }),
+        assignee,
+      ),
+    ).toBe(true)
+  })
+
+  it('returns false for deleted, rejected, or already accepted todos', () => {
+    expect(
+      isPendingAcceptanceTask(
+        buildTask({ scope: 'assigned_to_me', assigneeId: '1102080', backendStatus: 99 }),
+        assignee,
+      ),
+    ).toBe(false)
+    expect(
+      isPendingAcceptanceTask(
+        buildTask({ scope: 'assigned_to_me', assigneeId: '1102080', backendStatus: 9 }),
+        assignee,
+      ),
+    ).toBe(false)
+    expect(
+      isPendingAcceptanceTask(
+        buildTask({
+          scope: 'assigned_to_me',
+          assigneeId: '1102080',
+          receiveStatus: 1,
+          backendStatus: 3,
+        }),
+        assignee,
+      ),
+    ).toBe(false)
+  })
+
+  it('does not treat assigned_to_me scope alone as pending acceptance', () => {
+    expect(
+      isPendingAcceptanceTask(
+        buildTask({ scope: 'assigned_to_me', assigneeId: '1102080', backendStatus: 0 }),
+        assignee,
+      ),
+    ).toBe(false)
   })
 })

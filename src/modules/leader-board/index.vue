@@ -48,7 +48,6 @@ interface AppUsage {
   tokens: string
   value: number
   share: number
-  change?: number
   color: string
 }
 
@@ -137,8 +136,7 @@ const moduleColors: Record<string, string> = {
 const BOARD_DESIGN_WIDTH = 2000
 const BOARD_DESIGN_HEIGHT = 1125
 const boardScale = ref(1)
-const boardOffsetX = ref(0)
-const boardOffsetY = ref(0)
+const boardViewportHeight = ref(BOARD_DESIGN_HEIGHT)
 
 const trendChartRef = ref<HTMLElement | null>(null)
 const appDonutChartRef = ref<HTMLElement | null>(null)
@@ -146,10 +144,14 @@ const appDonutChartRef = ref<HTMLElement | null>(null)
 const { getChart, resizeCharts, disposeCharts } = useECharts()
 let resizeObserver: ResizeObserver | null = null
 
+const boardViewportStyle = computed(() => ({
+  height: `${boardViewportHeight.value}px`,
+}))
+
 const boardCanvasStyle = computed(() => ({
   width: `${BOARD_DESIGN_WIDTH}px`,
   height: `${BOARD_DESIGN_HEIGHT}px`,
-  transform: `translate3d(${boardOffsetX.value}px, ${boardOffsetY.value}px, 0) scale(${boardScale.value})`,
+  transform: `scale(${boardScale.value})`,
 }))
 
 function clampTrendIndex(index: number, length: number) {
@@ -448,21 +450,14 @@ function renderAppDonutChart() {
       color: apps.map((app) => app.color),
       title: {
         text: `总 Token\n${formatTokenCompact(total)}`,
-        subtext: periodDisplayName.value,
         left: 'center',
-        top: '39%',
+        top: 'middle',
         textStyle: {
           color: '#0d1d4a',
           fontSize: 15,
           lineHeight: 34,
           fontWeight: 800,
           fontFamily: '"Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif',
-        },
-        subtextStyle: {
-          ...chartTextStyle,
-          color: '#7a8db7',
-          fontSize: 13,
-          fontWeight: 800,
         },
       },
       tooltip: {
@@ -513,16 +508,10 @@ function renderAllCharts() {
 
 function updateBoardScale() {
   const viewportWidth = window.innerWidth
-  const viewportHeight = window.innerHeight
-  const nextScale = Math.min(
-    viewportWidth / BOARD_DESIGN_WIDTH,
-    viewportHeight / BOARD_DESIGN_HEIGHT,
-    1,
-  )
+  const nextScale = viewportWidth / BOARD_DESIGN_WIDTH
 
   boardScale.value = Number(nextScale.toFixed(4))
-  boardOffsetX.value = Math.max(0, (viewportWidth - BOARD_DESIGN_WIDTH * boardScale.value) / 2)
-  boardOffsetY.value = Math.max(0, (viewportHeight - BOARD_DESIGN_HEIGHT * boardScale.value) / 2)
+  boardViewportHeight.value = BOARD_DESIGN_HEIGHT * boardScale.value
 }
 
 function handleWindowResize() {
@@ -584,7 +573,8 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="leader-board-page">
-    <div class="leader-board-canvas" :style="boardCanvasStyle">
+    <div class="leader-board-viewport" :style="boardViewportStyle">
+      <div class="leader-board-canvas" :style="boardCanvasStyle">
       <header class="leader-topbar">
         <div class="title-stack">
           <h1>
@@ -686,8 +676,6 @@ onBeforeUnmount(() => {
                   <th scope="col">部门</th>
                   <th scope="col">Token 使用量</th>
                   <th scope="col">占比</th>
-                  <th scope="col">环比增长</th>
-                  <th scope="col">趋势</th>
                 </tr>
               </thead>
               <tbody>
@@ -718,8 +706,6 @@ onBeforeUnmount(() => {
                     <strong>{{ department.tokens }}</strong>
                   </td>
                   <td class="numeric">{{ department.share.toFixed(1) }}%</td>
-                  <td class="numeric muted">--</td>
-                  <td class="numeric muted">--</td>
                 </tr>
               </tbody>
             </table>
@@ -767,7 +753,6 @@ onBeforeUnmount(() => {
                     <th scope="col">应用名称</th>
                     <th scope="col">Token 使用量</th>
                     <th scope="col">占比</th>
-                    <th scope="col">环比增长</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -791,15 +776,6 @@ onBeforeUnmount(() => {
                       <strong>{{ app.tokens }}</strong>
                     </td>
                     <td class="numeric">{{ app.share.toFixed(1) }}%</td>
-                    <td class="numeric">
-                      <span class="change-chip" :class="{ negative: (app.change ?? 0) < 0 }">
-                        <template v-if="app.change !== undefined">
-                          {{ app.change >= 0 ? '▲' : '▼' }}
-                          {{ Math.abs(app.change).toFixed(1) }}%
-                        </template>
-                        <template v-else>--</template>
-                      </span>
-                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -807,6 +783,7 @@ onBeforeUnmount(() => {
           </div>
         </article>
       </section>
+      </div>
     </div>
   </main>
 </template>
@@ -825,11 +802,13 @@ onBeforeUnmount(() => {
   --green: #13b890;
   --orange: #ff8a18;
   position: relative;
+  display: grid;
+  place-items: center;
   width: 100vw;
-  height: 100vh;
-  min-height: 0;
+  min-height: 100vh;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 0;
   color: var(--ink);
   background: radial-gradient(circle at 17% 0%, rgba(18, 115, 248, 0.08), transparent 32%),
@@ -842,6 +821,13 @@ onBeforeUnmount(() => {
     BlinkMacSystemFont,
     sans-serif;
   font-variant-numeric: tabular-nums;
+}
+
+.leader-board-viewport {
+  position: relative;
+  width: 100%;
+  flex-shrink: 0;
+  overflow: hidden;
 }
 
 .leader-board-canvas {
@@ -1096,6 +1082,10 @@ onBeforeUnmount(() => {
 
 .usage-panel {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
   padding: 20px 28px 20px;
 }
@@ -1205,7 +1195,18 @@ onBeforeUnmount(() => {
 
 .department-table-wrap,
 .app-table-wrap {
-  overflow: hidden;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.department-table thead th,
+.app-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel-bg);
 }
 
 .usage-table {
@@ -1252,16 +1253,6 @@ onBeforeUnmount(() => {
 .department-table th:nth-child(4),
 .department-table td:nth-child(4) {
   width: 94px;
-}
-
-.department-table th:nth-child(5),
-.department-table td:nth-child(5) {
-  width: 126px;
-}
-
-.department-table th:nth-child(6),
-.department-table td:nth-child(6) {
-  width: 146px;
 }
 
 .rank-pill {
@@ -1340,27 +1331,10 @@ onBeforeUnmount(() => {
   text-align: right;
 }
 
-.numeric.muted {
-  color: #94a3b8;
-  font-weight: 700;
-}
-
-.change-chip {
-  color: var(--green);
-  font-weight: 900;
-}
-
-.change-chip.negative {
-  color: #ff334d;
-}
-
-.sparkline-chart {
-  width: 118px;
-  height: 28px;
-}
-
 .app-usage-body {
-  min-height: 350px;
+  flex: 1 1 auto;
+  align-items: flex-start;
+  min-height: 0;
   gap: 44px;
   padding: 12px 16px 0 4px;
 }
@@ -1389,11 +1363,6 @@ onBeforeUnmount(() => {
 .app-table th:nth-child(3),
 .app-table td:nth-child(3) {
   width: 92px;
-}
-
-.app-table th:nth-child(4),
-.app-table td:nth-child(4) {
-  width: 118px;
 }
 
 .app-name {

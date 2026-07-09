@@ -1,11 +1,11 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { compareEvents, dateRange } from '@/modules/home/dashboard/todoDisplay'
+import { compareEvents, dateRange } from '@/modules/home/dashboard/helpers/todoDisplay'
 import type {
   CalendarEvent,
   CalendarEventStatus,
   CalendarUser,
-} from '@/modules/home/dashboard/types'
+} from '@/modules/home/dashboard/config/types'
 import {
   listTodos,
   loadAssignableUsers,
@@ -13,7 +13,7 @@ import {
   loadTodos,
   type TodoDateRange,
   updateTodoStatus as serviceUpdateTodoStatus,
-} from '@/modules/home/dashboard/todo.service'
+} from '@/modules/home/dashboard/services/todo.service'
 import { isUnauthorizedRequestError } from '@/shared/request/request-error'
 import { useUserStore } from '@/stores/user.store'
 

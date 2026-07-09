@@ -105,8 +105,8 @@ const HOME_PANEL_TOOL_IDS: DashboardToolId[] = [
 ]
 
 const DASHBOARD_TOOL_IDS: DashboardToolId[] = [
-  'image-analysis',
   'policy-qa',
+  'image-analysis',
   'meeting-notes',
   'ppt-creator',
   'agent-workshop',
@@ -121,6 +121,15 @@ function pickDashboardTools(ids: DashboardToolId[]) {
 
 export const homePanelTools = pickDashboardTools(HOME_PANEL_TOOL_IDS)
 export const dashboardTools = pickDashboardTools(DASHBOARD_TOOL_IDS)
+
+export function toDashboardToolTarget(tool: DashboardTool): DashboardToolTarget {
+  return {
+    routeName: tool.routeName,
+    agentKey: tool.agentKey,
+    externalUrl: tool.externalUrl,
+    isMore: tool.isMore,
+  }
+}
 
 export function navigateDashboardTool(router: Router, tool: DashboardToolTarget) {
   if (tool.externalUrl) {

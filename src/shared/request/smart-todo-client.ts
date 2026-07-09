@@ -24,6 +24,25 @@ export function getResponseMessage(response: SmartTodoResponse, fallbackMessage:
   return response.msg || response.message || fallbackMessage
 }
 
+export function unwrapSmartTodoResponse<T>(
+  response: SmartTodoResponse<T>,
+  fallbackMessage: string,
+): T {
+  if (response.success === false) {
+    throw new Error(getResponseMessage(response, fallbackMessage))
+  }
+
+  if (typeof response.code === 'number' && response.code !== 200) {
+    throw new Error(getResponseMessage(response, fallbackMessage))
+  }
+
+  if (response.data === null || response.data === undefined) {
+    throw new Error(getResponseMessage(response, fallbackMessage))
+  }
+
+  return response.data
+}
+
 export function getOptionalText(value: unknown) {
   if (value === null || value === undefined) return undefined
   return String(value).trim()

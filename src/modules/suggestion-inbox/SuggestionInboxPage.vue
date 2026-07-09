@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import IconArrowLeft from '~icons/lucide/arrow-left'
 import IconMailbox from '~icons/lucide/mailbox'
 import IconSparkles from '~icons/lucide/sparkles'
-import type { OpinionCategory } from '@/modules/home/dashboard/opinion-box.service'
+import type { OpinionCategory } from '@/modules/opinion-box/opinion-box.service'
 import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
 
 defineOptions({

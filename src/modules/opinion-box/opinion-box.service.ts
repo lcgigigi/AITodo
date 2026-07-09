@@ -1,4 +1,5 @@
 import { httpClient } from '@/shared/request/http'
+import { type SmartTodoResponse, unwrapSmartTodoResponse } from '@/shared/request/smart-todo-client'
 
 export const DAILY_OPINION_LIMIT = 3
 
@@ -17,41 +18,12 @@ const OPINION_CATEGORY_TO_TYPE: Record<OpinionCategory, OpinionType> = {
   other: 4,
 }
 
-interface OpinionBoxResponse<T = unknown> {
-  code?: number
-  msg?: string
-  message?: string
-  traceId?: string
-  success?: boolean
-  data?: T | null
-}
-
 export function toOpinionType(category: OpinionCategory): OpinionType {
   return OPINION_CATEGORY_TO_TYPE[category]
 }
 
 export function isOpinionType(value: unknown): value is OpinionType {
   return value === 1 || value === 2 || value === 3 || value === 4
-}
-
-function getResponseMessage(response: OpinionBoxResponse, fallbackMessage: string) {
-  return response.msg || response.message || fallbackMessage
-}
-
-function unwrapOpinionBoxResponse<T>(response: OpinionBoxResponse<T>, fallbackMessage: string): T {
-  if (response.success === false) {
-    throw new Error(getResponseMessage(response, fallbackMessage))
-  }
-
-  if (typeof response.code === 'number' && response.code !== 200) {
-    throw new Error(getResponseMessage(response, fallbackMessage))
-  }
-
-  if (response.data === null || response.data === undefined) {
-    throw new Error(getResponseMessage(response, fallbackMessage))
-  }
-
-  return response.data
 }
 
 function toCount(value: unknown) {
@@ -69,7 +41,7 @@ export async function submitOpinion(payload: SubmitOpinionPayload): Promise<bool
     throw new Error('意见类型无效')
   }
 
-  const response = await httpClient.request<OpinionBoxResponse<boolean>>({
+  const response = await httpClient.request<SmartTodoResponse<boolean>>({
     method: 'POST',
     url: '/opinion-box/submit',
     data: {
@@ -79,19 +51,19 @@ export async function submitOpinion(payload: SubmitOpinionPayload): Promise<bool
     showError: false,
   })
 
-  unwrapOpinionBoxResponse(response.data, '意见提交失败')
+  unwrapSmartTodoResponse(response.data, '意见提交失败')
   return true
 }
 
 export async function loadTodayOpinionCount(): Promise<number> {
   try {
-    const response = await httpClient.request<OpinionBoxResponse<number>>({
+    const response = await httpClient.request<SmartTodoResponse<number>>({
       method: 'GET',
       url: '/opinion-box/today-count',
       showError: false,
     })
 
-    return toCount(unwrapOpinionBoxResponse(response.data, '查询今日意见数量失败'))
+    return toCount(unwrapSmartTodoResponse(response.data, '查询今日意见数量失败'))
   } catch {
     return 0
   }

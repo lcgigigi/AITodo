@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { CalendarEvent } from './types'
+import type { CalendarEvent } from '../dashboard/config/types'
 import {
   compareCalendarDisplayEvents,
   compareCalendarRangeBarEvents,
   getActiveCalendarDisplayEvents,
-} from './todoDisplay'
+} from '../dashboard/helpers/todoDisplay'
 
 function event(partial: Partial<CalendarEvent>): CalendarEvent {
   return {

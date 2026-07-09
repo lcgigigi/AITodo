@@ -2,13 +2,13 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import IconBell from '~icons/lucide/bell'
 import IconCheckCheck from '~icons/lucide/check-check'
-import IconExternalLink from '~icons/lucide/external-link'
 import IconTrash2 from '~icons/lucide/trash-2'
 import IconX from '~icons/lucide/x'
 import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
-import type { InboxItem } from '@/modules/home/dashboard/notification.inbox'
-import { useDashboardGlassSettings } from '@/modules/home/dashboard/useDashboardGlassSettings'
-import { useDashboardNotifications } from '@/modules/home/dashboard/useDashboardNotifications'
+import type { InboxItem } from '@/modules/home/dashboard/services/notification.inbox'
+import type { TodoOpenSource } from '@/modules/home/dashboard/config/types'
+import { useDashboardGlassSettings } from '@/modules/home/dashboard/composables/useDashboardGlassSettings'
+import { useDashboardNotifications } from '@/modules/home/dashboard/composables/useDashboardNotifications'
 
 const props = withDefaults(
   defineProps<{
@@ -27,7 +27,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   'calendar-refresh': []
-  'open-todo': [payload: { id: string; date?: string; source?: 'pending-inbox' }]
+  'open-todo': [payload: { id: string; date?: string; source?: TodoOpenSource }]
   close: []
   'update:open': [value: boolean]
 }>()
@@ -94,7 +94,6 @@ const {
 } = useDashboardNotifications({
   onCalendarRefresh: () => emit('calendar-refresh'),
   onOpenTodo: (payload) => emit('open-todo', payload),
-  onClose: () => closePanel(),
 })
 
 const isEmbedded = computed(() => props.layout === 'embedded')
@@ -402,14 +401,14 @@ defineExpose({
               class="notification-item"
               :class="{
                 'is-unread': item.isUnread,
-                'is-clickable': item.kind === 'todo_pending',
+                'is-clickable': isInboxItemOpenable(item),
               }"
-              :role="item.kind === 'todo_pending' ? 'button' : undefined"
-              :tabindex="item.kind === 'todo_pending' ? 0 : undefined"
-              @click="item.kind === 'todo_pending' ? handleOpenInboxItem(item) : undefined"
-              @keydown.enter="item.kind === 'todo_pending' ? handleOpenInboxItem(item) : undefined"
+              :role="isInboxItemOpenable(item) ? 'button' : undefined"
+              :tabindex="isInboxItemOpenable(item) ? 0 : undefined"
+              @click="isInboxItemOpenable(item) ? handleOpenInboxItem(item) : undefined"
+              @keydown.enter="isInboxItemOpenable(item) ? handleOpenInboxItem(item) : undefined"
               @keydown.space.prevent="
-                item.kind === 'todo_pending' ? handleOpenInboxItem(item) : undefined
+                isInboxItemOpenable(item) ? handleOpenInboxItem(item) : undefined
               "
             >
               <span
@@ -470,26 +469,9 @@ defineExpose({
                     >
                       拒绝
                     </button>
-                    <button
-                      type="button"
-                      class="action-btn is-view"
-                      @click="handleOpenInboxItem(item)"
-                    >
-                      查看
-                    </button>
                   </template>
 
                   <template v-else>
-                    <button
-                      v-if="isInboxItemOpenable(item)"
-                      type="button"
-                      class="action-btn is-view has-icon"
-                      :disabled="processingSysMessageId === item.id"
-                      @click="handleOpenInboxItem(item)"
-                    >
-                      <IconExternalLink aria-hidden="true" />
-                      <span>{{ processingSysMessageId === item.id ? '打开中…' : '查看' }}</span>
-                    </button>
                     <button
                       v-if="item.isUnread"
                       type="button"
@@ -501,6 +483,7 @@ defineExpose({
                       <span>已读</span>
                     </button>
                     <button
+                      v-else
                       type="button"
                       class="action-btn is-reject has-icon"
                       :disabled="processingSysMessageId === item.id"

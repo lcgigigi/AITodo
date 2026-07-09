@@ -3,7 +3,7 @@ import {
   getHomeTimePeriod,
   resolveHomeGreetingText,
   getNextHomeAmbienceChangeAt,
-} from './homeTimeOfDay'
+} from '../dashboard/helpers/homeTimeOfDay'
 
 function at(iso: string) {
   return new Date(iso)

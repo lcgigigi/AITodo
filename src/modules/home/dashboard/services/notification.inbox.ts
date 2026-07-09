@@ -1,5 +1,5 @@
-import type { SysMessage } from '@/modules/home/dashboard/sys-message.service'
-import type { CalendarEvent, CalendarUser } from '@/modules/home/dashboard/types'
+import type { SysMessage } from '@/modules/home/dashboard/services/sys-message.service'
+import type { CalendarEvent, CalendarUser } from '@/modules/home/dashboard/config/types'
 
 export type InboxFilter = 'actionable' | 'all'
 export type InboxItemKind = 'todo_pending' | 'todo_notice' | 'meeting' | 'system'

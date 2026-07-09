@@ -1,4 +1,4 @@
-import type { CalendarEvent } from './types'
+import type { CalendarEvent } from '../config/types'
 
 export function parseDate(date: string) {
   return new Date(`${date}T12:00:00`)
@@ -146,31 +146,6 @@ export function formatEventTimeForDayList(
   }
 
   return formatEventTime(event, allDayText)
-}
-
-export function formatMonthEventTime(event: CalendarEvent) {
-  if (isRangeEvent(event))
-    return `${formatShortDate(event.date)}-${formatShortDate(event.endDate ?? event.date)}`
-  return event.time || '·'
-}
-
-export function getCalendarEventTypeLabel(type: CalendarEvent['type']) {
-  if (type === 'meeting') return '会议'
-  if (type === 'approval') return '审批'
-  if (type === 'ai') return 'AI'
-  return '待办'
-}
-
-export function formatFormDateTime(
-  event: Pick<CalendarEvent, 'date' | 'endDate' | 'time' | 'endTime'>,
-) {
-  if (event.endDate) {
-    const start = `${formatShortDate(event.date)}${event.time ? ` ${event.time}` : ''}`
-    const end = `${formatShortDate(event.endDate)}${event.endTime ? ` ${event.endTime}` : ''}`
-    return `${start} ~ ${end}`
-  }
-
-  return `${event.date} ${event.time || '全天'}`
 }
 
 export function isRejectedTodo(event: CalendarEvent) {

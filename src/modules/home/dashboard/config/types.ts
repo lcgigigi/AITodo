@@ -124,11 +124,5 @@ export interface CalendarSpecialDay {
   type: CalendarSpecialDayType
 }
 
-export interface AiToolEntry {
-  id: string
-  name: string
-  desc: string
-  tone: 'blue' | 'green' | 'violet' | 'amber' | 'rose'
-  icon: string
-  meta: string
-}
+/** 待办详情打开来源：日历操作 / 消息通知只读 / 待接受收件箱 */
+export type TodoOpenSource = 'calendar' | 'notification' | 'pending-inbox'

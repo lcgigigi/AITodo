@@ -2,9 +2,9 @@ import type { AxiosRequestConfig } from 'axios'
 import { httpClient } from '@/shared/request/http'
 import {
   SMART_TODO_REQUEST_TIMEOUT,
-  getResponseMessage,
   toId,
   type SmartTodoResponse,
+  unwrapSmartTodoResponse,
 } from '@/shared/request/smart-todo-client'
 import type {
   CalendarEvent,
@@ -15,8 +15,8 @@ import type {
   CalendarUser,
   ParsedTodoDraft,
   SmartTodoKind,
-} from './types'
-import { compareEvents, ymd } from './todoDisplay'
+} from '../config/types'
+import { compareEvents, ymd } from '../helpers/todoDisplay'
 
 interface SmartTodoBackendUser {
   badge?: string | number
@@ -51,14 +51,6 @@ interface SmartTodoBackendItem {
   thirdId?: string | number | null
   fid?: string | number | null
   type?: number | string
-}
-
-export type TodayTodoStatus = 0 | 3 | 6 | 9
-export type TodayTodoType = 1 | 2
-
-export interface TodayTodoQuery {
-  status?: TodayTodoStatus
-  type?: TodayTodoType
 }
 
 interface SmartTodoAnalyzeData {
@@ -97,22 +89,6 @@ interface SmartTodoCreatePayload {
   assigneeIds?: string
   remark: string
   type: SmartTodoKind
-}
-
-function unwrapSmartTodoResponse<T>(response: SmartTodoResponse<T>, fallbackMessage: string): T {
-  if (response.success === false) {
-    throw new Error(getResponseMessage(response, fallbackMessage))
-  }
-
-  if (typeof response.code === 'number' && response.code !== 200) {
-    throw new Error(getResponseMessage(response, fallbackMessage))
-  }
-
-  if (response.data === null || response.data === undefined) {
-    throw new Error(getResponseMessage(response, fallbackMessage))
-  }
-
-  return response.data
 }
 
 async function requestSmartTodoData<T>(config: AxiosRequestConfig, fallbackMessage: string) {
@@ -615,24 +591,6 @@ export async function analyzeTodoText(
   return normalizeAnalyzeData(data, currentUser, assignableUsers, fallback)
 }
 
-export async function analyzeTodoTextByGet(
-  text: string,
-  currentUser: CalendarUser,
-  assignableUsers: CalendarUser[],
-  fallback: ParsedTodoDraft,
-) {
-  const data = await requestSmartTodoData<SmartTodoAnalyzeData>(
-    {
-      method: 'GET',
-      url: '/smart-todo/analyze',
-      params: { text: text.trim() },
-    },
-    'AI解析待办失败',
-  )
-
-  return normalizeAnalyzeData(data, currentUser, assignableUsers, fallback)
-}
-
 export async function loadAssignableUsers() {
   const users = await requestSmartTodoData<SmartTodoBackendUser[]>(
     {
@@ -716,26 +674,6 @@ export async function loadPendingTodos(currentUser: CalendarUser, users: Calenda
   return normalizeBackendTodos(items, currentUser, users).filter(
     (event) => event.backendStatus !== 9,
   )
-}
-
-export async function loadTodayTodos(
-  currentUser: CalendarUser,
-  users: CalendarUser[] = [],
-  query: TodayTodoQuery = {},
-) {
-  const items = await requestSmartTodoData<SmartTodoBackendItem[]>(
-    {
-      method: 'GET',
-      url: '/smart-todo/today-list',
-      params: {
-        status: query.status,
-        type: query.type,
-      },
-    },
-    '查询当天待办失败',
-  )
-
-  return normalizeBackendTodos(items, currentUser, users)
 }
 
 interface SmartTodoDetailResponse {

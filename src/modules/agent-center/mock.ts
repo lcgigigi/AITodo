@@ -98,18 +98,6 @@ export const agents: AgentCatalogItem[] = [
     scenarios: ['面试安排', '候选人管理', '招聘协同'],
     launchUrl: agentLaunchUrls['interview-center'],
   },
-  {
-    id: 'agent-compliance-assistant',
-    key: 'compliance-assistant',
-    name: '合规检查',
-    description: '政策法规解读与合规检查，降低业务风险，保障合规运营。',
-    category: '办公',
-    icon: '盾',
-    theme: 'indigo',
-    permissionState: 'available',
-    scenarios: ['政策解读', '合规检查', '风险提示'],
-    launchUrl: agentLaunchUrls['compliance-assistant'],
-  },
 ]
 
 export const skills: SkillCatalogItem[] = [

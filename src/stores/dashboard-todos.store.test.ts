@@ -4,13 +4,13 @@ import {
   loadAssignableUsers,
   loadCurrentUser,
   loadTodos,
-} from '@/modules/home/dashboard/todo.service'
-import type { CalendarEvent, CalendarUser } from '@/modules/home/dashboard/types'
+} from '@/modules/home/dashboard/services/todo.service'
+import type { CalendarEvent, CalendarUser } from '@/modules/home/dashboard/config/types'
 import { RequestError } from '@/shared/request/request-error'
 import { useDashboardTodosStore } from './dashboard-todos.store'
 import { useUserStore } from './user.store'
 
-vi.mock('@/modules/home/dashboard/todo.service', () => ({
+vi.mock('@/modules/home/dashboard/services/todo.service', () => ({
   listTodos: (events: CalendarEvent[]) => events,
   loadAssignableUsers: vi.fn(),
   loadCurrentUser: vi.fn(),

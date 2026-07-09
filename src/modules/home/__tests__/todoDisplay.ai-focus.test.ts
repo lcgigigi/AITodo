@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { CalendarEvent } from './types'
-import { formatAiFocusTodoLabel, isWeakTodoTitle } from './todoDisplay'
+import type { CalendarEvent } from '../dashboard/config/types'
+import { formatAiFocusTodoLabel, isWeakTodoTitle } from '../dashboard/helpers/todoDisplay'
 
 function event(partial: Partial<CalendarEvent>): CalendarEvent {
   return {

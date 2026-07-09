@@ -3,6 +3,8 @@
 @import './theme.css';
 @import './transitions.css';
 @import './components/glass.css';
+@import './components/todo-badges.css';
+@import './components/todo-picker.css';
 
 @tailwind base;
 @tailwind components;

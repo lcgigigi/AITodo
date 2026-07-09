@@ -3,7 +3,8 @@ import {
   homePanelTools,
   type DashboardTool,
   type DashboardToolTarget,
-} from '@/modules/home/dashboard/dashboardTools'
+  toDashboardToolTarget,
+} from '@/modules/home/dashboard/config/dashboardTools'
 
 defineOptions({
   name: 'HomePanelToolDock',
@@ -14,12 +15,7 @@ const emit = defineEmits<{
 }>()
 
 function selectTool(tool: DashboardTool) {
-  emit('select', {
-    routeName: tool.routeName,
-    agentKey: tool.agentKey,
-    externalUrl: tool.externalUrl,
-    isMore: tool.isMore,
-  })
+  emit('select', toDashboardToolTarget(tool))
 }
 </script>
 

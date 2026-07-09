@@ -1,0 +1,11 @@
+.todo-scope-badge.tone-outgoing {
+  color: #0e7490;
+  background: rgba(207, 250, 254, 0.92);
+  box-shadow: inset 0 0 0 1px rgba(14, 116, 144, 0.16);
+}
+
+.todo-scope-badge.tone-incoming {
+  color: #b45309;
+  background: rgba(254, 243, 199, 0.96);
+  box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.18);
+}

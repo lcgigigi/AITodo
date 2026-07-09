@@ -78,7 +78,13 @@ function onDatePopoverOutside(event: { target?: EventTarget | null; preventDefau
         variant="outline"
         :disabled="disabled"
         :aria-label="ariaLabel"
-        :class="cn('todo-date-trigger', highlighted && 'is-ai-highlighted', externalClass)"
+        :class="
+          cn(
+            'todo-picker-trigger todo-date-trigger',
+            highlighted && 'is-ai-highlighted',
+            externalClass,
+          )
+        "
       >
         <span class="todo-picker-value" :class="{ 'is-placeholder': !modelValue }">
           {{ displayValue }}
@@ -105,56 +111,7 @@ function onDatePopoverOutside(event: { target?: EventTarget | null; preventDefau
 
 <style scoped>
 .todo-date-trigger {
-  width: 100%;
-  min-width: 0;
-  height: 40px;
-  border-color: #dfe8f3;
-  border-radius: 10px;
-  background: #ffffff;
-  color: #111827;
-  padding: 0 12px;
-  justify-content: space-between;
-  font: inherit;
-  font-size: 14px;
   font-weight: 500;
-  box-shadow: none;
-}
-
-.todo-date-trigger:hover,
-.todo-date-trigger[aria-expanded='true'] {
-  border-color: #111827;
-  background: #ffffff;
-  color: #111827;
-  box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.07);
-}
-
-.todo-date-trigger:disabled {
-  background: #f8fafc;
-  color: #475569;
-  cursor: default;
-  opacity: 1;
-}
-
-.todo-picker-value {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.todo-picker-value.is-placeholder {
-  color: #94a3b8;
-}
-
-.todo-date-trigger svg {
-  width: 16px;
-  height: 16px;
-  color: #94a3b8;
-  flex: 0 0 auto;
-}
-
-.todo-date-trigger.is-ai-highlighted .todo-picker-value {
-  animation: ai-picker-value-highlight 0.55s ease-in-out 2;
 }
 
 .todo-date-popover {
@@ -164,29 +121,6 @@ function onDatePopoverOutside(event: { target?: EventTarget | null; preventDefau
 
 .todo-date-popover :deep([data-slot='calendar']) {
   width: max-content;
-}
-
-@keyframes ai-picker-value-highlight {
-  0% {
-    color: #111827;
-    text-shadow: none;
-  }
-  38% {
-    color: #2563eb;
-    text-shadow:
-      0 0 1px rgba(59, 130, 246, 0.62),
-      0 0 10px rgba(59, 130, 246, 0.24);
-  }
-  100% {
-    color: #111827;
-    text-shadow: none;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .todo-date-trigger.is-ai-highlighted .todo-picker-value {
-    animation: none;
-  }
 }
 </style>
 

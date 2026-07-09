@@ -7,7 +7,7 @@ import {
   markAllSysMessagesRead,
   markSysMessagesRead,
   normalizeSysMessagePush,
-} from './sys-message.service'
+} from '../dashboard/services/sys-message.service'
 
 vi.mock('@/shared/request/http', () => ({
   httpClient: {

@@ -13,7 +13,7 @@ import {
   submitOpinion,
   toOpinionType,
   type OpinionCategory,
-} from '@/modules/home/dashboard/opinion-box.service'
+} from '@/modules/opinion-box/opinion-box.service'
 import { useFeedbackStore } from '@/stores/feedback.store'
 import { useUserStore } from '@/stores/user.store'
 

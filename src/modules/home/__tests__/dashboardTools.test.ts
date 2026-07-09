@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dashboardTools, homePanelTools } from './dashboardTools'
+import { dashboardTools, homePanelTools, toDashboardToolTarget } from '../dashboard/config/dashboardTools'
 
 describe('dashboardTools catalog', () => {
   it('uses the same display names for shared tools in both docks', () => {
@@ -16,5 +16,16 @@ describe('dashboardTools catalog', () => {
 
     expect(pptInHome?.name).toBe('智能PPT')
     expect(pptInDetail?.name).toBe('智能PPT')
+  })
+
+  it('maps catalog entries to navigation targets consistently', () => {
+    const tool = dashboardTools[0]
+
+    expect(toDashboardToolTarget(tool)).toEqual({
+      routeName: tool.routeName,
+      agentKey: tool.agentKey,
+      externalUrl: tool.externalUrl,
+      isMore: tool.isMore,
+    })
   })
 })

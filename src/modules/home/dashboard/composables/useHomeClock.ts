@@ -1,5 +1,5 @@
 import { onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
-import { getNextHomeAmbienceChangeAt } from './homeTimeOfDay'
+import { getNextHomeAmbienceChangeAt } from '../helpers/homeTimeOfDay'
 
 const sharedNow = ref(new Date())
 let subscriberCount = 0

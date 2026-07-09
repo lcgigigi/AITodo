@@ -25,22 +25,23 @@ import {
   isMeetingEvent,
   type TodoScopeFilter,
   type TodoTypeFilter,
-} from './dayPreviewPanel.helpers'
+} from './helpers/dayPreviewPanel.helpers'
 import {
   clearDesktopTodoDetailQuery as buildClearedDesktopTodoDetailQuery,
   getDesktopTodoDetailRequest,
-} from './desktopTodoQuery'
-import { navigateDashboardTool, type DashboardToolTarget } from './dashboardTools'
-import { resolveHomeGreetingText } from './homeTimeOfDay'
-import { DASHBOARD_ONBOARDING_TOUR_CLOSE_DAY_PREVIEW_EVENT } from './onboardingTour'
-import { specialDays } from './calendar-special-days/2026'
+} from './helpers/desktopTodoQuery'
+import { navigateDashboardTool, type DashboardToolTarget } from './config/dashboardTools'
+import { resolveHomeGreetingText } from './helpers/homeTimeOfDay'
+import { DASHBOARD_ONBOARDING_TOUR_CLOSE_DAY_PREVIEW_EVENT } from './helpers/onboardingTour'
+import { specialDays } from './config/calendar-special-days/2026'
 import type {
   CalendarEvent,
   CalendarEventStatus,
   CalendarSpecialDay,
   CalendarTodoDraft,
   CalendarTodoUpdate,
-} from './types'
+  TodoOpenSource,
+} from './config/types'
 import {
   compareEvents,
   countTodoScopeEvents,
@@ -52,7 +53,7 @@ import {
   isRangeEvent,
   isSameDayRangeEvent,
   ymd,
-} from './todoDisplay'
+} from './helpers/todoDisplay'
 import {
   buildTodoDetailPanelViewModel,
   canDeleteTodoEvent,
@@ -61,7 +62,7 @@ import {
   mergeCalendarEventWithDetail,
   resolveCalendarEventDetail,
   storeCalendarEventDetail,
-} from './todoDetailPanel.helpers'
+} from './helpers/todoDetailPanel.helpers'
 import {
   acceptTodos,
   createTodo as serviceCreateTodo,
@@ -71,10 +72,11 @@ import {
   loadTodoDetail,
   rejectTodo,
   updateTodo as serviceUpdateTodo,
-} from './todo.service'
-import { useDashboardTodos } from './useDashboardTodos'
-import { runDashboardTodoAction } from './dashboardTodoActions'
-import { useDashboardGlassSettings } from './useDashboardGlassSettings'
+} from './services/todo.service'
+import { useDashboardTodos } from './composables/useDashboardTodos'
+import { runDashboardTodoAction } from './helpers/dashboardTodoActions'
+import { useDashboardGlassSettings } from './composables/useDashboardGlassSettings'
+import { useTodoDetailCache } from './composables/useTodoDetailCache'
 
 type HomePanelMode = 'view' | 'edit' | 'create'
 
@@ -99,11 +101,10 @@ const currentMonth = ref(new Date(now.value.getFullYear(), now.value.getMonth(),
 const isDayPreviewOpen = ref(false)
 const homePanelMode = ref<HomePanelMode>('view')
 const activePanelTaskId = ref('')
-const taskDetails = ref<Record<string, CalendarEvent>>({})
-const detailLoadingId = ref('')
 const pendingDeleteTaskId = ref('')
 const pendingDeleteListTaskId = ref('')
 const pendingActionProcessing = ref(false)
+const panelTodoOpenSource = ref<TodoOpenSource>('calendar')
 const deleteActionProcessing = ref(false)
 const listDeleteActionProcessing = ref(false)
 const quickCreatePrompt = ref('')
@@ -138,6 +139,16 @@ const {
 } = useDashboardTodos({
   getLoadRange: getActiveTodoLoadRange,
   onUnauthorized: redirectToLogin,
+})
+
+const {
+  taskDetails,
+  detailLoadingId,
+  loadTaskDetail: loadCachedTaskDetail,
+} = useTodoDetailCache({
+  currentUser,
+  assignableUsers,
+  onError: () => showToast('查询待办详情失败', 'error'),
 })
 
 onMounted(() => {
@@ -214,6 +225,13 @@ const showPanelPendingInboxActions = computed(() => {
   const task = activePanelTask.value
   if (!task) return false
   return isPendingAcceptanceTask(taskDetails.value[task.id] ?? task, currentUser.value)
+})
+const showPanelDetailFooter = computed(() => {
+  if (panelTodoOpenSource.value === 'notification') return false
+  if (panelTodoOpenSource.value === 'pending-inbox' && !showPanelPendingInboxActions.value) {
+    return false
+  }
+  return true
 })
 const isPanelDeleteConfirming = computed(() =>
   Boolean(activePanelTaskId.value && pendingDeleteTaskId.value === activePanelTaskId.value),
@@ -438,22 +456,10 @@ function openSelectedDayAddTodo() {
 }
 
 async function loadPanelTaskDetail(task: CalendarEvent, options?: { silent?: boolean }) {
-  if (!options?.silent) {
-    detailLoadingId.value = task.id
-  }
-
-  try {
-    const detail = await loadTodoDetail(task.id, currentUser.value, assignableUsers.value)
-    taskDetails.value = storeCalendarEventDetail(taskDetails.value, detail, task.id)
-  } catch {
-    if (!options?.silent) {
-      showToast('查询待办详情失败', 'error')
-    }
-  } finally {
-    if (!options?.silent) {
-      detailLoadingId.value = ''
-    }
-  }
+  await loadCachedTaskDetail(task, {
+    force: true,
+    silent: options?.silent,
+  })
 }
 
 async function refreshCalendarTodos() {
@@ -487,6 +493,9 @@ function openHomePanel(mode: HomePanelMode, task?: CalendarEvent) {
   homePanelMode.value = mode
   activePanelTaskId.value = task?.id ?? ''
   pendingDeleteTaskId.value = ''
+  if (mode === 'view' && task) {
+    panelTodoOpenSource.value = 'calendar'
+  }
   openTodoPanel()
 }
 
@@ -679,6 +688,7 @@ function closeDayPreview() {
     isDayPreviewFormDirty.value = false
     activePanelTaskId.value = ''
     pendingDeleteTaskId.value = ''
+    panelTodoOpenSource.value = 'calendar'
   }
 
   if (!confirmDiscardPreviewChanges(closePreview)) return
@@ -894,7 +904,11 @@ async function deleteTodo(id: string) {
   })
 }
 
-async function openTodoFromNotification(payload: { id: string; date?: string }) {
+async function openTodoFromNotification(payload: {
+  id: string
+  date?: string
+  source?: TodoOpenSource
+}) {
   let targetDate = payload.date
   let cachedDetail: CalendarEvent | null = null
 
@@ -909,6 +923,7 @@ async function openTodoFromNotification(payload: { id: string; date?: string }) 
   }
 
   isDayPreviewFormDirty.value = false
+  panelTodoOpenSource.value = payload.source ?? 'calendar'
   selectDate(targetDate)
   activePanelTaskId.value = payload.id
   homePanelMode.value = 'view'
@@ -944,9 +959,9 @@ defineExpose({
   <div class="calendar-workspace" @click="closeDayPreview">
     <div class="home-time-mark" :aria-label="homeCornerClockAriaLabel" aria-live="polite">
       <time class="home-time-mark__date" :datetime="todayDate">
+        <span>{{ homeCornerClockDateParts.year }}</span>
         <strong>{{ homeCornerClockDateParts.monthDay }}</strong>
         <em>{{ homeCornerClockDateParts.weekday }}</em>
-        <span>{{ homeCornerClockDateParts.year }}</span>
       </time>
       <time class="home-time-mark__time" :datetime="homeCornerClockIso">
         <span>{{ homeCornerClockHours }}</span>
@@ -976,7 +991,7 @@ defineExpose({
             :loading="isPanelDetailLoading"
             @close="closeDayPreview"
           >
-            <template #footer>
+            <template v-if="showPanelDetailFooter" #footer>
               <div
                 class="detail-panel-actions"
                 :class="{
@@ -1349,7 +1364,7 @@ defineExpose({
                   </span>
                   <span
                     v-if="getTodoScopeBadge(task)"
-                    class="home-todo-scope-badge"
+                    class="todo-scope-badge home-todo-scope-badge"
                     :class="`tone-${getTodoScopeBadge(task)!.tone}`"
                   >
                     {{ getTodoScopeBadge(task)!.label }}
@@ -1452,7 +1467,7 @@ defineExpose({
   display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 4px;
+  gap: clamp(12px, 1.6vh, 20px);
   padding: 0;
   pointer-events: none;
   user-select: none;
@@ -1463,11 +1478,11 @@ defineExpose({
 }
 
 .home-time-mark__greeting {
-  align-self: flex-start;
+  align-self: center;
   display: block;
-  margin-left: clamp(6px, 0.6vw, 10px);
-  margin-top: 4px;
-  text-align: left;
+  margin-left: 0;
+  margin-top: 0;
+  text-align: center;
   font-family:
     'SF Pro Text',
     -apple-system,
@@ -1479,7 +1494,7 @@ defineExpose({
 
 .home-time-mark__greeting strong {
   color: var(--time-mark-fill);
-  font-size: clamp(24px, 2.2vw, 30px);
+  font-size: clamp(30px, 2.8vw, 38px);
   font-weight: 600;
   line-height: 1.2;
   letter-spacing: 0.01em;
@@ -1524,13 +1539,13 @@ defineExpose({
 }
 
 .home-time-mark__date {
-  align-self: flex-start;
+  align-self: center;
   min-width: 0;
   margin-top: 0;
-  margin-left: clamp(6px, 0.6vw, 10px);
+  margin-left: 0;
   display: inline-flex;
   align-items: baseline;
-  justify-content: flex-start;
+  justify-content: center;
   gap: 10px;
   font-family:
     'SF Pro Text',
@@ -1540,7 +1555,7 @@ defineExpose({
     'Segoe UI',
     sans-serif;
   white-space: nowrap;
-  font-size: clamp(16px, 1.4vw, 20px);
+  font-size: clamp(20px, 1.9vw, 26px);
   line-height: 1;
 }
 
@@ -1907,18 +1922,6 @@ defineExpose({
   font-weight: 800;
   line-height: 1.2;
   white-space: nowrap;
-}
-
-.home-todo-scope-badge.tone-outgoing {
-  color: #0e7490;
-  background: rgba(207, 250, 254, 0.92);
-  box-shadow: inset 0 0 0 1px rgba(14, 116, 144, 0.16);
-}
-
-.home-todo-scope-badge.tone-incoming {
-  color: #b45309;
-  background: rgba(254, 243, 199, 0.96);
-  box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.18);
 }
 
 .home-todo-item-leading {

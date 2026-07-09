@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-import type { CalendarEvent } from '../types'
-import { formatEventTime, getEventScheduleDisplay } from '../todoDisplay'
+import type { CalendarEvent } from '../config/types'
+import { formatEventTime, getEventScheduleDisplay } from '../helpers/todoDisplay'
 
 const props = defineProps<{
   event: CalendarEvent

@@ -3,22 +3,19 @@ import type { Component } from 'vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import * as echarts from 'echarts/core'
-import IconBot from '~icons/lucide/bot'
-import IconBox from '~icons/lucide/box'
 import IconChevronDown from '~icons/lucide/chevron-down'
-import IconCode2 from '~icons/lucide/code-2'
-import IconImage from '~icons/lucide/image'
-import IconLayers from '~icons/lucide/layers'
-import IconMessageCircle from '~icons/lucide/message-circle'
-import IconRocket from '~icons/lucide/rocket'
 import IconShieldCheck from '~icons/lucide/shield-check'
-import IconSparkles from '~icons/lucide/sparkles'
 import IconTrendingDown from '~icons/lucide/trending-down'
 import IconTrendingUp from '~icons/lucide/trending-up'
-import IconUsers from '~icons/lucide/users'
 import IconX from '~icons/lucide/x'
 import agentBgUrl from '@/assets/agentbg.png'
 import DashboardTopBar from '@/modules/home/dashboard/DashboardTopBar.vue'
+import SimpleTodoListPanel from '@/modules/home/dashboard/components/SimpleTodoListPanel.vue'
+import {
+  dashboardTools,
+  type DashboardTool,
+  type DashboardToolId,
+} from '@/modules/home/dashboard/config/dashboardTools'
 import {
   loadCurrentUserTokenUsage,
   resolveTokenUsageDateRange,
@@ -37,7 +34,8 @@ defineOptions({
 })
 
 type AgentVisual = {
-  icon: Component
+  icon?: Component
+  iconSrc?: string
   tone: string
 }
 
@@ -57,30 +55,6 @@ type TokenTrendPoint = {
   label: string
   value: number
 }
-
-type WelcomeFeature = {
-  title: string
-  description: string
-  icon: Component
-}
-
-const welcomeFeatures: WelcomeFeature[] = [
-  {
-    title: '多场景覆盖',
-    description: '满足企业多样化业务需求',
-    icon: IconLayers,
-  },
-  {
-    title: '开箱即用',
-    description: '快速接入，轻松上手',
-    icon: IconRocket,
-  },
-  {
-    title: '安全可靠',
-    description: '企业级安全与权限管控',
-    icon: IconShieldCheck,
-  },
-]
 
 const route = useRoute()
 const router = useRouter()
@@ -335,21 +309,11 @@ function renderAllCharts() {
   renderUsageTrendChart()
 }
 
-const agentVisualMap: Record<string, AgentVisual> = {
-  'policy-qa': { icon: IconMessageCircle, tone: 'icon-blue' },
-  'image-analysis': { icon: IconImage, tone: 'icon-blue' },
-  'meeting-notes': { icon: IconUsers, tone: 'icon-teal' },
-  'ppt-creator': { icon: IconSparkles, tone: 'icon-orange' },
-  'agent-workshop': { icon: IconBox, tone: 'icon-blue' },
-  'code-assistant': { icon: IconCode2, tone: 'icon-cyan' },
-  'interview-center': { icon: IconUsers, tone: 'icon-teal' },
-  'compliance-assistant': { icon: IconShieldCheck, tone: 'icon-blue' },
-}
+const dashboardToolById = Object.fromEntries(
+  dashboardTools.map((tool) => [tool.id, tool]),
+) as Record<DashboardToolId, DashboardTool>
 
-const defaultAgentVisual: AgentVisual = {
-  icon: IconBot,
-  tone: 'icon-blue',
-}
+const morePlaceholderTool = dashboardToolById.more
 
 const visibleAgents = computed(() =>
   agents.filter(
@@ -357,8 +321,21 @@ const visibleAgents = computed(() =>
   ),
 )
 
-function getAgentVisual(agent: AgentCatalogItem) {
-  return agentVisualMap[agent.key] ?? defaultAgentVisual
+function getAgentTool(agent: AgentCatalogItem) {
+  return dashboardToolById[agent.key as DashboardToolId]
+}
+
+function getAgentVisual(agent: AgentCatalogItem): AgentVisual {
+  const tool = getAgentTool(agent)
+  if (!tool) {
+    return { tone: 'tone-slate' }
+  }
+
+  return {
+    icon: tool.icon,
+    iconSrc: tool.iconSrc,
+    tone: `tone-${tool.tone}`,
+  }
 }
 
 function showToast(message: string) {
@@ -449,7 +426,9 @@ watch(selectedTokenPeriodCode, () => {
       <img :src="agentBgUrl" alt="" />
     </div>
 
-    <DashboardTopBar @open-todo="handleOpenTodo" />
+    <div class="agent-center-topbar-wrap">
+      <DashboardTopBar page-title="智体中心" @open-todo="handleOpenTodo" />
+    </div>
 
     <main class="agent-center-shell">
       <Transition
@@ -467,26 +446,9 @@ watch(selectedTokenPeriodCode, () => {
 
       <section class="agent-main">
         <section class="agent-hero-row">
-          <section class="agent-welcome" aria-label="欢迎语">
-            <h1 class="welcome-title">AI Agent <span>应用广场</span></h1>
-            <p class="welcome-subtitle">一站式企业级 AI 应用平台，赋能高效协作与智能创新</p>
-
-            <div class="welcome-features">
-              <article
-                v-for="feature in welcomeFeatures"
-                :key="feature.title"
-                class="welcome-feature-card"
-              >
-                <span class="welcome-feature-icon" aria-hidden="true">
-                  <component :is="feature.icon" />
-                </span>
-                <div class="welcome-feature-copy">
-                  <h2>{{ feature.title }}</h2>
-                  <p>{{ feature.description }}</p>
-                </div>
-              </article>
-            </div>
-          </section>
+          <div class="agent-hero-panel-slot">
+            <SimpleTodoListPanel />
+          </div>
 
           <section class="token-usage-card" aria-label="个人 Token 使用记录">
             <header class="token-usage-header">
@@ -570,8 +532,17 @@ watch(selectedTokenPeriodCode, () => {
               class="agent-card"
               @click="launchAgent(agent)"
             >
-              <span class="agent-card-icon" :class="getAgentVisual(agent).tone">
-                <component :is="getAgentVisual(agent).icon" />
+              <span
+                class="agent-card-icon"
+                :class="[getAgentVisual(agent).tone, { 'has-image': getAgentVisual(agent).iconSrc }]"
+              >
+                <img
+                  v-if="getAgentVisual(agent).iconSrc"
+                  :src="getAgentVisual(agent).iconSrc"
+                  alt=""
+                  class="agent-card-icon-image"
+                />
+                <component v-else-if="getAgentVisual(agent).icon" :is="getAgentVisual(agent).icon" />
               </span>
 
               <div class="agent-card-copy">
@@ -580,6 +551,30 @@ watch(selectedTokenPeriodCode, () => {
                 <span class="agent-card-action">进入应用 -&gt;</span>
               </div>
             </button>
+
+            <article
+              v-if="activeCategory === '全部'"
+              class="agent-card agent-card-more"
+              aria-label="期待更多智能应用"
+            >
+              <span
+                class="agent-card-icon tone-slate"
+                :class="{ 'has-image': morePlaceholderTool.iconSrc }"
+              >
+                <img
+                  v-if="morePlaceholderTool.iconSrc"
+                  :src="morePlaceholderTool.iconSrc"
+                  alt=""
+                  class="agent-card-icon-image"
+                />
+                <component v-else-if="morePlaceholderTool.icon" :is="morePlaceholderTool.icon" />
+              </span>
+
+              <div class="agent-card-copy">
+                <h2>期待更多</h2>
+                <p class="agent-description">更多智能应用持续上线，敬请期待。</p>
+              </div>
+            </article>
 
             <AppStateBlock
               v-if="visibleAgents.length === 0"
@@ -644,7 +639,7 @@ watch(selectedTokenPeriodCode, () => {
   height: 100vh;
   flex-direction: column;
   overflow: hidden;
-  background: #ffffff;
+  background: #e6edf5;
   color: #111827;
   font-family: Inter, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
 }
@@ -662,13 +657,38 @@ watch(selectedTokenPeriodCode, () => {
   overflow: hidden;
 }
 
+.agent-center-bg::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(245, 250, 255, 0.08), rgba(226, 237, 248, 0.08));
+  content: '';
+}
+
 .agent-center-bg img {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  object-position: center calc(100% + clamp(96px, 11vh, 160px));
+  object-position: center bottom;
+  transform: translateY(clamp(28px, 4.8vh, 72px));
+}
+
+.agent-center-topbar-wrap {
+  flex-shrink: 0;
+}
+
+.agent-center-topbar-wrap :deep(.dashboard-topbar) {
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  background:
+    radial-gradient(circle at 22% 20%, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0) 36%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.52), rgba(214, 228, 248, 0.42)),
+    rgba(226, 236, 250, 0.58) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 10px 28px rgba(72, 110, 165, 0.14);
+  backdrop-filter: blur(22px) saturate(1.14) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(1.14) !important;
 }
 
 .agent-center-shell {
@@ -676,6 +696,8 @@ watch(selectedTokenPeriodCode, () => {
   --main-pad-right: clamp(18px, 1.1vw, 21px);
   --main-pad-bottom: 32px;
   --main-pad-left: clamp(25px, 1.45vw, 28px);
+  --topbar-gutter: clamp(48px, 3.8vw, 76px);
+  --hero-panel-min-height: clamp(310px, 34vh, 370px);
   --banner-height: clamp(260px, 26.5vh, 286px);
   --toolbar-gap: clamp(14px, 1.55vh, 17px);
   --grid-gap-x: 16px;
@@ -698,7 +720,7 @@ watch(selectedTokenPeriodCode, () => {
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  gap: clamp(18px, 2.2vh, 28px);
+  gap: clamp(10px, 1.2vh, 14px);
   overflow: hidden;
   padding: var(--main-pad-top) var(--main-pad-right) var(--main-pad-bottom) var(--main-pad-left);
 }
@@ -706,98 +728,26 @@ watch(selectedTokenPeriodCode, () => {
 .agent-hero-row {
   display: grid;
   flex: 0 0 auto;
-  grid-template-columns: minmax(0, 1.12fr) minmax(320px, 0.88fr);
-  gap: clamp(18px, 2vw, 28px);
+  width: calc(100% + var(--main-pad-left) + var(--main-pad-right) - var(--topbar-gutter));
+  min-height: var(--hero-panel-min-height);
+  margin-left: calc((var(--topbar-gutter) / 2) - var(--main-pad-left));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(10px, 1.2vw, 14px);
   align-items: stretch;
 }
 
-.agent-welcome {
+.agent-hero-panel-slot {
   display: flex;
   min-width: 0;
-  flex-direction: column;
-  justify-content: center;
-  padding: clamp(8px, 1.2vh, 16px) 0;
-}
-
-.welcome-title {
-  margin: 0;
-  color: #0f172a;
-  font-size: clamp(34px, 3.4vw, 52px);
-  font-weight: 900;
-  line-height: 1.08;
-  letter-spacing: -0.03em;
-}
-
-.welcome-title span {
-  color: #126cff;
-}
-
-.welcome-subtitle {
-  max-width: 640px;
-  margin: clamp(12px, 1.4vh, 18px) 0 0;
-  color: #64748b;
-  font-size: clamp(14px, 1vw, 16px);
-  font-weight: 500;
-  line-height: 1.7;
-}
-
-.welcome-features {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: clamp(20px, 2.4vh, 28px);
-}
-
-.welcome-feature-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  min-width: 0;
-  border: 1px solid rgba(255, 255, 255, 0.88);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.72);
-  backdrop-filter: blur(14px);
-  box-shadow: 0 10px 24px rgba(100, 140, 200, 0.08);
-  padding: 12px 14px;
-}
-
-.welcome-feature-icon {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  flex-shrink: 0;
-  place-items: center;
-  border-radius: 10px;
-  background: linear-gradient(180deg, #edf5ff 0%, #e4efff 100%);
-  color: #126cff;
-}
-
-.welcome-feature-icon svg {
-  width: 18px;
-  height: 18px;
-  stroke-width: 2.4;
-}
-
-.welcome-feature-copy h2 {
-  margin: 0;
-  color: #0f172a;
-  font-size: 14px;
-  font-weight: 800;
-  line-height: 1.3;
-}
-
-.welcome-feature-copy p {
-  margin: 4px 0 0;
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1.45;
+  min-height: 0;
+  height: 100%;
 }
 
 .token-usage-card {
   display: flex;
   min-width: 0;
-  min-height: clamp(280px, 30vh, 340px);
+  min-height: 0;
+  height: 100%;
   flex-direction: column;
   border: 1px solid rgba(255, 255, 255, 0.92);
   border-radius: 20px;
@@ -956,10 +906,11 @@ watch(selectedTokenPeriodCode, () => {
 
 .agent-catalog-panel {
   display: flex;
-  min-height: 0;
-  flex: 1 1 auto;
+  width: calc(100% + var(--main-pad-left) + var(--main-pad-right) - var(--topbar-gutter));
+  flex: 0 0 auto;
   flex-direction: column;
-  overflow: hidden;
+  margin-top: 0;
+  margin-left: calc((var(--topbar-gutter) / 2) - var(--main-pad-left));
   border: 1px solid rgba(255, 255, 255, 0.88);
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.72);
@@ -967,18 +918,15 @@ watch(selectedTokenPeriodCode, () => {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.92),
     0 24px 48px rgba(100, 140, 200, 0.12);
-  padding: clamp(18px, 1.8vw, 24px);
+  padding: clamp(16px, 1.5vw, 20px);
 }
 
 .agent-grid {
   display: grid;
-  flex: 1 1 auto;
   grid-template-columns: repeat(var(--agent-grid-columns), minmax(0, 1fr));
   align-content: start;
   gap: var(--grid-gap-y) var(--grid-gap-x);
-  min-height: 0;
-  overflow-y: auto;
-  padding: 2px 4px 8px 0;
+  padding: 2px 2px 0;
 }
 
 .agent-grid::-webkit-scrollbar {
@@ -1034,10 +982,79 @@ watch(selectedTokenPeriodCode, () => {
   box-shadow: 0 10px 20px rgba(91, 131, 184, 0.12);
 }
 
+.agent-card-icon.has-image {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.agent-card-icon-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: inherit;
+}
+
 .agent-card-icon svg {
   width: 22px;
   height: 22px;
   stroke-width: 2.5;
+}
+
+.tone-orange.agent-card-icon {
+  background: #ffe5d7;
+  color: #ff7a3d;
+}
+
+.tone-blue.agent-card-icon {
+  background: #dbeafe;
+  color: #2f7cff;
+}
+
+.tone-green.agent-card-icon {
+  background: #d9f8e7;
+  color: #20bb77;
+}
+
+.tone-violet.agent-card-icon,
+.tone-purple.agent-card-icon {
+  background: #eadfff;
+  color: #8b5cf6;
+}
+
+.tone-cyan.agent-card-icon {
+  background: #d7f7ff;
+  color: #09b6d7;
+}
+
+.tone-sky.agent-card-icon {
+  background: #dff3ff;
+  color: #26a4e8;
+}
+
+.tone-slate.agent-card-icon {
+  background: #e7edf5;
+  color: #70819a;
+}
+
+.agent-card-more {
+  border-style: dashed;
+  border-color: rgba(148, 163, 184, 0.42);
+  background: rgba(255, 255, 255, 0.56);
+  cursor: default;
+  box-shadow: none;
+}
+
+.agent-card-more:hover,
+.agent-card-more:focus-within {
+  border-color: rgba(148, 163, 184, 0.42);
+  box-shadow: none;
+  transform: none;
+}
+
+.agent-card-more h2,
+.agent-card-more .agent-description {
+  color: #64748b;
 }
 
 .agent-card-copy {
@@ -1073,21 +1090,6 @@ watch(selectedTokenPeriodCode, () => {
   font-weight: 800;
 }
 
-.icon-blue {
-  color: #126cff;
-}
-
-.icon-teal {
-  color: #19bfae;
-}
-
-.icon-orange {
-  color: #ff7a00;
-}
-
-.icon-cyan {
-  color: #16b9c1;
-}
 
 .agent-grid-empty {
   grid-column: 1 / -1;
@@ -1271,9 +1273,11 @@ watch(selectedTokenPeriodCode, () => {
   .agent-center-shell {
     --agent-grid-columns: 3;
   }
+}
 
-  .agent-hero-row {
-    grid-template-columns: minmax(0, 1fr) minmax(300px, 0.92fr);
+@media (max-width: 900px) {
+  .agent-center-shell {
+    --topbar-gutter: 28px;
   }
 }
 
@@ -1283,6 +1287,7 @@ watch(selectedTokenPeriodCode, () => {
     --main-pad-right: 12px;
     --main-pad-bottom: 32px;
     --main-pad-left: 12px;
+    --hero-panel-min-height: clamp(290px, 32vh, 330px);
     --agent-grid-columns: 2;
     --agent-card-min-height: 148px;
     overflow: hidden;
@@ -1294,14 +1299,6 @@ watch(selectedTokenPeriodCode, () => {
 
   .agent-hero-row {
     grid-template-columns: 1fr;
-  }
-
-  .welcome-features {
-    grid-template-columns: 1fr;
-  }
-
-  .token-usage-card {
-    min-height: 300px;
   }
 }
 
@@ -1319,11 +1316,9 @@ watch(selectedTokenPeriodCode, () => {
     flex: 1 1 auto;
     min-height: 0;
     overflow: hidden;
+    --main-pad-right: 8px;
+    --main-pad-left: 8px;
     padding: 18px 8px 28px;
-  }
-
-  .welcome-title {
-    font-size: 30px;
   }
 
   .token-usage-footer {

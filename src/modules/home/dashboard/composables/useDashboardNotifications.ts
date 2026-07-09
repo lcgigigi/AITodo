@@ -4,7 +4,7 @@ import {
   loadAssignableUsers,
   loadPendingTodos,
   rejectTodo,
-} from '@/modules/home/dashboard/todo.service'
+} from '@/modules/home/dashboard/services/todo.service'
 import {
   buildInboxItems,
   countActionableInboxItems,
@@ -13,7 +13,7 @@ import {
   isInboxItemOpenable,
   type InboxFilter,
   type InboxItem,
-} from '@/modules/home/dashboard/notification.inbox'
+} from '@/modules/home/dashboard/services/notification.inbox'
 import {
   buildSysMessageWebSocketUrl,
   deleteSysMessages,
@@ -22,15 +22,15 @@ import {
   markSysMessagesRead,
   normalizeSysMessagePush,
   type SysMessage,
-} from '@/modules/home/dashboard/sys-message.service'
+} from '@/modules/home/dashboard/services/sys-message.service'
 import {
   hasSysMessage,
   markAllSysMessagesReadInList,
   markSysMessageIdsReadInList,
   mergeSysMessages,
   removeSysMessageIdsFromList,
-} from '@/modules/home/dashboard/sys-message.state'
-import type { CalendarEvent, CalendarUser } from '@/modules/home/dashboard/types'
+} from '@/modules/home/dashboard/services/sys-message.state'
+import type { CalendarEvent, CalendarUser, TodoOpenSource } from '@/modules/home/dashboard/config/types'
 import { useFeedbackStore } from '@/stores/feedback.store'
 import { useUserStore } from '@/stores/user.store'
 
@@ -40,8 +40,7 @@ const SYS_MESSAGE_PAGE_SIZE = 10
 
 type DashboardNotificationOptions = {
   onCalendarRefresh?: () => void
-  onOpenTodo?: (payload: { id: string; date?: string; source?: 'pending-inbox' }) => void
-  onClose?: () => void
+  onOpenTodo?: (payload: { id: string; date?: string; source?: TodoOpenSource }) => void
 }
 
 export function useDashboardNotifications(options: DashboardNotificationOptions = {}) {
@@ -256,9 +255,8 @@ export function useDashboardNotifications(options: DashboardNotificationOptions 
       options.onOpenTodo?.({
         id: todoId,
         date: item.todo?.date,
-        source: item.kind === 'todo_pending' ? 'pending-inbox' : undefined,
+        source: item.kind === 'todo_pending' ? 'pending-inbox' : 'notification',
       })
-      options.onClose?.()
     } catch (error) {
       inboxError.value = error instanceof Error ? error.message : '打开关联待办失败'
     } finally {

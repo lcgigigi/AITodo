@@ -258,7 +258,7 @@ onBeforeUnmount(() => {
           aria-label="选择开始时间"
           :class="
             cn(
-              'todo-datetime-trigger',
+              'todo-picker-trigger todo-datetime-trigger',
               startHighlighted && 'is-ai-highlighted',
               open && activeField === 'start' && 'is-active',
             )
@@ -280,7 +280,7 @@ onBeforeUnmount(() => {
           aria-label="选择截止时间"
           :class="
             cn(
-              'todo-datetime-trigger',
+              'todo-picker-trigger todo-datetime-trigger',
               endHighlighted && 'is-ai-highlighted',
               open && activeField === 'end' && 'is-active',
             )
@@ -399,58 +399,6 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
-.todo-datetime-trigger {
-  width: 100%;
-  min-width: 0;
-  height: 40px;
-  border-color: #dfe8f3;
-  border-radius: 10px;
-  background: #ffffff;
-  color: #111827;
-  padding: 0 12px;
-  justify-content: space-between;
-  font: inherit;
-  font-size: 14px;
-  box-shadow: none;
-}
-
-.todo-datetime-trigger:hover,
-.todo-datetime-trigger.is-active {
-  border-color: #111827;
-  background: #ffffff;
-  color: #111827;
-  box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.07);
-}
-
-.todo-datetime-trigger:disabled {
-  background: #f8fafc;
-  color: #475569;
-  cursor: default;
-  opacity: 1;
-}
-
-.todo-picker-value {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.todo-picker-value.is-placeholder {
-  color: #94a3b8;
-}
-
-.todo-datetime-trigger svg {
-  width: 16px;
-  height: 16px;
-  color: #94a3b8;
-  flex: 0 0 auto;
-}
-
-.todo-datetime-trigger.is-ai-highlighted .todo-picker-value {
-  animation: ai-picker-value-highlight 0.55s ease-in-out 2;
-}
-
 .todo-datetime-panel {
   display: flex;
   align-items: flex-start;
@@ -533,29 +481,6 @@ onBeforeUnmount(() => {
   width: 13px;
   height: 13px;
   color: currentColor;
-}
-
-@keyframes ai-picker-value-highlight {
-  0% {
-    color: #111827;
-    text-shadow: none;
-  }
-  38% {
-    color: #2563eb;
-    text-shadow:
-      0 0 1px rgba(59, 130, 246, 0.62),
-      0 0 10px rgba(59, 130, 246, 0.24);
-  }
-  100% {
-    color: #111827;
-    text-shadow: none;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .todo-datetime-trigger.is-ai-highlighted .todo-picker-value {
-    animation: none;
-  }
 }
 </style>
 

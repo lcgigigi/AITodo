@@ -1,4 +1,4 @@
-import type { CalendarEvent, CalendarUser } from './types'
+import type { CalendarEvent, CalendarUser } from '../config/types'
 import {
   formatTodoDetailTimeField,
   getBackendTodoStatusLabel,
@@ -43,11 +43,19 @@ export function getTaskTypeLabel(event: CalendarEvent) {
 }
 
 export function isPendingAcceptanceTask(task: CalendarEvent, currentUser: CalendarUser) {
-  if (task.backendStatus === 3 || task.backendStatus === 6 || task.backendStatus === 9) {
+  if (!currentUser.id) return false
+
+  if (
+    task.backendStatus === 3 ||
+    task.backendStatus === 6 ||
+    task.backendStatus === 9 ||
+    task.backendStatus === 99
+  ) {
     return false
   }
 
-  if (task.scope === 'assigned_to_me') return true
+  if (isRejectedTodo(task) || isCompletedTodoEvent(task)) return false
+  if (task.receiveStatus !== 2) return false
 
   const assigneeIds =
     task.assigneeId
@@ -55,12 +63,7 @@ export function isPendingAcceptanceTask(task: CalendarEvent, currentUser: Calend
       .map((item) => item.trim())
       .filter(Boolean) ?? []
 
-  return Boolean(
-    currentUser.id &&
-      assigneeIds.includes(currentUser.id) &&
-      task.creatorId &&
-      task.creatorId !== currentUser.id,
-  )
+  return assigneeIds.includes(currentUser.id)
 }
 
 export function getDetailStatusTone(

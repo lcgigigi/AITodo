@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { CalendarEvent } from './types'
+import type { CalendarEvent } from '../dashboard/config/types'
 import {
   getBackendTodoStatusLabel,
   getTodoScopeBadge,
@@ -10,7 +10,7 @@ import {
   matchesDetailStatusFilter,
   matchesTodoScopeFilter,
   countTodoScopeEvents,
-} from './todoDisplay'
+} from '../dashboard/helpers/todoDisplay'
 
 function event(partial: Partial<CalendarEvent>): CalendarEvent {
   return {

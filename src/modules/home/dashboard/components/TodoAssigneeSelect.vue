@@ -5,7 +5,7 @@ import IconChevronDown from '~icons/lucide/chevron-down'
 import IconSearch from '~icons/lucide/search'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
-import type { CalendarUser } from '../types'
+import type { CalendarUser } from '../config/types'
 
 const props = withDefaults(
   defineProps<{

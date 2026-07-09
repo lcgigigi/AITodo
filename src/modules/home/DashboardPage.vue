@@ -17,24 +17,33 @@ import CalendarWorkspace from './dashboard/CalendarWorkspace.vue'
 import DashboardTopBar from './dashboard/DashboardTopBar.vue'
 import DetailedDashboardWorkspace from './dashboard/DetailedDashboardWorkspace.vue'
 import OnboardingTour from './dashboard/components/OnboardingTour.vue'
-import { navigateDashboardTool, type DashboardToolTarget } from './dashboard/dashboardTools'
-import { getHomeTimePeriod } from './dashboard/homeTimeOfDay'
-import { useHomeClock } from './dashboard/useHomeClock'
-import { ymd } from './dashboard/todoDisplay'
-import { dispatchDashboardOnboardingTourStart } from './dashboard/onboardingTour'
+import { navigateDashboardTool, type DashboardToolTarget } from './dashboard/config/dashboardTools'
+import { getHomeTimePeriod } from './dashboard/helpers/homeTimeOfDay'
+import { useHomeClock } from './dashboard/composables/useHomeClock'
+import type { TodoOpenSource } from './dashboard/config/types'
+import { ymd } from './dashboard/helpers/todoDisplay'
+import { dispatchDashboardOnboardingTourStart } from './dashboard/helpers/onboardingTour'
 import {
   selectEmailProvider as submitEmailProvider,
   type SmartTodoEmailProvider,
-} from './dashboard/todo.service'
+} from './dashboard/services/todo.service'
 
 type CalendarWorkspaceExpose = {
   refreshTodos: () => Promise<void>
-  openTodoFromNotification: (payload: { id: string; date?: string }) => Promise<void>
+  openTodoFromNotification: (payload: {
+    id: string
+    date?: string
+    source?: TodoOpenSource
+  }) => Promise<void>
 }
 
 type DetailedDashboardWorkspaceExpose = {
   refreshTodos: () => Promise<void>
-  openTodoFromNotification: (payload: { id: string; date?: string }) => Promise<void>
+  openTodoFromNotification: (payload: {
+    id: string
+    date?: string
+    source?: TodoOpenSource
+  }) => Promise<void>
 }
 
 type HomeViewMode = 'simple' | 'detail'
@@ -106,7 +115,11 @@ function handleCalendarRefresh() {
   void dashboardTodosStore.reloadCurrentRange()
 }
 
-async function handleOpenTodo(payload: { id: string; date?: string }) {
+async function handleOpenTodo(payload: {
+  id: string
+  date?: string
+  source?: TodoOpenSource
+}) {
   if (homeViewMode.value === 'detail') {
     await detailedDashboardWorkspaceRef.value?.openTodoFromNotification(payload)
     return

@@ -9,7 +9,7 @@ import IconX from '~icons/lucide/x'
 import {
   DASHBOARD_ONBOARDING_TOUR_EVENT,
   dispatchDashboardOnboardingTourCloseDayPreview,
-} from '@/modules/home/dashboard/onboardingTour'
+} from '@/modules/home/dashboard/helpers/onboardingTour'
 
 type TourAnchor = 'left' | 'right' | 'top' | 'bottom' | 'center'
 
@@ -202,7 +202,7 @@ const steps: TourStep[] = [
     eyebrow: '消息收件箱',
     title: '所有通知都汇总在一个列表里',
     description:
-      '别人派发给你的待办会直接出现在这里，待接受时可接受、拒绝或查看；其他消息则支持查看、已读和删除。',
+      '别人派发给你的待办会直接出现在这里，待接受时可接受或拒绝；可跳转的消息点击卡片查看详情，未读消息可标记已读，已读消息可在列表中删除。',
     action: '这里是协作入口，日常建议先用「待处理」筛一遍。',
     accent: '#06b6d4',
     closeDayPreview: true,
