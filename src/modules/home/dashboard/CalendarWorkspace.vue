@@ -48,6 +48,8 @@ import {
   formatEventTime,
   formatEventTimeForDayList,
   getTodoListDisplayText,
+  getTodoRemarkDisplay,
+  hasTodoRemark,
   getTodoScopeBadge,
   isRejectedTodo,
   isRangeEvent,
@@ -1355,21 +1357,36 @@ defineExpose({
                     {{ formatHomeTodoMeta(task) }}
                   </time>
                 </div>
-                <div class="home-todo-item-main">
-                  <span
-                    class="home-todo-type-tag"
-                    :class="isMeetingEvent(task) ? 'is-meeting' : 'is-task'"
-                  >
-                    {{ eventTypeLabel(task) }}
-                  </span>
-                  <span
-                    v-if="getTodoScopeBadge(task)"
-                    class="todo-scope-badge home-todo-scope-badge"
-                    :class="`tone-${getTodoScopeBadge(task)!.tone}`"
-                  >
-                    {{ getTodoScopeBadge(task)!.label }}
-                  </span>
-                  <span class="home-todo-item-title">{{ getTodoListDisplayText(task) }}</span>
+                <div
+                  class="home-todo-item-main"
+                  :class="{ 'has-remark': hasTodoRemark(task) }"
+                >
+                  <div class="home-todo-item-head">
+                    <span
+                      class="home-todo-type-tag"
+                      :class="isMeetingEvent(task) ? 'is-meeting' : 'is-task'"
+                    >
+                      {{ eventTypeLabel(task) }}
+                    </span>
+                    <span class="home-todo-item-title">{{ getTodoListDisplayText(task) }}</span>
+                    <span
+                      v-if="getTodoScopeBadge(task) && !hasTodoRemark(task)"
+                      class="todo-scope-badge home-todo-scope-badge is-inline"
+                      :class="`tone-${getTodoScopeBadge(task)!.tone}`"
+                    >
+                      {{ getTodoScopeBadge(task)!.label }}
+                    </span>
+                  </div>
+                  <div v-if="hasTodoRemark(task)" class="home-todo-item-sub">
+                    <span
+                      v-if="getTodoScopeBadge(task)"
+                      class="todo-scope-badge home-todo-scope-badge"
+                      :class="`tone-${getTodoScopeBadge(task)!.tone}`"
+                    >
+                      {{ getTodoScopeBadge(task)!.label }}
+                    </span>
+                    <p class="home-todo-item-remark">{{ getTodoRemarkDisplay(task) }}</p>
+                  </div>
                 </div>
                 <div class="home-todo-item-aside">
                   <div class="home-todo-item-actions" @click.stop>
@@ -1913,16 +1930,6 @@ defineExpose({
   background: linear-gradient(90deg, rgba(255, 251, 235, 0.82), rgba(255, 255, 255, 0)), #ffffff;
 }
 
-.home-todo-scope-badge {
-  flex: 0 0 auto;
-  max-width: 100%;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 800;
-  line-height: 1.2;
-  white-space: nowrap;
-}
 
 .home-todo-item-leading {
   display: flex;
@@ -2028,6 +2035,25 @@ defineExpose({
 .home-todo-item-main {
   min-width: 0;
   padding: 11px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.home-todo-item-main.has-remark {
+  padding: 9px 0;
+  gap: 4px;
+}
+
+.home-todo-item-head {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.home-todo-item-sub {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2150,8 +2176,8 @@ defineExpose({
 }
 
 .home-todo-item-title {
-  flex: 1 1 0;
-  min-width: 3.5rem;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   color: #0f172a;
   font-size: 14px;
@@ -2162,6 +2188,19 @@ defineExpose({
   transition:
     color 0.22s ease,
     opacity 0.22s ease;
+}
+
+.home-todo-item-remark {
+  flex: 1 1 auto;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .home-todo-item-time {
@@ -2214,6 +2253,18 @@ defineExpose({
   white-space: nowrap;
 }
 
+.home-todo-scope-badge {
+  flex: 0 0 auto;
+  max-width: 9.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-todo-scope-badge.is-inline {
+  margin-left: auto;
+}
+
 .home-todo-type-tag.is-task {
   background: rgba(218, 247, 232, 0.86);
   color: #08724f;
@@ -2256,6 +2307,10 @@ defineExpose({
 .home-todo-item.is-done .home-todo-item-title {
   color: #94a3b8;
   text-decoration: line-through;
+}
+
+.home-todo-item.is-done .home-todo-item-remark {
+  color: #94a3b8;
 }
 
 .home-todo-status-tag {

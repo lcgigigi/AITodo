@@ -29,6 +29,10 @@ export function parseTodoTime(value: string): TodoTimeParts | undefined {
   }
 }
 
+export function isValidTodoTime(value: string) {
+  return Boolean(parseTodoTime(value.trim()))
+}
+
 export function getTodoHourOptions(currentHour?: string) {
   return includeCurrentOption(TODO_HOUR_OPTIONS, currentHour)
 }

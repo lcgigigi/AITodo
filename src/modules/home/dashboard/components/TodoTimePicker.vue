@@ -23,12 +23,14 @@ const props = withDefaults(
     modelValue: string
     disabled?: boolean
     highlighted?: boolean
+    invalid?: boolean
     placeholder?: string
     ariaLabel?: string
   }>(),
   {
     disabled: false,
     highlighted: false,
+    invalid: false,
     placeholder: '--:--',
     ariaLabel: '选择时间',
   },
@@ -118,10 +120,12 @@ watch(open, (isOpen) => {
           variant="outline"
           :disabled="disabled"
           :aria-label="ariaLabel"
+          :aria-invalid="invalid || undefined"
           :class="
             cn(
               'todo-picker-trigger todo-time-trigger',
               highlighted && 'is-ai-highlighted',
+              invalid && 'is-field-invalid',
               externalClass,
             )
           "

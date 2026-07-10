@@ -29,6 +29,19 @@
   opacity: 1;
 }
 
+.todo-picker-trigger.is-field-invalid {
+  border-color: rgba(239, 68, 68, 0.72);
+  background: rgba(254, 242, 242, 0.92);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+}
+
+.todo-picker-trigger.is-field-invalid:hover,
+.todo-picker-trigger.is-field-invalid[aria-expanded='true'],
+.todo-picker-trigger.is-field-invalid.is-active {
+  border-color: rgba(220, 38, 38, 0.82);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.14);
+}
+
 .todo-picker-value {
   min-width: 0;
   overflow: hidden;

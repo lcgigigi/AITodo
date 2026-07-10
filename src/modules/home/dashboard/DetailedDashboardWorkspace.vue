@@ -17,6 +17,8 @@ import {
   getBackendTodoStatusLabel,
   getEventScheduleDisplay,
   getTodoListDisplayText,
+  getTodoListRemarkLine,
+  hasTodoRemark,
   getTodoScopeBadge,
   isAllDayEvent,
   isMeetingTodoEvent as isMeetingEvent,
@@ -952,11 +954,6 @@ function getTaskDetail(task: CalendarEvent) {
   return resolveCalendarEventDetail(taskDetails.value, task)
 }
 
-function getTaskRemarkText(event: CalendarEvent) {
-  const detail = getTaskDetail(event)
-  return detail.remark?.trim() || ''
-}
-
 function formatDateTitle(date: string) {
   const value = new Date(`${date}T12:00:00`)
   const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][value.getDay()]
@@ -1217,8 +1214,8 @@ function weekRangeLabel(anchorDate: string) {
                           {{ getTodoScopeBadge(task)!.label }}
                         </span>
                       </div>
-                      <div v-if="getTaskRemarkText(task)" class="task-sub">
-                        备注：{{ getTaskRemarkText(task) }}
+                      <div class="task-sub" :class="{ 'is-empty': !hasTodoRemark(getTaskDetail(task)) }">
+                        {{ getTodoListRemarkLine(getTaskDetail(task)) }}
                       </div>
                     </div>
 
@@ -1306,7 +1303,7 @@ function weekRangeLabel(anchorDate: string) {
             :loading="isActiveDetailLoading"
             @close="closeTaskDetail"
           >
-            <template v-if="showDetailFooter" #footer>
+            <template v-if="showDetailFooter && activeTask" #footer>
               <div
                 class="detail-panel-actions"
                 :class="{
@@ -1983,14 +1980,8 @@ function weekRangeLabel(anchorDate: string) {
 }
 
 .task-scope-badge {
-  flex: 0 0 auto;
-  max-width: 100%;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 800;
-  line-height: 1.2;
-  white-space: nowrap;
+  min-height: 24px;
+  height: 24px;
 }
 
 .task-card.todo {
@@ -2342,11 +2333,17 @@ function weekRangeLabel(anchorDate: string) {
 
 .task-sub {
   margin-top: 5px;
-  color: #8795aa;
-  font-size: 12px;
+  color: #3f4f63;
+  font-size: 13px;
+  font-weight: 650;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.task-sub.is-empty {
+  color: #64748b;
+  font-weight: 600;
 }
 
 .task-tag {
@@ -2481,7 +2478,7 @@ function weekRangeLabel(anchorDate: string) {
 .task-card.completed .task-time,
 .task-card.completed .task-time-sub,
 .task-card.completed .task-sub {
-  color: #94a3b8;
+  color: #7b8ea6;
 }
 
 .task-card.completed .task-tag {

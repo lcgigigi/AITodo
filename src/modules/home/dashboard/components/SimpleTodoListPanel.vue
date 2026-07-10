@@ -28,6 +28,8 @@ import {
   formatEventTime,
   formatEventTimeForDayList,
   getTodoListDisplayText,
+  getTodoRemarkDisplay,
+  hasTodoRemark,
   getTodoScopeBadge,
   isRejectedTodo,
   isRangeEvent,
@@ -340,21 +342,36 @@ async function toggleTaskStatus(event: CalendarEvent) {
                 {{ formatTodoMeta(task) }}
               </time>
             </div>
-            <div class="simple-todo-item-main">
-              <span
-                class="simple-todo-type-tag"
-                :class="isMeetingEvent(task) ? 'is-meeting' : 'is-task'"
-              >
-                {{ eventTypeLabel(task) }}
-              </span>
-              <span
-                v-if="getTodoScopeBadge(task)"
-                class="todo-scope-badge simple-todo-scope-badge"
-                :class="`tone-${getTodoScopeBadge(task)!.tone}`"
-              >
-                {{ getTodoScopeBadge(task)!.label }}
-              </span>
-              <span class="simple-todo-item-title">{{ getTodoListDisplayText(task) }}</span>
+            <div
+              class="simple-todo-item-main"
+              :class="{ 'has-remark': hasTodoRemark(task) }"
+            >
+              <div class="simple-todo-item-head">
+                <span
+                  class="simple-todo-type-tag"
+                  :class="isMeetingEvent(task) ? 'is-meeting' : 'is-task'"
+                >
+                  {{ eventTypeLabel(task) }}
+                </span>
+                <span class="simple-todo-item-title">{{ getTodoListDisplayText(task) }}</span>
+                <span
+                  v-if="getTodoScopeBadge(task) && !hasTodoRemark(task)"
+                  class="todo-scope-badge simple-todo-scope-badge is-inline"
+                  :class="`tone-${getTodoScopeBadge(task)!.tone}`"
+                >
+                  {{ getTodoScopeBadge(task)!.label }}
+                </span>
+              </div>
+              <div v-if="hasTodoRemark(task)" class="simple-todo-item-sub">
+                <span
+                  v-if="getTodoScopeBadge(task)"
+                  class="todo-scope-badge simple-todo-scope-badge"
+                  :class="`tone-${getTodoScopeBadge(task)!.tone}`"
+                >
+                  {{ getTodoScopeBadge(task)!.label }}
+                </span>
+                <p class="simple-todo-item-remark">{{ getTodoRemarkDisplay(task) }}</p>
+              </div>
             </div>
             <div class="simple-todo-item-aside">
               <span v-if="isRejectedTodo(task)" class="simple-todo-status-tag is-rejected">
@@ -571,20 +588,31 @@ async function toggleTaskStatus(event: CalendarEvent) {
   min-width: 0;
   padding: 11px 0;
   display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.simple-todo-item-main.has-remark {
+  padding: 9px 0;
+  gap: 4px;
+}
+
+.simple-todo-item-head {
+  min-width: 0;
+  display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.simple-todo-scope-badge {
-  flex: 0 0 auto;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 800;
+.simple-todo-item-sub {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .simple-todo-item-title {
-  flex: 1 1 0;
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   color: #0f172a;
@@ -594,12 +622,38 @@ async function toggleTaskStatus(event: CalendarEvent) {
   white-space: nowrap;
 }
 
+.simple-todo-item-remark {
+  flex: 1 1 auto;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .simple-todo-item-time {
+  flex: 0 0 auto;
   min-width: 3.1rem;
   color: #64748b;
   font-size: 14px;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.simple-todo-scope-badge {
+  flex: 0 0 auto;
+  max-width: 9.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.simple-todo-scope-badge.is-inline {
+  margin-left: auto;
 }
 
 .simple-todo-item.todo .simple-todo-item-time {

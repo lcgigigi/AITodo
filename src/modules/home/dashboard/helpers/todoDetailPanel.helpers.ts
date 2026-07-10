@@ -5,7 +5,8 @@ import {
   getRejectedTodoMessage,
   getSmartTodoKindLabel,
   getTodoAssigneeDisplayName,
-  getTodoContentDisplay,
+  getTodoRemarkDisplay,
+  hasTodoRemark,
   getTodoCreatorDisplayName,
   getTodoHandlerDisplayName,
   isCompletedTodoEvent,
@@ -30,7 +31,8 @@ export type TodoDetailPanelViewModel = {
   statusLabel: string
   statusTone: DetailStatusTone
   time: string | string[]
-  content: string
+  remark: string
+  remarkIsEmpty: boolean
   meta: Array<{ key: string; label: string; value: string }>
   assigneeProgress?: AssigneeProgressItem[]
 }
@@ -275,7 +277,8 @@ export function buildTodoDetailPanelViewModel(
     statusLabel: progressSummary?.label ?? getBackendTodoStatusLabel(task),
     statusTone: progressSummary?.tone ?? getDetailStatusTone(task, currentUser),
     time: formatTodoDetailTimeField(task),
-    content: getTodoContentDisplay(task),
+    remark: getTodoRemarkDisplay(task),
+    remarkIsEmpty: !hasTodoRemark(task),
     meta,
     assigneeProgress: showAssigneeProgress
       ? buildAssigneeProgressItems(task.childTodos ?? [])

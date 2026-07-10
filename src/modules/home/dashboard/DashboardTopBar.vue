@@ -295,14 +295,15 @@ onBeforeUnmount(() => {
     <div
       v-if="hasContextualNav"
       class="brand-block brand-block--contextual"
-      aria-label="页面导航"
+      aria-label="AI办公平台"
     >
       <button type="button" class="contextual-back-btn" @click="goHome">
         <IconArrowLeft aria-hidden="true" />
         <span>{{ props.backLabel }}</span>
       </button>
       <span class="contextual-divider" aria-hidden="true" />
-      <h1 class="contextual-page-title">{{ props.pageTitle }}</h1>
+      <img class="brand-logo" :src="homeCardLogoImage" alt="" />
+      <span class="brand-title">AI办公平台</span>
     </div>
     <div v-else class="brand-block" :class="{ 'is-embedded': props.embedded }" aria-label="AI办公平台">
       <img class="brand-logo" :src="homeCardLogoImage" alt="" />
@@ -1071,16 +1072,6 @@ onBeforeUnmount(() => {
   height: 18px;
   flex: 0 0 auto;
   background: rgba(148, 163, 184, 0.42);
-}
-
-.contextual-page-title {
-  margin: 0;
-  color: #13203a;
-  font-size: 18px;
-  font-weight: 950;
-  line-height: 1;
-  letter-spacing: 0.01em;
-  white-space: nowrap;
 }
 
 .topbar-actions {

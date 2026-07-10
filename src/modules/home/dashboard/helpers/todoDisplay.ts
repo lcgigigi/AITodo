@@ -384,6 +384,20 @@ export function getTodoContentDisplay(event: CalendarEvent) {
   return event.content?.trim() || '暂无内容'
 }
 
+export function getTodoRemarkDisplay(event: CalendarEvent) {
+  return event.remark?.trim() || '暂无备注'
+}
+
+export function hasTodoRemark(event: CalendarEvent) {
+  return Boolean(event.remark?.trim())
+}
+
+export function getTodoListRemarkLine(event: CalendarEvent) {
+  const remark = event.remark?.trim()
+  if (remark) return `备注：${remark}`
+  return '暂无备注'
+}
+
 export function getTodoListDisplayText(event: CalendarEvent) {
   const content = event.content?.trim()
   if (content) return content

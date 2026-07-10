@@ -7,7 +7,7 @@ import IconEyeOff from '~icons/lucide/eye-off'
 import IconLockKeyhole from '~icons/lucide/lock-keyhole'
 import IconUserRound from '~icons/lucide/user-round'
 import campusImage from '@/assets/morning.png'
-import logoDarkImage from '@/assets/logoDark1.png'
+import logoImage from '@/assets/logo.png'
 import { Button } from '@/components/ui/button'
 import { routeConfig } from '@/config/route.config'
 import { APP_TITLE } from '@/shared/constants/app'
@@ -34,12 +34,7 @@ const activeSignal = ref(0)
 const mouse = reactive({ x: 0.5, y: 0.5 })
 const cardTilt = reactive({ rx: 0 })
 
-const signalItems = [
-  { label: '需求识别', value: '08:45' },
-  { label: '任务拆解', value: '09:20' },
-  { label: '日程锁定', value: '10:10' },
-  { label: 'AI 跟进', value: '14:00' },
-]
+const signalItems = ['需求识别', '任务拆解', '日程锁定', 'AI 跟进']
 
 const heroDescription = '智能待办、日程日历和 AI 扩展，一处进入。'
 
@@ -201,34 +196,29 @@ onUnmounted(() => {
         <span class="orb orb-three"></span>
       </div>
 
-      <header class="brand-lockup">
-        <span class="brand-mark" aria-hidden="true">
-          <img :src="logoDarkImage" alt="" />
-        </span>
-        <!-- <span>华力企业级 AI 平台</span> -->
-      </header>
-
       <div class="hero-copy">
         <span class="eyebrow">
           <span class="eyebrow-text">Smart Todo Command</span>
           <span class="eyebrow-cursor" aria-hidden="true"></span>
         </span>
         <h1>
-          <span class="title-gradient">{{ APP_TITLE }}</span>
+          <span class="title-lockup">
+            <img class="hero-logo" :src="logoImage" alt="" />
+            <span class="title-gradient">{{ APP_TITLE }}</span>
+          </span>
         </h1>
         <p>{{ heroDescription }}</p>
       </div>
 
       <div class="signal-strip" aria-label="今日节奏">
         <span
-          v-for="(item, index) in signalItems"
-          :key="item.label"
+          v-for="(label, index) in signalItems"
+          :key="label"
           class="signal-item"
           :class="{ 'is-active': activeSignal === index }"
           :style="{ '--i': index }"
         >
-          <strong>{{ item.value }}</strong>
-          {{ item.label }}
+          {{ label }}
           <span class="signal-progress" aria-hidden="true"></span>
         </span>
       </div>
@@ -357,7 +347,7 @@ onUnmounted(() => {
   isolation: isolate;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: flex-end;
   padding: 48px clamp(32px, 5vw, 78px);
 }
 
@@ -443,52 +433,14 @@ onUnmounted(() => {
   transition: transform 0.35s ease-out;
 }
 
-.brand-lockup {
-  position: relative;
-  z-index: 2;
-  display: inline-flex;
-  width: fit-content;
-  align-items: center;
-  gap: 12px;
-  color: #0f172a;
-  font-size: 15px;
-  font-weight: 900;
-  animation: rise-in 0.48s ease-out both;
-}
-
-.brand-mark {
-  width: 42px;
-  height: 42px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.74);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 14px 38px -26px rgba(15, 23, 42, 0.54);
-  overflow: hidden;
-  transition:
-    transform 0.28s ease,
-    box-shadow 0.28s ease;
-}
-
-.brand-lockup:hover .brand-mark {
-  transform: rotate(-4deg) scale(1.06);
-  box-shadow: 0 18px 42px -24px rgba(37, 99, 235, 0.42);
-}
-
-.brand-mark img {
-  width: 30px;
-  height: 30px;
-  object-fit: contain;
-}
-
 .hero-copy {
-  position: relative;
+  position: absolute;
+  top: 30%;
+  left: 5%;
   z-index: 2;
   max-width: min(620px, calc(100vw - 580px));
-  padding-bottom: min(13vh, 118px);
   animation: rise-in 0.58s 0.08s ease-out both;
-  transform: translate3d(calc(var(--mx) * 0.2), calc(var(--my) * 0.2), 0);
+  transform: translate3d(calc(var(--mx) * 0.2), calc(-50% + var(--my) * 0.2), 0);
   transition: transform 0.35s ease-out;
 }
 
@@ -515,6 +467,20 @@ onUnmounted(() => {
   font-size: clamp(52px, 6.4vw, 92px);
   font-weight: 950;
   line-height: 0.94;
+}
+
+.title-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: clamp(14px, 2vw, 22px);
+}
+
+.hero-logo {
+  width: clamp(52px, 6.4vw, 84px);
+  height: clamp(52px, 6.4vw, 84px);
+  flex: 0 0 auto;
+  display: block;
+  object-fit: contain;
 }
 
 .title-gradient {
@@ -643,19 +609,6 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.62);
   transform: translateY(-2px);
   box-shadow: 0 14px 28px -22px rgba(37, 99, 235, 0.38);
-}
-
-.signal-item strong {
-  display: block;
-  margin-bottom: 5px;
-  color: #0f172a;
-  font-size: 18px;
-  font-weight: 950;
-  transition: color 0.32s ease;
-}
-
-.signal-item.is-active strong {
-  color: #2563eb;
 }
 
 .signal-progress {
@@ -1079,7 +1032,10 @@ onUnmounted(() => {
   }
 
   .hero-copy {
+    position: relative;
+    top: auto;
     padding: 54px 0 24px;
+    transform: translate3d(calc(var(--mx) * 0.2), calc(var(--my) * 0.2), 0);
   }
 
   .hero-copy h1 {
@@ -1111,15 +1067,6 @@ onUnmounted(() => {
   .visual-plane::after,
   .ambient-orbs {
     display: none;
-  }
-
-  .brand-lockup {
-    font-size: 13px;
-  }
-
-  .brand-mark {
-    width: 38px;
-    height: 38px;
   }
 
   .hero-copy {
@@ -1171,7 +1118,6 @@ onUnmounted(() => {
   .title-gradient,
   .signal-progress::after,
   .loading-ring,
-  .brand-lockup,
   .hero-copy,
   .signal-strip,
   .field-enter,

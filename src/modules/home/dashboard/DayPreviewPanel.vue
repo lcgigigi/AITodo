@@ -11,6 +11,7 @@ import TodoAssigneeSelect from './components/TodoAssigneeSelect.vue'
 import TodoDatePicker from './components/TodoDatePicker.vue'
 import TodoDeadlineDateTimeRange from './components/TodoDeadlineDateTimeRange.vue'
 import TodoTimePicker from './components/TodoTimePicker.vue'
+import { isValidTodoTime } from './components/picker.helpers'
 import type {
   CalendarEvent,
   CalendarEventStatus,
@@ -86,6 +87,9 @@ const aiPrompt = ref('')
 const aiParsedOriginalText = ref('')
 const isParsing = ref(false)
 const isTitleInvalid = ref(false)
+const isScheduledTimeInvalid = ref(false)
+const isDeadlineStartTimeInvalid = ref(false)
+const isDeadlineEndTimeInvalid = ref(false)
 const highlightedFields = ref<Set<ParsedHighlightField>>(new Set())
 const todoForm = ref<CalendarTodoForm>(createEmptyForm(props.date))
 const initialFormSnapshot = ref(formSnapshot(todoForm.value))
@@ -154,6 +158,46 @@ watch(
   (title) => {
     if (title.trim()) {
       isTitleInvalid.value = false
+    }
+  },
+)
+
+function clearTimeInvalidState() {
+  isScheduledTimeInvalid.value = false
+  isDeadlineStartTimeInvalid.value = false
+  isDeadlineEndTimeInvalid.value = false
+}
+
+function isCreateTimeValid(form: CalendarTodoForm) {
+  if (form.mode === 'scheduled') {
+    return isValidTodoTime(form.time)
+  }
+
+  return isValidTodoTime(form.time) && isValidTodoTime(form.endTime)
+}
+
+function setCreateTimeInvalidState(form: CalendarTodoForm) {
+  if (form.mode === 'scheduled') {
+    isScheduledTimeInvalid.value = !isValidTodoTime(form.time)
+    isDeadlineStartTimeInvalid.value = false
+    isDeadlineEndTimeInvalid.value = false
+    return
+  }
+
+  isScheduledTimeInvalid.value = false
+  isDeadlineStartTimeInvalid.value = !isValidTodoTime(form.time)
+  isDeadlineEndTimeInvalid.value = !isValidTodoTime(form.endTime)
+}
+
+watch(
+  () => [todoForm.value.time, todoForm.value.endTime, todoForm.value.mode] as const,
+  () => {
+    if (!isScheduledTimeInvalid.value && !isDeadlineStartTimeInvalid.value && !isDeadlineEndTimeInvalid.value) {
+      return
+    }
+
+    if (isCreateTimeValid(todoForm.value)) {
+      clearTimeInvalidState()
     }
   },
 )
@@ -385,6 +429,7 @@ function resetFormState() {
   aiParsedOriginalText.value = ''
   isParsing.value = false
   isTitleInvalid.value = false
+  clearTimeInvalidState()
   todoForm.value = nextForm
   syncFormSnapshot(nextForm)
   panelMode.value = 'list'
@@ -403,6 +448,7 @@ function beginCreateForm(overrides: Partial<CalendarTodoForm> = {}) {
   aiParsedOriginalText.value = ''
   isParsing.value = false
   isTitleInvalid.value = false
+  clearTimeInvalidState()
   todoForm.value = nextForm
   syncFormSnapshot(nextForm)
   panelMode.value = 'create'
@@ -478,6 +524,7 @@ async function beginEditForm(event: CalendarEvent) {
   aiParsedOriginalText.value = ''
   isParsing.value = false
   isTitleInvalid.value = false
+  clearTimeInvalidState()
   todoForm.value = nextForm
   syncFormSnapshot(nextForm)
   panelMode.value = 'edit'
@@ -670,6 +717,13 @@ function submitTodo() {
   }
 
   isTitleInvalid.value = false
+
+  if (panelMode.value === 'create' && !isCreateTimeValid(todoForm.value)) {
+    setCreateTimeInvalidState(todoForm.value)
+    return
+  }
+
+  clearTimeInvalidState()
 
   const payload = createFormCopy(todoForm.value)
 
@@ -1193,6 +1247,7 @@ defineExpose({
                         class="soft-picker"
                         :disabled="isFormReadonly"
                         :highlighted="isAiHighlighted('time')"
+                        :invalid="isScheduledTimeInvalid"
                         aria-label="选择待办时间"
                       />
                     </label>
@@ -1220,6 +1275,8 @@ defineExpose({
                     :disabled="isFormReadonly"
                     :start-highlighted="isAiHighlighted('date') || isAiHighlighted('time')"
                     :end-highlighted="isAiHighlighted('endDate') || isAiHighlighted('endTime')"
+                    :start-invalid="isDeadlineStartTimeInvalid"
+                    :end-invalid="isDeadlineEndTimeInvalid"
                     @change="syncDateRange"
                   />
                   <div class="quick-range-row field-full" aria-label="快捷时间">
@@ -2032,17 +2089,21 @@ defineExpose({
   flex-wrap: wrap;
 }
 
-.dispatch-target,
-.scope-badge {
+.dispatch-target {
   display: inline-flex;
   align-items: center;
   max-width: 100%;
-  padding: 2px 8px;
+  min-height: 20px;
+  padding: 0 8px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 800;
-  line-height: 1.2;
+  line-height: 1;
   white-space: nowrap;
+}
+
+.scope-badge {
+  min-height: 20px;
 }
 
 .timeline-item.scope-assigned_by_me {

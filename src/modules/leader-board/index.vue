@@ -151,7 +151,7 @@ const boardViewportStyle = computed(() => ({
 const boardCanvasStyle = computed(() => ({
   width: `${BOARD_DESIGN_WIDTH}px`,
   height: `${BOARD_DESIGN_HEIGHT}px`,
-  transform: `scale(${boardScale.value})`,
+  transform: `translateX(-50%) scale(${boardScale.value})`,
 }))
 
 function clampTrendIndex(index: number, length: number) {
@@ -507,8 +507,12 @@ function renderAllCharts() {
 }
 
 function updateBoardScale() {
-  const viewportWidth = window.innerWidth
-  const nextScale = viewportWidth / BOARD_DESIGN_WIDTH
+  const viewportWidth = document.documentElement.clientWidth
+  const viewportHeight = document.documentElement.clientHeight
+  const nextScale = Math.min(
+    viewportWidth / BOARD_DESIGN_WIDTH,
+    viewportHeight / BOARD_DESIGN_HEIGHT,
+  )
 
   boardScale.value = Number(nextScale.toFixed(4))
   boardViewportHeight.value = BOARD_DESIGN_HEIGHT * boardScale.value
@@ -804,11 +808,10 @@ onBeforeUnmount(() => {
   position: relative;
   display: grid;
   place-items: center;
-  width: 100vw;
-  min-height: 100vh;
+  width: 100%;
+  height: 100dvh;
   box-sizing: border-box;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: hidden;
   padding: 0;
   color: var(--ink);
   background: radial-gradient(circle at 17% 0%, rgba(18, 115, 248, 0.08), transparent 32%),
@@ -833,10 +836,10 @@ onBeforeUnmount(() => {
 .leader-board-canvas {
   position: absolute;
   top: 0;
-  left: 0;
+  left: 50%;
   overflow: hidden;
   padding: 24px 34px 22px;
-  transform-origin: top left;
+  transform-origin: top center;
   will-change: transform;
 }
 

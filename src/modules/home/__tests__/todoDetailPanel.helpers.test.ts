@@ -115,6 +115,22 @@ describe('buildTodoDetailPanelViewModel assignee progress', () => {
       expect.arrayContaining([expect.objectContaining({ key: 'receiver', label: '接受人' })]),
     )
   })
+
+  it('shows remark in detail desc and falls back when empty', () => {
+    expect(
+      buildTodoDetailPanelViewModel(buildTask({ remark: '会议室 317' }), creator).remark,
+    ).toBe('会议室 317')
+    expect(
+      buildTodoDetailPanelViewModel(buildTask({ remark: '会议室 317' }), creator).remarkIsEmpty,
+    ).toBe(false)
+    expect(buildTodoDetailPanelViewModel(buildTask({ remark: '' }), creator).remark).toBe('暂无备注')
+    expect(
+      buildTodoDetailPanelViewModel(buildTask({ remark: '' }), creator).remarkIsEmpty,
+    ).toBe(true)
+    expect(buildTodoDetailPanelViewModel(buildTask({ remark: '   ' }), creator).remark).toBe(
+      '暂无备注',
+    )
+  })
 })
 
 describe('isPendingAcceptanceTask', () => {

@@ -42,11 +42,15 @@ const props = withDefaults(
     disabled?: boolean
     startHighlighted?: boolean
     endHighlighted?: boolean
+    startInvalid?: boolean
+    endInvalid?: boolean
   }>(),
   {
     disabled: false,
     startHighlighted: false,
     endHighlighted: false,
+    startInvalid: false,
+    endInvalid: false,
   },
 )
 
@@ -256,10 +260,12 @@ onBeforeUnmount(() => {
           variant="outline"
           :disabled="disabled"
           aria-label="选择开始时间"
+          :aria-invalid="startInvalid || undefined"
           :class="
             cn(
               'todo-picker-trigger todo-datetime-trigger',
               startHighlighted && 'is-ai-highlighted',
+              startInvalid && 'is-field-invalid',
               open && activeField === 'start' && 'is-active',
             )
           "
@@ -278,10 +284,12 @@ onBeforeUnmount(() => {
           variant="outline"
           :disabled="disabled"
           aria-label="选择截止时间"
+          :aria-invalid="endInvalid || undefined"
           :class="
             cn(
               'todo-picker-trigger todo-datetime-trigger',
               endHighlighted && 'is-ai-highlighted',
+              endInvalid && 'is-field-invalid',
               open && activeField === 'end' && 'is-active',
             )
           "

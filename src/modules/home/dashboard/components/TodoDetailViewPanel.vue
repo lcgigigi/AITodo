@@ -69,7 +69,7 @@ const emit = defineEmits<{
 
       <template v-else-if="panel">
         <h2 class="detail-panel-title">{{ panel.title }}</h2>
-        <p class="detail-panel-desc">{{ panel.content }}</p>
+        <p class="detail-panel-desc" :class="{ 'is-empty': panel.remarkIsEmpty }">{{ panel.remark }}</p>
 
         <section class="detail-time-card" aria-label="时间安排">
           <span class="detail-time-icon" aria-hidden="true">
@@ -292,11 +292,17 @@ const emit = defineEmits<{
 
 .detail-panel-desc {
   margin: -6px 0 0;
-  color: #5c6b82;
+  color: #334155;
   font-size: 14px;
+  font-weight: 650;
   line-height: 1.75;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.detail-panel-desc.is-empty {
+  color: #5c6d84;
+  font-weight: 600;
 }
 
 .detail-field-label {
