@@ -48,7 +48,7 @@ import {
   formatEventTime,
   formatEventTimeForDayList,
   getTodoListDisplayText,
-  getTodoRemarkDisplay,
+  getTodoListRemarkLine,
   hasTodoRemark,
   getTodoScopeBadge,
   isRejectedTodo,
@@ -1357,10 +1357,7 @@ defineExpose({
                     {{ formatHomeTodoMeta(task) }}
                   </time>
                 </div>
-                <div
-                  class="home-todo-item-main"
-                  :class="{ 'has-remark': hasTodoRemark(task) }"
-                >
+                <div class="home-todo-item-main">
                   <div class="home-todo-item-head">
                     <span
                       class="home-todo-type-tag"
@@ -1368,16 +1365,6 @@ defineExpose({
                     >
                       {{ eventTypeLabel(task) }}
                     </span>
-                    <span class="home-todo-item-title">{{ getTodoListDisplayText(task) }}</span>
-                    <span
-                      v-if="getTodoScopeBadge(task) && !hasTodoRemark(task)"
-                      class="todo-scope-badge home-todo-scope-badge is-inline"
-                      :class="`tone-${getTodoScopeBadge(task)!.tone}`"
-                    >
-                      {{ getTodoScopeBadge(task)!.label }}
-                    </span>
-                  </div>
-                  <div v-if="hasTodoRemark(task)" class="home-todo-item-sub">
                     <span
                       v-if="getTodoScopeBadge(task)"
                       class="todo-scope-badge home-todo-scope-badge"
@@ -1385,8 +1372,11 @@ defineExpose({
                     >
                       {{ getTodoScopeBadge(task)!.label }}
                     </span>
-                    <p class="home-todo-item-remark">{{ getTodoRemarkDisplay(task) }}</p>
+                    <span class="home-todo-item-title">{{ getTodoListDisplayText(task) }}</span>
                   </div>
+                  <p class="home-todo-item-remark" :class="{ 'is-empty': !hasTodoRemark(task) }">
+                    {{ getTodoListRemarkLine(task) }}
+                  </p>
                 </div>
                 <div class="home-todo-item-aside">
                   <div class="home-todo-item-actions" @click.stop>
@@ -1907,7 +1897,7 @@ defineExpose({
   align-items: center;
   gap: 10px;
   flex: 0 0 auto;
-  min-height: 50px;
+  min-height: 58px;
   box-sizing: border-box;
   padding: 0 14px 0 12px;
   border-radius: 14px;
@@ -2034,25 +2024,13 @@ defineExpose({
 
 .home-todo-item-main {
   min-width: 0;
-  padding: 11px 0;
+  padding: 9px 0;
   display: flex;
   flex-direction: column;
-  gap: 0;
-}
-
-.home-todo-item-main.has-remark {
-  padding: 9px 0;
-  gap: 4px;
+  gap: 3px;
 }
 
 .home-todo-item-head {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.home-todo-item-sub {
   min-width: 0;
   display: flex;
   align-items: center;
@@ -2176,8 +2154,8 @@ defineExpose({
 }
 
 .home-todo-item-title {
-  flex: 1 1 auto;
-  min-width: 0;
+  flex: 1 1 0;
+  min-width: 3.5rem;
   overflow: hidden;
   color: #0f172a;
   font-size: 14px;
@@ -2191,16 +2169,20 @@ defineExpose({
 }
 
 .home-todo-item-remark {
-  flex: 1 1 auto;
   margin: 0;
   min-width: 0;
   overflow: hidden;
-  color: #64748b;
+  color: #3f4f63;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 650;
   line-height: 1.45;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.home-todo-item-remark.is-empty {
+  color: #64748b;
+  font-weight: 600;
 }
 
 .home-todo-item-time {
@@ -2253,18 +2235,6 @@ defineExpose({
   white-space: nowrap;
 }
 
-.home-todo-scope-badge {
-  flex: 0 0 auto;
-  max-width: 9.5rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.home-todo-scope-badge.is-inline {
-  margin-left: auto;
-}
-
 .home-todo-type-tag.is-task {
   background: rgba(218, 247, 232, 0.86);
   color: #08724f;
@@ -2310,7 +2280,7 @@ defineExpose({
 }
 
 .home-todo-item.is-done .home-todo-item-remark {
-  color: #94a3b8;
+  color: #7b8ea6;
 }
 
 .home-todo-status-tag {

@@ -272,14 +272,48 @@ function createUserMap(users: CalendarUser[]) {
   return new Map(users.map((user) => [user.id, user]))
 }
 
+function splitAssigneeIds(assigneeId: string) {
+  return assigneeId
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean)
+}
+
+function mergeAssigneeIds(...assigneeGroups: string[]) {
+  const merged = new Set<string>()
+
+  for (const group of assigneeGroups) {
+    splitAssigneeIds(group).forEach((id) => merged.add(id))
+  }
+
+  return [...merged].join(',')
+}
+
 function resolveScope(
   creatorId: string,
   assigneeId: string,
   currentUser: CalendarUser,
 ): CalendarTodoScope | undefined {
-  if (!currentUser.id || !creatorId || !assigneeId) return undefined
-  if (creatorId === currentUser.id && assigneeId === currentUser.id) return 'self'
-  if (creatorId === currentUser.id && assigneeId !== currentUser.id) return 'assigned_by_me'
+  if (!currentUser.id) return undefined
+
+  const assigneeIds = splitAssigneeIds(assigneeId)
+  const includesCurrentUser = assigneeIds.includes(currentUser.id)
+  const onlyCurrentUser = assigneeIds.length === 1 && assigneeIds[0] === currentUser.id
+
+  // 列表接口偶发缺失 creatorId；此时只能依据接受人推断派发方向。
+  if (!creatorId) {
+    if (!assigneeIds.length) return undefined
+    if (onlyCurrentUser) return 'self'
+    if (!includesCurrentUser) return 'assigned_by_me'
+    return 'assigned_to_me'
+  }
+
+  if (creatorId === currentUser.id) {
+    if (!assigneeIds.length || onlyCurrentUser) return 'self'
+    if (assigneeIds.some((id) => id !== currentUser.id)) return 'assigned_by_me'
+    return 'self'
+  }
+
   return 'assigned_to_me'
 }
 
@@ -375,14 +409,42 @@ function normalizeBackendTodo(
 
 function dedupeLinkedBackendTodoItems(items: SmartTodoBackendItem[]) {
   const ids = new Set(items.map((item) => toId(item.id)).filter(Boolean))
+  const childrenByParent = new Map<string, SmartTodoBackendItem[]>()
+
+  for (const item of items) {
+    const parentId = toId(item.fid)
+    if (!parentId) continue
+
+    const children = childrenByParent.get(parentId) ?? []
+    children.push(item)
+    childrenByParent.set(parentId, children)
+  }
 
   // 派发待办时后台会返回主待办（fid 为空）和子待办（fid 指向主待办 id）。
-  // 同一列表里两者内容重复，保留主待办即可。
-  return items.filter((item) => {
-    const parentId = toId(item.fid)
-    if (!parentId) return true
-    return !ids.has(parentId)
-  })
+  // 同一列表里两者内容重复，保留主待办即可；同时合并子待办接受人，便于识别“我派发”。
+  return items
+    .filter((item) => {
+      const parentId = toId(item.fid)
+      if (!parentId) return true
+      return !ids.has(parentId)
+    })
+    .map((item) => {
+      const itemId = toId(item.id)
+      const children = itemId ? childrenByParent.get(itemId) : undefined
+      if (!children?.length) return item
+
+      const mergedAssigneeIds = mergeAssigneeIds(
+        resolveAssigneeIds(item.assigneeId, item.assigneeIds),
+        ...children.map((child) => resolveAssigneeIds(child.assigneeId, child.assigneeIds)),
+      )
+      if (!mergedAssigneeIds) return item
+
+      return {
+        ...item,
+        assigneeId: undefined,
+        assigneeIds: mergedAssigneeIds,
+      }
+    })
 }
 
 function normalizeBackendTodos(

@@ -28,7 +28,7 @@ import {
   formatEventTime,
   formatEventTimeForDayList,
   getTodoListDisplayText,
-  getTodoRemarkDisplay,
+  getTodoListRemarkLine,
   hasTodoRemark,
   getTodoScopeBadge,
   isRejectedTodo,
@@ -342,10 +342,7 @@ async function toggleTaskStatus(event: CalendarEvent) {
                 {{ formatTodoMeta(task) }}
               </time>
             </div>
-            <div
-              class="simple-todo-item-main"
-              :class="{ 'has-remark': hasTodoRemark(task) }"
-            >
+            <div class="simple-todo-item-main">
               <div class="simple-todo-item-head">
                 <span
                   class="simple-todo-type-tag"
@@ -353,16 +350,6 @@ async function toggleTaskStatus(event: CalendarEvent) {
                 >
                   {{ eventTypeLabel(task) }}
                 </span>
-                <span class="simple-todo-item-title">{{ getTodoListDisplayText(task) }}</span>
-                <span
-                  v-if="getTodoScopeBadge(task) && !hasTodoRemark(task)"
-                  class="todo-scope-badge simple-todo-scope-badge is-inline"
-                  :class="`tone-${getTodoScopeBadge(task)!.tone}`"
-                >
-                  {{ getTodoScopeBadge(task)!.label }}
-                </span>
-              </div>
-              <div v-if="hasTodoRemark(task)" class="simple-todo-item-sub">
                 <span
                   v-if="getTodoScopeBadge(task)"
                   class="todo-scope-badge simple-todo-scope-badge"
@@ -370,8 +357,11 @@ async function toggleTaskStatus(event: CalendarEvent) {
                 >
                   {{ getTodoScopeBadge(task)!.label }}
                 </span>
-                <p class="simple-todo-item-remark">{{ getTodoRemarkDisplay(task) }}</p>
+                <span class="simple-todo-item-title">{{ getTodoListDisplayText(task) }}</span>
               </div>
+              <p class="simple-todo-item-remark" :class="{ 'is-empty': !hasTodoRemark(task) }">
+                {{ getTodoListRemarkLine(task) }}
+              </p>
             </div>
             <div class="simple-todo-item-aside">
               <span v-if="isRejectedTodo(task)" class="simple-todo-status-tag is-rejected">
@@ -542,7 +532,7 @@ async function toggleTaskStatus(event: CalendarEvent) {
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  min-height: 50px;
+  min-height: 58px;
   padding: 0 14px 0 12px;
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.692);
@@ -586,15 +576,10 @@ async function toggleTaskStatus(event: CalendarEvent) {
 
 .simple-todo-item-main {
   min-width: 0;
-  padding: 11px 0;
+  padding: 9px 0;
   display: flex;
   flex-direction: column;
-  gap: 0;
-}
-
-.simple-todo-item-main.has-remark {
-  padding: 9px 0;
-  gap: 4px;
+  gap: 3px;
 }
 
 .simple-todo-item-head {
@@ -604,15 +589,8 @@ async function toggleTaskStatus(event: CalendarEvent) {
   gap: 8px;
 }
 
-.simple-todo-item-sub {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .simple-todo-item-title {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   color: #0f172a;
@@ -623,37 +601,28 @@ async function toggleTaskStatus(event: CalendarEvent) {
 }
 
 .simple-todo-item-remark {
-  flex: 1 1 auto;
   margin: 0;
   min-width: 0;
   overflow: hidden;
-  color: #64748b;
+  color: #3f4f63;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 650;
   line-height: 1.45;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.simple-todo-item-remark.is-empty {
+  color: #64748b;
+  font-weight: 600;
+}
+
 .simple-todo-item-time {
-  flex: 0 0 auto;
   min-width: 3.1rem;
   color: #64748b;
   font-size: 14px;
   font-weight: 800;
   white-space: nowrap;
-}
-
-.simple-todo-scope-badge {
-  flex: 0 0 auto;
-  max-width: 9.5rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.simple-todo-scope-badge.is-inline {
-  margin-left: auto;
 }
 
 .simple-todo-item.todo .simple-todo-item-time {

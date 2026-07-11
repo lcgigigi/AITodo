@@ -701,6 +701,95 @@ describe('todo.service real backend adapter', () => {
     })
   })
 
+  it('merges child assignees into parent so dispatched todos show assigned_by_me scope', async () => {
+    const creator: CalendarUser = {
+      id: '1110691',
+      name: '田坤坤',
+      role: 'employee',
+    }
+
+    vi.mocked(httpClient.request).mockImplementation((config) => {
+      if (config.url === '/smart-todo/month-list') {
+        return backendResponse([
+          {
+            id: 100,
+            title: '',
+            timeType: 1,
+            startDateShow: '2026-07-10 09:15:00',
+            content: '11',
+            assigneeIds: '1110691',
+            creatorId: '1110691',
+            status: 0,
+            fid: null,
+            type: 1,
+          },
+          {
+            id: 101,
+            title: '',
+            timeType: 1,
+            startDateShow: '2026-07-10 09:15:00',
+            content: '11',
+            assigneeIds: '1102999',
+            creatorId: '1110691',
+            handlerId: '1102999',
+            status: 0,
+            receiveStatus: 2,
+            fid: 100,
+            type: 1,
+          },
+        ]) as never
+      }
+
+      return backendResponse(true) as never
+    })
+
+    const events = await loadTodos(creator, [
+      { id: '1102999', name: '徐逸臣', role: 'employee' },
+    ])
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      id: '100',
+      scope: 'assigned_by_me',
+      assigneeId: '1110691,1102999',
+    })
+  })
+
+  it('infers assigned_by_me when list item lacks creatorId but assignee is someone else', async () => {
+    const creator: CalendarUser = {
+      id: '1110691',
+      name: '田坤坤',
+      role: 'employee',
+    }
+
+    vi.mocked(httpClient.request).mockImplementation((config) => {
+      if (config.url === '/smart-todo/month-list') {
+        return backendResponse([
+          {
+            id: 100,
+            title: '11',
+            timeType: 1,
+            startDateShow: '2026-07-10 09:15:00',
+            content: '11',
+            assigneeIds: '1102999',
+            status: 0,
+            type: 1,
+          },
+        ]) as never
+      }
+
+      return backendResponse(true) as never
+    })
+
+    await expect(
+      loadTodos(creator, [{ id: '1102999', name: '徐逸臣', role: 'employee' }]),
+    ).resolves.toMatchObject([
+      {
+        id: '100',
+        scope: 'assigned_by_me',
+      },
+    ])
+  })
+
   it('keeps child todo when parent is absent from month-list', async () => {
     vi.mocked(httpClient.request).mockImplementation((config) => {
       if (config.url === '/smart-todo/month-list') {

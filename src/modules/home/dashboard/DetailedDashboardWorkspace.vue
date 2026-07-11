@@ -1303,7 +1303,7 @@ function weekRangeLabel(anchorDate: string) {
             :loading="isActiveDetailLoading"
             @close="closeTaskDetail"
           >
-            <template v-if="showDetailFooter && activeTask" #footer>
+            <template v-if="showDetailFooter" #footer>
               <div
                 class="detail-panel-actions"
                 :class="{
@@ -1370,6 +1370,7 @@ function weekRangeLabel(anchorDate: string) {
                     编辑
                   </button>
                   <button
+                    v-if="activeTask"
                     type="button"
                     class="detail-action primary"
                     :class="{ 'is-syncing': isTodoStatusUpdating(activeTask.id) }"
