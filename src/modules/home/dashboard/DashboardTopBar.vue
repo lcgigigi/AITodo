@@ -28,6 +28,7 @@ import { DEFAULT_USER_AVATAR, useUserStore } from '@/stores/user.store'
 const emit = defineEmits<{
   'calendar-refresh': []
   'open-todo': [payload: { id: string; date?: string; source?: TodoOpenSource }]
+  'open-email-provider': []
   'start-onboarding': []
   'switch-mode': [mode: 'simple' | 'detail']
   'select-tool': [payload: DashboardToolTarget]
@@ -154,6 +155,13 @@ function toggleSettingsMenu() {
 
 async function syncCalendarFromEmail() {
   if (isSyncingCalendar.value) return
+
+  const checkEmail = userStore.profile?.checkEmail
+  if (!String(checkEmail ?? '').trim()) {
+    closeSettingsMenu()
+    emit('open-email-provider')
+    return
+  }
 
   isSyncingCalendar.value = true
 

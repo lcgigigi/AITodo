@@ -85,12 +85,16 @@ const emailProviderOptions: EmailProviderOption[] = [
   },
 ]
 
+const EMAIL_PROVIDER_SKIP_KEY = 'ai-workbench:email-provider-skipped'
+
 const calendarWorkspaceRef = ref<CalendarWorkspaceExpose | null>(null)
 const detailedDashboardWorkspaceRef = ref<DetailedDashboardWorkspaceExpose | null>(null)
 const homeViewMode = ref<HomeViewMode>('simple')
 const sharedSelectedDate = ref(ymd(new Date()))
 const selectedEmailProvider = ref<SmartTodoEmailProvider | ''>('')
 const isEmailProviderSaving = ref(false)
+const emailProviderGateSkipped = ref(sessionStorage.getItem(EMAIL_PROVIDER_SKIP_KEY) === '1')
+const emailProviderGateForcedOpen = ref(false)
 const userStore = useUserStore()
 const feedbackStore = useFeedbackStore()
 const dashboardTodosStore = useDashboardTodosStore()
@@ -108,7 +112,12 @@ const currentBgImage = computed(() => bgImages[getHomeTimePeriod(now.value)])
 
 const shouldShowEmailProviderGate = computed(() => {
   const checkEmail = userStore.profile?.checkEmail
-  return userStore.isLoggedIn && Boolean(userStore.profile) && !String(checkEmail ?? '').trim()
+  const needsSelection =
+    userStore.isLoggedIn && Boolean(userStore.profile) && !String(checkEmail ?? '').trim()
+
+  if (!needsSelection) return false
+  if (emailProviderGateForcedOpen.value) return true
+  return !emailProviderGateSkipped.value
 })
 
 function handleCalendarRefresh() {
@@ -158,12 +167,28 @@ async function confirmEmailProvider() {
   try {
     await submitEmailProvider(selectedEmailProvider.value)
     userStore.setCheckEmail(selectedEmailProvider.value)
+    emailProviderGateForcedOpen.value = false
+    emailProviderGateSkipped.value = false
+    sessionStorage.removeItem(EMAIL_PROVIDER_SKIP_KEY)
     feedbackStore.success('邮箱类型已确认')
   } catch (error) {
     feedbackStore.error(error instanceof Error ? error.message : '邮箱类型确认失败')
   } finally {
     isEmailProviderSaving.value = false
   }
+}
+
+function skipEmailProvider() {
+  if (isEmailProviderSaving.value) return
+
+  emailProviderGateSkipped.value = true
+  emailProviderGateForcedOpen.value = false
+  sessionStorage.setItem(EMAIL_PROVIDER_SKIP_KEY, '1')
+  selectedEmailProvider.value = ''
+}
+
+function openEmailProviderGate() {
+  emailProviderGateForcedOpen.value = true
 }
 </script>
 
@@ -183,6 +208,7 @@ async function confirmEmailProvider() {
         @start-onboarding="startOnboardingTour"
         @select-tool="handleTopbarToolSelect"
         @switch-mode="setHomeViewMode"
+        @open-email-provider="openEmailProviderGate"
       />
       <div class="dashboard-content">
         <KeepAlive>
@@ -192,6 +218,7 @@ async function confirmEmailProvider() {
             v-model:selected-date="sharedSelectedDate"
             @switch-mode="setHomeViewMode"
             @start-onboarding="startOnboardingTour"
+            @open-email-provider="openEmailProviderGate"
           />
           <DetailedDashboardWorkspace
             v-else
@@ -223,7 +250,9 @@ async function confirmEmailProvider() {
             </div>
             <p class="email-provider-kicker">Mail Sync Setup</p>
             <h2 id="email-provider-title">选择你的邮箱入口</h2>
-            <p class="email-provider-desc">选好之后，工作台会按对应邮箱系统同步日程与待办提醒。</p>
+            <p class="email-provider-desc">
+              选好之后，工作台会按对应邮箱系统同步日程与待办提醒。若暂未使用以上邮箱，可先跳过。
+            </p>
           </header>
 
           <div class="email-provider-options" role="radiogroup" aria-label="邮箱类型">
@@ -267,6 +296,14 @@ async function confirmEmailProvider() {
           >
             {{ isEmailProviderSaving ? '确认中...' : '确认选择' }}
           </Button>
+          <button
+            type="button"
+            class="email-skip-button"
+            :disabled="isEmailProviderSaving"
+            @click="skipEmailProvider"
+          >
+            暂不选择，跳过
+          </button>
         </section>
       </div>
     </Transition>
@@ -622,6 +659,31 @@ async function confirmEmailProvider() {
   background: #f1f5f9;
   color: #94a3b8;
   box-shadow: none;
+  cursor: not-allowed;
+}
+
+.email-skip-button {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px 16px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 200ms ease;
+}
+
+.email-skip-button:hover:not(:disabled),
+.email-skip-button:focus-visible:not(:disabled) {
+  color: #334155;
+}
+
+.email-skip-button:disabled {
+  color: #cbd5e1;
   cursor: not-allowed;
 }
 
