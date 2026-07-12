@@ -59,7 +59,7 @@ describe('todo.service real backend adapter', () => {
     vi.mocked(httpClient.request).mockReset()
   })
 
-  it('logs in and maps current user info from the real auth endpoints', async () => {
+  it('logs in without requesting current user info', async () => {
     vi.mocked(httpClient.post).mockResolvedValueOnce({
       data: {
         code: 200,
@@ -67,30 +67,15 @@ describe('todo.service real backend adapter', () => {
         token: 'real-token',
       },
     })
-    vi.mocked(httpClient.get).mockResolvedValueOnce({
-      data: {
-        code: 200,
-        msg: '操作成功',
-        user: {
-          userId: 1,
-          userName: '1102080',
-          nickName: '李四',
-          isSecurityPassword: 'yes',
-        },
-        roles: ['admin'],
-        permissions: ['*:*:*'],
-      },
-    })
-
     await expect(loginSmartTodo({ username: 'admin', password: 'admin123' })).resolves.toBe(
       'real-token',
     )
-    await expect(loadCurrentUser()).resolves.toMatchObject({
+    await expect(loadCurrentUser('1102080')).resolves.toMatchObject({
       id: '1102080',
-      name: '李四',
-      role: 'leader',
-      roles: ['admin'],
-      permissions: ['*:*:*'],
+      name: '1102080',
+      role: 'employee',
+      roles: [],
+      permissions: [],
     })
 
     expect(httpClient.post).toHaveBeenCalledWith(
@@ -98,7 +83,7 @@ describe('todo.service real backend adapter', () => {
       { username: 'admin', password: 'admin123' },
       expect.any(Object),
     )
-    expect(httpClient.get).toHaveBeenCalledWith('/getInfo', expect.any(Object))
+    expect(httpClient.get).not.toHaveBeenCalled()
   })
 
   it('submits the selected email provider choice', async () => {
