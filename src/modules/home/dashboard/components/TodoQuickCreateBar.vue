@@ -62,7 +62,7 @@ function handleSubmit() {
       type="text"
       autocomplete="off"
       aria-label="快速创建"
-      placeholder="一句话描述待办，按 Enter 创建"
+      placeholder="一句话描述待办，例如：明天下午给xxx布置xxx任务"
       :disabled="disabled"
     />
 

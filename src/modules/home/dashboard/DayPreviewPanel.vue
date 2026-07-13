@@ -1142,6 +1142,7 @@ defineExpose({
             <div class="ai-inline-row">
               <Input
                 v-model="aiPrompt"
+                class="ai-prompt-input"
                 type="text"
                 :disabled="isParsing"
                 :aria-describedby="isParsing ? 'ai-parse-status-title' : undefined"
@@ -2562,6 +2563,13 @@ p {
 .ai-inline-section :deep(input:focus) {
   border-color: rgba(var(--todo-primary-rgb), 0.28);
   box-shadow: 0 0 0 3px rgba(var(--todo-primary-rgb), 0.08);
+}
+
+.ai-inline-section :deep(.ai-prompt-input::placeholder) {
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 500;
+  opacity: 1;
 }
 
 .ai-inline-row button:not(:disabled) {

@@ -10,8 +10,6 @@ import IconChevronRight from '~icons/lucide/chevron-right'
 import IconClock3 from '~icons/lucide/clock-3'
 import IconFlame from '~icons/lucide/flame'
 import IconLoaderCircle from '~icons/lucide/loader-circle'
-import IconPause from '~icons/lucide/pause'
-import IconPlay from '~icons/lucide/play'
 import IconQuote from '~icons/lucide/quote'
 import IconRefreshCw from '~icons/lucide/refresh-cw'
 import IconRotateCcw from '~icons/lucide/rotate-ccw'
@@ -29,7 +27,6 @@ import {
   type StorySlideKind,
 } from '@/modules/home/dashboard/helpers/workReportStory.helpers'
 
-const AUTO_PLAY_DELAY_MS = 4800
 const COUNT_UP_DURATION_MS = 1100
 
 const SLIDE_ICON_MAP: Record<StorySlideKind, Component> = {
@@ -69,13 +66,11 @@ const isLoading = ref(false)
 const loadError = ref(false)
 const currentSlideIndex = ref(0)
 const slideDirection = ref<'forward' | 'backward'>('forward')
-const isAutoPlaying = ref(true)
 const isSlideReady = ref(false)
 const animatedMetricValues = ref<Record<string, number>>({})
 const visibleTagCount = ref(0)
 
 let requestId = 0
-let autoPlayTimer: ReturnType<typeof setTimeout> | null = null
 let countUpFrame: number | null = null
 let touchStartX = 0
 let touchStartY = 0
@@ -137,13 +132,6 @@ function handleKeydown(event: KeyboardEvent) {
   }
 }
 
-function clearAutoPlayTimer() {
-  if (autoPlayTimer) {
-    clearTimeout(autoPlayTimer)
-    autoPlayTimer = null
-  }
-}
-
 function clearCountUpFrame() {
   if (countUpFrame !== null) {
     cancelAnimationFrame(countUpFrame)
@@ -152,11 +140,9 @@ function clearCountUpFrame() {
 }
 
 function resetStoryState() {
-  clearAutoPlayTimer()
   clearCountUpFrame()
   currentSlideIndex.value = 0
   slideDirection.value = 'forward'
-  isAutoPlaying.value = true
   isSlideReady.value = false
   animatedMetricValues.value = {}
   visibleTagCount.value = 0
@@ -227,7 +213,6 @@ function animateTags(tags: string[] = []) {
 }
 
 function prepareSlideAnimations() {
-  clearAutoPlayTimer()
   clearCountUpFrame()
   isSlideReady.value = false
   visibleTagCount.value = 0
@@ -248,21 +233,7 @@ function prepareSlideAnimations() {
       animateTags(slide.tags)
     }
 
-    scheduleAutoPlay()
   }, 120)
-}
-
-function scheduleAutoPlay() {
-  clearAutoPlayTimer()
-
-  if (!props.open || !isAutoPlaying.value || isCoverSlide.value || !canGoForward.value) {
-    return
-  }
-
-  autoPlayTimer = setTimeout(() => {
-    if (!props.open || !isAutoPlaying.value) return
-    goForward(true)
-  }, AUTO_PLAY_DELAY_MS)
 }
 
 function goToSlide(index: number) {
@@ -273,16 +244,12 @@ function goToSlide(index: number) {
   prepareSlideAnimations()
 }
 
-function goForward(fromAutoPlay = false) {
+function goForward() {
   if (!canGoForward.value) return
 
   if (isCoverSlide.value) {
     goToSlide(1)
     return
-  }
-
-  if (!fromAutoPlay) {
-    clearAutoPlayTimer()
   }
 
   slideDirection.value = 'forward'
@@ -292,19 +259,9 @@ function goForward(fromAutoPlay = false) {
 
 function goBack() {
   if (!canGoBack.value) return
-  clearAutoPlayTimer()
   slideDirection.value = 'backward'
   currentSlideIndex.value -= 1
   prepareSlideAnimations()
-}
-
-function toggleAutoPlay() {
-  isAutoPlaying.value = !isAutoPlaying.value
-  if (isAutoPlaying.value) {
-    scheduleAutoPlay()
-  } else {
-    clearAutoPlayTimer()
-  }
 }
 
 function replayStory() {
@@ -395,7 +352,6 @@ watch(
 )
 
 onBeforeUnmount(() => {
-  clearAutoPlayTimer()
   clearCountUpFrame()
   document.removeEventListener('keydown', handleKeydown)
 })
@@ -422,18 +378,6 @@ onBeforeUnmount(() => {
             <h2 id="work-report-story-title" class="work-report-story-dialog__title">这是你的今年回顾</h2>
 
             <div class="work-report-story-dialog__actions">
-              <button
-                v-if="!isLoading && !loadError && totalSlides > 0"
-                type="button"
-                class="work-report-story-icon-btn"
-                :class="{ 'is-active': isAutoPlaying }"
-                :aria-label="isAutoPlaying ? '暂停自动播放' : '继续自动播放'"
-                :title="isAutoPlaying ? '暂停自动播放' : '继续自动播放'"
-                @click="toggleAutoPlay"
-              >
-                <IconPause v-if="isAutoPlaying" aria-hidden="true" />
-                <IconPlay v-else aria-hidden="true" />
-              </button>
               <button
                 type="button"
                 class="work-report-story-icon-btn"
@@ -470,10 +414,7 @@ onBeforeUnmount(() => {
               :aria-label="`跳转到第 ${index + 1} 屏`"
               @click="goToSlide(index)"
             >
-              <span
-                class="work-report-story-segment__fill"
-                :class="{ 'is-pulsing': index === currentSlideIndex && isAutoPlaying && !isCoverSlide }"
-              />
+              <span class="work-report-story-segment__fill" />
             </button>
           </div>
 
@@ -811,12 +752,6 @@ onBeforeUnmount(() => {
     box-shadow 0.18s ease;
 }
 
-.work-report-story-icon-btn.is-active {
-  color: #1d4ed8;
-  background: rgba(239, 246, 255, 0.98);
-  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.42);
-}
-
 .work-report-story-icon-btn:hover:not(:disabled),
 .work-report-story-icon-btn:focus-visible {
   background: #ffffff;
@@ -870,10 +805,6 @@ onBeforeUnmount(() => {
 .work-report-story-segment.is-done .work-report-story-segment__fill,
 .work-report-story-segment.is-active .work-report-story-segment__fill {
   width: 100%;
-}
-
-.work-report-story-segment.is-active .work-report-story-segment__fill.is-pulsing {
-  animation: story-segment-pulse 1.8s ease-in-out infinite;
 }
 
 .work-report-story-dialog__body {
@@ -1573,16 +1504,6 @@ onBeforeUnmount(() => {
   }
   50% {
     transform: translateY(-10px);
-  }
-}
-
-@keyframes story-segment-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.72;
   }
 }
 
