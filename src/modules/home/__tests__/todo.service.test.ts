@@ -10,6 +10,7 @@ import {
   loadAssignableUsers,
   loadCurrentUser,
   loadPendingTodos,
+  loadLatestWorkSummary,
   loadTodoDetail,
   getTodoMonthRange,
   getTodoWeekRange,
@@ -126,6 +127,26 @@ describe('todo.service real backend adapter', () => {
         method: 'POST',
         url: '/smart-todo/select-email',
         params: { choice: 2 },
+      }),
+    )
+  })
+
+  it('loads the current employee work summary text', async () => {
+    vi.mocked(httpClient.request).mockResolvedValueOnce({
+      data: {
+        code: 200,
+        msg: '操作成功',
+        data: {
+          aiReportText: '这是 AI 生成的工作总结内容',
+        },
+      },
+    })
+
+    await expect(loadLatestWorkSummary()).resolves.toBe('这是 AI 生成的工作总结内容')
+    expect(httpClient.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'GET',
+        url: '/work-summary/latest',
       }),
     )
   })

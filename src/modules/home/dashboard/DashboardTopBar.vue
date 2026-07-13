@@ -3,6 +3,7 @@ import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, 
 import { useRouter } from 'vue-router'
 import IconArrowLeft from '~icons/lucide/arrow-left'
 import IconChevronDown from '~icons/lucide/chevron-down'
+import IconFileText from '~icons/lucide/file-text'
 import IconLayoutDashboard from '~icons/lucide/layout-dashboard'
 import IconLogOut from '~icons/lucide/log-out'
 import IconMailbox from '~icons/lucide/mailbox'
@@ -11,6 +12,8 @@ import IconSettings from '~icons/lucide/settings'
 import IconSparkles from '~icons/lucide/sparkles'
 import DashboardNotificationCenter from '@/modules/home/dashboard/components/DashboardNotificationCenter.vue'
 import DashboardSuggestionBox from '@/modules/home/dashboard/components/DashboardSuggestionBox.vue'
+import EmployeeWorkReportDialog from '@/modules/home/dashboard/components/EmployeeWorkReportDialog.vue'
+import EmployeeWorkReportStoryDialog from '@/modules/home/dashboard/components/EmployeeWorkReportStoryDialog.vue'
 import DashboardViewModeSwitch, {
   type DashboardViewMode,
 } from '@/modules/home/dashboard/components/DashboardViewModeSwitch.vue'
@@ -68,6 +71,11 @@ const isSettingsMenuOpen = ref(false)
 const isSyncingCalendar = ref(false)
 const isNotificationPanelOpen = ref(false)
 const isSuggestionBoxOpen = ref(false)
+const workReportMenuWrapRef = ref<HTMLElement | null>(null)
+const workReportMenuPanelRef = ref<HTMLElement | null>(null)
+const isWorkReportMenuOpen = ref(false)
+const isWorkReportClassicOpen = ref(false)
+const isWorkReportStoryOpen = ref(false)
 const suggestionBoxRef = ref<InstanceType<typeof DashboardSuggestionBox> | null>(null)
 const isUserMenuOpen = ref(false)
 const isLoggingOut = ref(false)
@@ -97,6 +105,9 @@ function openSuggestionBox() {
   closeNotificationPanel()
   closeUserMenu()
   closeSettingsMenu()
+  closeWorkReportMenu()
+  isWorkReportClassicOpen.value = false
+  isWorkReportStoryOpen.value = false
 
   if (isSuggestionBoxOpen.value) {
     suggestionBoxRef.value?.expand()
@@ -104,6 +115,38 @@ function openSuggestionBox() {
   }
 
   isSuggestionBoxOpen.value = true
+}
+
+function closeWorkReportMenu() {
+  isWorkReportMenuOpen.value = false
+}
+
+function toggleWorkReportMenu() {
+  closeNotificationPanel()
+  closeUserMenu()
+  closeSettingsMenu()
+  isSuggestionBoxOpen.value = false
+  isWorkReportMenuOpen.value = !isWorkReportMenuOpen.value
+}
+
+function openWorkReportClassic() {
+  closeNotificationPanel()
+  closeUserMenu()
+  closeSettingsMenu()
+  isSuggestionBoxOpen.value = false
+  closeWorkReportMenu()
+  isWorkReportStoryOpen.value = false
+  isWorkReportClassicOpen.value = true
+}
+
+function openWorkReportStory() {
+  closeNotificationPanel()
+  closeUserMenu()
+  closeSettingsMenu()
+  isSuggestionBoxOpen.value = false
+  closeWorkReportMenu()
+  isWorkReportClassicOpen.value = false
+  isWorkReportStoryOpen.value = true
 }
 
 function closeUserMenu() {
@@ -240,6 +283,14 @@ function handleDocumentClick(event: MouseEvent) {
   if (isSettingsMenuOpen.value && !insideSettingsMenu) {
     closeSettingsMenu()
   }
+
+  const workReportMenuElement = workReportMenuPanelRef.value
+  const insideWorkReportMenu =
+    workReportMenuWrapRef.value?.contains(target) || workReportMenuElement?.contains(target)
+
+  if (isWorkReportMenuOpen.value && !insideWorkReportMenu) {
+    closeWorkReportMenu()
+  }
 }
 
 function handleDocumentKeydown(event: KeyboardEvent) {
@@ -247,6 +298,9 @@ function handleDocumentKeydown(event: KeyboardEvent) {
     closeNotificationPanel()
     closeUserMenu()
     closeSettingsMenu()
+    closeWorkReportMenu()
+    isWorkReportClassicOpen.value = false
+    isWorkReportStoryOpen.value = false
   }
 }
 
@@ -351,6 +405,53 @@ onBeforeUnmount(() => {
         <span class="suggestion-entry-btn__label">悄悄说</span>
         <span class="suggestion-entry-btn__dot" aria-hidden="true" />
       </button>
+      <div ref="workReportMenuWrapRef" class="work-report-menu-wrap">
+        <button
+          class="work-report-entry-btn"
+          type="button"
+          aria-label="打开工作总结"
+          aria-controls="dashboard-work-report-menu"
+          :aria-expanded="isWorkReportMenuOpen"
+          title="工作总结"
+          @click.stop="toggleWorkReportMenu"
+        >
+          <IconFileText aria-hidden="true" />
+          <span>工作总结</span>
+          <IconChevronDown class="work-report-entry-btn__chevron" aria-hidden="true" />
+        </button>
+
+        <Transition name="work-report-menu-popover">
+          <section
+            v-if="isWorkReportMenuOpen"
+            id="dashboard-work-report-menu"
+            ref="workReportMenuPanelRef"
+            class="work-report-menu-panel"
+            aria-label="工作总结版本选择"
+            @click.stop
+            @pointerdown.stop
+          >
+            <span class="work-report-menu-panel__arrow" aria-hidden="true" />
+            <header class="work-report-menu-panel__header">
+              <strong>选择回顾方式</strong>
+              <span>同一套内容，两种呈现体验</span>
+            </header>
+            <button type="button" class="work-report-menu-item" @click="openWorkReportClassic">
+              <IconFileText aria-hidden="true" />
+              <span>
+                <strong>版本一 · 经典阅读</strong>
+                <em>长文时间线，适合细读回看</em>
+              </span>
+            </button>
+            <button type="button" class="work-report-menu-item is-featured" @click="openWorkReportStory">
+              <IconSparkles aria-hidden="true" />
+              <span>
+                <strong>版本二 · 分镜回顾</strong>
+                <em>翻页叙事，更接近年终总结</em>
+              </span>
+            </button>
+          </section>
+        </Transition>
+      </div>
       <button
         v-if="!props.embedded"
         class="icon-button"
@@ -400,7 +501,7 @@ onBeforeUnmount(() => {
               </button>
               <button type="button" class="settings-menu-item" @click="openLeaderBoard">
                 <IconLayoutDashboard aria-hidden="true" />
-                <span>领导者看板</span>
+                <span>Token看板</span>
               </button>
               <button
                 v-if="isAdminUser"
@@ -478,6 +579,8 @@ onBeforeUnmount(() => {
       v-model:open="isSuggestionBoxOpen"
       :view-mode="props.viewMode"
     />
+    <EmployeeWorkReportDialog v-model:open="isWorkReportClassicOpen" :display-name="displayName" />
+    <EmployeeWorkReportStoryDialog v-model:open="isWorkReportStoryOpen" :display-name="displayName" />
   </header>
 </template>
 
@@ -831,6 +934,21 @@ onBeforeUnmount(() => {
     display: none;
   }
 
+  .work-report-entry-btn {
+    width: 38px;
+    min-height: 38px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .work-report-entry-btn span {
+    display: none;
+  }
+
+  .work-report-entry-btn__chevron {
+    display: none;
+  }
+
   .suggestion-entry-btn {
     width: 38px;
     min-height: 38px;
@@ -958,6 +1076,17 @@ onBeforeUnmount(() => {
 .dashboard-topbar.has-tool-dock .suggestion-entry-btn__dot {
   top: 6px;
   right: 7px;
+}
+
+.dashboard-topbar.has-tool-dock .work-report-entry-btn {
+  width: 38px;
+  min-height: 38px;
+  padding: 0;
+  justify-content: center;
+}
+
+.dashboard-topbar.has-tool-dock .work-report-entry-btn span {
+  display: none;
 }
 
 .dashboard-topbar.has-tool-dock .user-chip {
@@ -1177,6 +1306,197 @@ onBeforeUnmount(() => {
   background: #f97316;
   box-shadow: 0 0 0 2px rgba(255, 247, 237, 0.96);
   animation: suggestion-entry-pulse 2s ease-in-out infinite;
+}
+
+.work-report-entry-btn {
+  border: 1px solid rgba(125, 154, 219, 0.42);
+  border-radius: 999px;
+  background: rgba(244, 248, 255, 0.86);
+  color: #355da3;
+  min-height: 38px;
+  padding: 0 12px 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease;
+}
+
+.work-report-entry-btn:hover,
+.work-report-entry-btn:focus-visible {
+  border-color: rgba(76, 122, 204, 0.68);
+  background: rgba(232, 240, 255, 0.98);
+  color: #1f4e9d;
+  transform: translateY(-1px);
+  outline: 2px solid rgba(59, 130, 246, 0.24);
+  outline-offset: 2px;
+}
+
+.work-report-entry-btn svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.work-report-menu-wrap {
+  position: relative;
+}
+
+.work-report-entry-btn__chevron {
+  width: 14px;
+  height: 14px;
+  color: rgba(53, 93, 163, 0.62);
+  flex: 0 0 auto;
+}
+
+.work-report-menu-panel {
+  --work-report-menu-arrow-center: 72px;
+  position: absolute;
+  top: calc(100% + 12px);
+  right: 0;
+  z-index: 90;
+  width: min(300px, calc(100vw - 32px));
+  padding: 10px;
+  border: 1px solid rgba(214, 226, 244, 0.92);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow:
+    0 24px 48px -28px rgba(15, 23, 42, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(16px);
+}
+
+.work-report-menu-panel__arrow {
+  position: absolute;
+  top: -11px;
+  right: calc(var(--work-report-menu-arrow-center) - 11px);
+  width: 22px;
+  height: 22px;
+  overflow: hidden;
+}
+
+.work-report-menu-panel__arrow::before {
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  width: 14px;
+  height: 14px;
+  border-top: 1px solid rgba(214, 226, 244, 0.92);
+  border-left: 1px solid rgba(214, 226, 244, 0.92);
+  background: rgba(255, 255, 255, 0.96);
+  transform: translateX(-50%) rotate(45deg);
+  content: '';
+}
+
+.work-report-menu-panel__header {
+  padding: 6px 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.work-report-menu-panel__header strong {
+  color: #152342;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.work-report-menu-panel__header span {
+  color: #6b7c98;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.work-report-menu-item {
+  width: 100%;
+  border: 1px solid rgba(214, 226, 244, 0.72);
+  border-radius: 14px;
+  background: rgba(248, 251, 255, 0.88);
+  color: #355da3;
+  padding: 10px 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease;
+}
+
+.work-report-menu-item + .work-report-menu-item {
+  margin-top: 8px;
+}
+
+.work-report-menu-item svg {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  flex: 0 0 auto;
+}
+
+.work-report-menu-item span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.work-report-menu-item strong {
+  color: #17305d;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.3;
+}
+
+.work-report-menu-item em {
+  color: #6b7c98;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.work-report-menu-item:hover,
+.work-report-menu-item:focus-visible {
+  border-color: rgba(76, 122, 204, 0.68);
+  background: rgba(237, 244, 255, 0.98);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.work-report-menu-item.is-featured {
+  border-color: rgba(245, 158, 11, 0.42);
+  background: linear-gradient(135deg, rgba(255, 247, 237, 0.96), rgba(255, 252, 245, 0.98));
+}
+
+.work-report-menu-item.is-featured strong {
+  color: #9a3412;
+}
+
+.work-report-menu-popover-enter-active,
+.work-report-menu-popover-leave-active {
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.work-report-menu-popover-enter-from,
+.work-report-menu-popover-leave-to {
+  opacity: 0;
+  transform: translateY(-6px) scale(0.98);
 }
 
 @keyframes suggestion-entry-wiggle {

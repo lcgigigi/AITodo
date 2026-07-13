@@ -7,7 +7,7 @@ export const leaderBoardRoutes: RouteRecordRaw[] = [
     name: 'LeaderBoard',
     component: () => import('./index.vue'),
     meta: {
-      title: 'Token 使用领导者看板',
+      title: 'Token 使用Token看板',
       requiresAuth: true,
       permission: PERMISSIONS.AGENT_LIST_VIEW,
     },

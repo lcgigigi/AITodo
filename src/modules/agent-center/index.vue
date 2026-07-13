@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import * as echarts from 'echarts/core'
 import IconChevronDown from '~icons/lucide/chevron-down'
+import IconSearch from '~icons/lucide/search'
 import IconShieldCheck from '~icons/lucide/shield-check'
 import IconTrendingDown from '~icons/lucide/trending-down'
 import IconTrendingUp from '~icons/lucide/trending-up'
@@ -60,6 +61,7 @@ const route = useRoute()
 const router = useRouter()
 
 const activeCategory = ref<AgentCategory | '全部'>('全部')
+const agentSearchQuery = ref('')
 const selectedAgent = ref<AgentCatalogItem | null>(null)
 const actionToast = ref('')
 const currentUserTokenUsage = ref<CurrentUserTokenUsage | null>(null)
@@ -315,11 +317,35 @@ const dashboardToolById = Object.fromEntries(
 
 const morePlaceholderTool = dashboardToolById.more
 
-const visibleAgents = computed(() =>
+const normalizedAgentSearchQuery = computed(() => agentSearchQuery.value.trim().toLowerCase())
+
+const hasAgentSearchQuery = computed(() => normalizedAgentSearchQuery.value.length > 0)
+
+const categoryFilteredAgents = computed(() =>
   agents.filter(
     (agent) => activeCategory.value === '全部' || agent.category === activeCategory.value,
   ),
 )
+
+function agentMatchesSearch(agent: AgentCatalogItem, query: string) {
+  if (!query) return true
+
+  const haystack = [agent.name, agent.description, agent.category, agent.level, ...agent.scenarios]
+    .join(' ')
+    .toLowerCase()
+
+  return haystack.includes(query)
+}
+
+const visibleAgents = computed(() =>
+  categoryFilteredAgents.value.filter((agent) =>
+    agentMatchesSearch(agent, normalizedAgentSearchQuery.value),
+  ),
+)
+
+function clearAgentSearch() {
+  agentSearchQuery.value = ''
+}
 
 function getAgentTool(agent: AgentCatalogItem) {
   return dashboardToolById[agent.key as DashboardToolId]
@@ -524,6 +550,35 @@ watch(selectedTokenPeriodCode, () => {
         </section>
 
         <section class="agent-catalog-panel" aria-label="智能体列表">
+          <header class="agent-catalog-toolbar">
+            <div class="agent-catalog-heading">
+              <h2>智能体列表</h2>
+              <span v-if="hasAgentSearchQuery" class="agent-catalog-count">
+                {{ visibleAgents.length }} / {{ categoryFilteredAgents.length }}
+              </span>
+            </div>
+
+            <label class="agent-catalog-search">
+              <IconSearch class="agent-catalog-search-icon" aria-hidden="true" />
+              <input
+                v-model="agentSearchQuery"
+                type="search"
+                class="agent-catalog-search-input"
+                placeholder="搜索名称、描述或场景"
+                autocomplete="off"
+              />
+              <button
+                v-if="hasAgentSearchQuery"
+                type="button"
+                class="agent-catalog-search-clear"
+                aria-label="清除搜索"
+                @click="clearAgentSearch"
+              >
+                <IconX aria-hidden="true" />
+              </button>
+            </label>
+          </header>
+
           <section class="agent-grid">
             <button
               v-for="agent in visibleAgents"
@@ -532,6 +587,14 @@ watch(selectedTokenPeriodCode, () => {
               class="agent-card"
               @click="launchAgent(agent)"
             >
+              <span
+                class="agent-card-tier"
+                :class="`is-${agent.level.toLowerCase()}`"
+                :aria-label="`智能体级别 ${agent.level}`"
+              >
+                {{ agent.level }}
+              </span>
+
               <span
                 class="agent-card-icon"
                 :class="[getAgentVisual(agent).tone, { 'has-image': getAgentVisual(agent).iconSrc }]"
@@ -553,7 +616,7 @@ watch(selectedTokenPeriodCode, () => {
             </button>
 
             <article
-              v-if="activeCategory === '全部'"
+              v-if="activeCategory === '全部' && !hasAgentSearchQuery"
               class="agent-card agent-card-more"
               aria-label="期待更多智能应用"
             >
@@ -580,8 +643,12 @@ watch(selectedTokenPeriodCode, () => {
               v-if="visibleAgents.length === 0"
               class="agent-grid-empty"
               type="empty"
-              title="没有匹配的智能体"
-              description="当前暂无可用智能体，请稍后再试。"
+              :title="hasAgentSearchQuery ? '未找到匹配的智能体' : '没有匹配的智能体'"
+              :description="
+                hasAgentSearchQuery
+                  ? `没有与「${agentSearchQuery.trim()}」相关的智能体，试试其他关键词。`
+                  : '当前暂无可用智能体，请稍后再试。'
+              "
               size="sm"
               variant="inline"
             />
@@ -700,10 +767,10 @@ watch(selectedTokenPeriodCode, () => {
   --hero-panel-min-height: clamp(310px, 34vh, 370px);
   --banner-height: clamp(260px, 26.5vh, 286px);
   --toolbar-gap: clamp(14px, 1.55vh, 17px);
-  --grid-gap-x: 16px;
-  --grid-gap-y: 14px;
+  --grid-gap-x: 14px;
+  --grid-gap-y: 12px;
   --agent-grid-columns: 4;
-  --agent-card-min-height: 132px;
+  --agent-card-min-height: 122px;
   --metric-card-width: clamp(269px, 16vw, 307px);
   --metric-card-height: clamp(100px, 10.6vh, 116px);
   position: relative;
@@ -918,7 +985,105 @@ watch(selectedTokenPeriodCode, () => {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.92),
     0 24px 48px rgba(100, 140, 200, 0.12);
-  padding: clamp(16px, 1.5vw, 20px);
+  padding: clamp(14px, 1.35vw, 16px);
+}
+
+.agent-catalog-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: clamp(10px, 1.1vw, 12px);
+}
+
+.agent-catalog-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.agent-catalog-heading h2 {
+  margin: 0;
+  color: #172033;
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.agent-catalog-count {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.agent-catalog-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: min(280px, 100%);
+  flex: 0 1 280px;
+}
+
+.agent-catalog-search-icon {
+  position: absolute;
+  left: 12px;
+  width: 16px;
+  height: 16px;
+  color: #7b8da8;
+  pointer-events: none;
+}
+
+.agent-catalog-search-input {
+  width: 100%;
+  height: 34px;
+  border: 1px solid #dfe8f4;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 6px 15px rgba(69, 101, 148, 0.08);
+  color: #172033;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  outline: none;
+  padding: 0 36px;
+}
+
+.agent-catalog-search-input::placeholder {
+  color: #94a3b8;
+}
+
+.agent-catalog-search-input:focus-visible {
+  border-color: rgba(18, 108, 255, 0.45);
+  box-shadow: 0 0 0 3px rgba(18, 108, 255, 0.12);
+}
+
+.agent-catalog-search-clear {
+  position: absolute;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #7b8da8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.agent-catalog-search-clear svg {
+  width: 14px;
+  height: 14px;
+}
+
+.agent-catalog-search-clear:hover,
+.agent-catalog-search-clear:focus-visible {
+  background: rgba(226, 236, 250, 0.9);
+  color: #355da3;
+  outline: none;
 }
 
 .agent-grid {
@@ -945,21 +1110,56 @@ watch(selectedTokenPeriodCode, () => {
 }
 
 .agent-card {
+  position: relative;
   display: flex;
   align-items: flex-start;
-  gap: 14px;
+  gap: 12px;
   min-height: var(--agent-card-min-height);
   border: 1px solid rgba(255, 255, 255, 0.95);
-  border-radius: 16px;
+  border-radius: 15px;
   background: rgba(255, 255, 255, 0.9);
   box-shadow: 0 12px 28px rgba(91, 131, 184, 0.1);
   color: inherit;
-  padding: 18px 18px 16px;
+  padding: 15px 15px 13px;
   text-align: left;
   transition:
     border-color 180ms ease,
     box-shadow 180ms ease,
     transform 180ms ease;
+}
+
+.agent-card-tier {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  min-height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.agent-card-tier.is-l1 {
+  color: #1f4e9d;
+  background: rgba(219, 234, 254, 0.98);
+  box-shadow:
+    inset 0 0 0 1px rgba(59, 130, 246, 0.28),
+    0 4px 10px rgba(59, 130, 246, 0.12);
+}
+
+.agent-card-tier.is-l2 {
+  color: #9a3412;
+  background: linear-gradient(135deg, rgba(255, 247, 237, 0.98), rgba(254, 230, 138, 0.94));
+  box-shadow:
+    inset 0 0 0 1px rgba(245, 158, 11, 0.36),
+    0 4px 10px rgba(245, 158, 11, 0.14);
 }
 
 .agent-card:hover,
@@ -972,12 +1172,12 @@ watch(selectedTokenPeriodCode, () => {
 
 .agent-card-icon {
   display: grid;
-  width: 52px;
-  height: 52px;
+  width: 48px;
+  height: 48px;
   flex-shrink: 0;
   place-items: center;
   border: 1px solid rgba(226, 237, 255, 0.95);
-  border-radius: 14px;
+  border-radius: 12px;
   background: linear-gradient(180deg, #ffffff 0%, #f3f8ff 100%);
   box-shadow: 0 10px 20px rgba(91, 131, 184, 0.12);
 }
@@ -1062,31 +1262,35 @@ watch(selectedTokenPeriodCode, () => {
   flex: 1;
 }
 
+.agent-card:not(.agent-card-more) .agent-card-copy {
+  padding-right: 40px;
+}
+
 .agent-card h2 {
   margin: 0;
   color: #0f172a;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 900;
-  line-height: 1.3;
+  line-height: 1.25;
 }
 
 .agent-description {
   display: -webkit-box;
-  margin: 8px 0 0;
+  margin: 7px 0 0;
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   color: #64748b;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
-  line-height: 1.55;
+  line-height: 1.52;
 }
 
 .agent-card-action {
   display: inline-flex;
-  margin-top: 12px;
+  margin-top: 10px;
   color: #126cff;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -1289,7 +1493,7 @@ watch(selectedTokenPeriodCode, () => {
     --main-pad-left: 12px;
     --hero-panel-min-height: clamp(290px, 32vh, 330px);
     --agent-grid-columns: 2;
-    --agent-card-min-height: 148px;
+    --agent-card-min-height: 136px;
     overflow: hidden;
   }
 
@@ -1305,7 +1509,7 @@ watch(selectedTokenPeriodCode, () => {
 @media (max-width: 760px) {
   .agent-center-shell {
     --agent-grid-columns: 1;
-    --agent-card-min-height: 152px;
+    --agent-card-min-height: 140px;
     display: flex;
     min-height: 0;
     flex-direction: column;
@@ -1324,6 +1528,16 @@ watch(selectedTokenPeriodCode, () => {
   .token-usage-footer {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .agent-catalog-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .agent-catalog-search {
+    width: 100%;
+    flex: 1 1 auto;
   }
 }
 </style>

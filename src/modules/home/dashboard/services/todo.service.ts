@@ -23,6 +23,10 @@ interface SmartTodoBackendUser {
   name?: string
 }
 
+interface SmartTodoWorkSummary {
+  aiReportText?: string | null
+}
+
 interface SmartTodoBackendItem {
   id?: string | number
   title?: string
@@ -884,6 +888,18 @@ export async function syncCalendar() {
     },
     '同步邮箱日程失败',
   )
+}
+
+export async function loadLatestWorkSummary() {
+  const data = await requestSmartTodoData<SmartTodoWorkSummary>(
+    {
+      method: 'GET',
+      url: '/work-summary/latest',
+    },
+    '获取工作总结失败',
+  )
+
+  return data?.aiReportText?.trim() ?? ''
 }
 
 export function listTodos(events: CalendarEvent[], currentUser: CalendarUser) {

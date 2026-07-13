@@ -582,7 +582,7 @@ onBeforeUnmount(() => {
       <header class="leader-topbar">
         <div class="title-stack">
           <h1>
-            <span>Token 使用领导者看板</span>
+            <span>Token 使用Token看板</span>
             <IconSparkles aria-hidden="true" />
           </h1>
           <p>全局视角 · 实时洞察 · 智能决策</p>

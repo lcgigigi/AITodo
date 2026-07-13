@@ -56,6 +56,10 @@ export default defineConfig({
         target: smartTodoApiTarget,
         changeOrigin: true,
       },
+      '/work-summary': {
+        target: smartTodoApiTarget,
+        changeOrigin: true,
+      },
       '/websocket': {
         target: smartTodoApiTarget,
         changeOrigin: true,
