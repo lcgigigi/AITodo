@@ -12,7 +12,9 @@ import IconSparkles from '~icons/lucide/sparkles'
 import IconUsersRound from '~icons/lucide/users-round'
 import IconX from '~icons/lucide/x'
 import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
-import { fetchWorkReportText } from '@/modules/home/dashboard/helpers/workReport.shared'
+import { fetchWorkReportStorySource } from '@/modules/home/dashboard/helpers/workReport.shared'
+import { normalizeWorkReportStoryboardItems } from '@/modules/home/dashboard/helpers/workReportStory.helpers'
+import type { WorkReportSource } from '@/modules/home/dashboard/services/todo.service'
 
 type ReportSectionKind = 'journey' | 'busiest' | 'focus' | 'collaboration' | 'closing'
 
@@ -45,12 +47,17 @@ const emit = defineEmits<{
 }>()
 
 const dialogRef = ref<HTMLElement | null>(null)
-const reportText = ref('')
+const reportSource = ref<WorkReportSource>('')
 const isLoading = ref(false)
 const loadError = ref(false)
 let requestId = 0
 
-const reportSections = computed<ReportSection[]>(() => buildReportSections(reportText.value))
+const reportSections = computed<ReportSection[]>(() => buildReportSections(reportSource.value))
+const hasReportContent = computed(() =>
+  typeof reportSource.value === 'string'
+    ? Boolean(reportSource.value.trim())
+    : reportSource.value.length > 0,
+)
 
 function closeDialog() {
   emit('update:open', false)
@@ -70,13 +77,13 @@ async function refreshReport() {
   loadError.value = false
 
   try {
-    const text = await fetchWorkReportText()
+    const source = await fetchWorkReportStorySource()
     if (activeRequest !== requestId) return
-    reportText.value = text
+    reportSource.value = source
   } catch {
     if (activeRequest !== requestId) return
     loadError.value = true
-    reportText.value = ''
+    reportSource.value = ''
   } finally {
     if (activeRequest === requestId) isLoading.value = false
   }
@@ -92,8 +99,8 @@ function getTextTokens(paragraph: string): TextToken[] {
 
 function splitParagraphs(text: string) {
   return text
-    .split(/\n\s*\n/)
-    .map((paragraph) => paragraph.replace(/\n/g, '').trim())
+    .split(/\r?\n/)
+    .map((paragraph) => paragraph.trim())
     .filter(Boolean)
 }
 
@@ -142,7 +149,26 @@ function getSectionMeta(paragraph: string, index: number, total: number) {
   }
 }
 
-function buildReportSections(text: string) {
+function buildReportSections(source: WorkReportSource) {
+  const storyboardItems = normalizeWorkReportStoryboardItems(source)
+
+  if (storyboardItems.length > 0) {
+    return storyboardItems.map((scene, index) => {
+      const isClosing = index === storyboardItems.length - 1
+      const content = scene.content?.trim() || ''
+
+      return {
+        id: `scene-${index + 1}`,
+        kind: isClosing ? 'closing' as const : 'journey' as const,
+        eyebrow: scene.summary?.trim() || `工作片段 ${String(index + 1).padStart(2, '0')}`,
+        title: scene.title?.trim() || '工作回顾',
+        icon: isClosing ? IconSparkles : index === 0 ? IconCalendarDays : IconCheckCircle2,
+        paragraphs: content ? [content] : [],
+      }
+    })
+  }
+
+  const text = typeof source === 'string' ? source : ''
   const paragraphs = splitParagraphs(text)
   const contentParagraphs = paragraphs.filter(
     (paragraph, index) => !(index === 0 && /你好[！!]?$/.test(paragraph)),
@@ -237,7 +263,7 @@ onBeforeUnmount(() => {
             />
 
             <AppStateBlock
-              v-else-if="!reportText"
+              v-else-if="!hasReportContent"
               type="empty"
               title="还没有生成工作总结"
               description="有新的总结后，会在这里为你呈现。"
@@ -313,6 +339,8 @@ onBeforeUnmount(() => {
   box-shadow: 0 36px 96px -40px rgba(15, 23, 42, 0.82);
   color: var(--report-ink);
   outline: none;
+  display: flex;
+  flex-direction: column;
 }
 
 .work-report-dialog__header {
@@ -406,7 +434,8 @@ onBeforeUnmount(() => {
 }
 
 .work-report-dialog__body {
-  max-height: calc(min(860px, 100vh - 64px) - 188px);
+  min-height: 0;
+  flex: 1;
   overflow-y: auto;
   padding: 22px 30px 30px;
   scrollbar-color: rgba(148, 163, 184, 0.6) transparent;

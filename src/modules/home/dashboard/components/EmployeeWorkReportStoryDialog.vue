@@ -2,43 +2,29 @@
 import type { Component } from 'vue'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import IconAward from '~icons/lucide/award'
-import IconBarChart3 from '~icons/lucide/bar-chart-3'
 import IconCalendarDays from '~icons/lucide/calendar-days'
 import IconChevronLeft from '~icons/lucide/chevron-left'
 import IconChevronRight from '~icons/lucide/chevron-right'
-import IconClock3 from '~icons/lucide/clock-3'
-import IconFlame from '~icons/lucide/flame'
 import IconLoaderCircle from '~icons/lucide/loader-circle'
 import IconQuote from '~icons/lucide/quote'
 import IconRefreshCw from '~icons/lucide/refresh-cw'
 import IconRotateCcw from '~icons/lucide/rotate-ccw'
 import IconSparkles from '~icons/lucide/sparkles'
-import IconSunrise from '~icons/lucide/sunrise'
 import IconX from '~icons/lucide/x'
 import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
-import { fetchWorkReportText } from '@/modules/home/dashboard/helpers/workReport.shared'
+import { fetchWorkReportStorySource } from '@/modules/home/dashboard/helpers/workReport.shared'
 import {
   buildWorkReportStorySlides,
-  formatDurationMinutes,
-  type StoryMetric,
   type StorySlide,
   type StorySlideKind,
 } from '@/modules/home/dashboard/helpers/workReportStory.helpers'
-
-const COUNT_UP_DURATION_MS = 1100
+import type { WorkReportSource } from '@/modules/home/dashboard/services/todo.service'
 
 const SLIDE_ICON_MAP: Record<StorySlideKind, Component> = {
   cover: IconSparkles,
   intro: IconCalendarDays,
   content: IconSparkles,
   closing: IconAward,
-}
-
-const METRIC_ICON_MAP: Record<string, Component> = {
-  'busiest-count': IconFlame,
-  'focus-duration': IconClock3,
-  'earliest-start': IconSunrise,
-  'busiest-day-count': IconFlame,
 }
 
 const props = withDefaults(
@@ -56,22 +42,20 @@ const emit = defineEmits<{
 }>()
 
 const dialogRef = ref<HTMLElement | null>(null)
-const reportText = ref('')
+const reportSource = ref<WorkReportSource>('')
 const isLoading = ref(false)
 const loadError = ref(false)
 const currentSlideIndex = ref(0)
 const slideDirection = ref<'forward' | 'backward'>('forward')
 const isSlideReady = ref(false)
-const animatedMetricValues = ref<Record<string, number>>({})
 const visibleTagCount = ref(0)
 
 let requestId = 0
-let countUpFrame: number | null = null
 let touchStartX = 0
 let touchStartY = 0
 
 const storySlides = computed<StorySlide[]>(() =>
-  reportText.value ? buildWorkReportStorySlides(reportText.value, props.displayName) : [],
+  reportSource.value ? buildWorkReportStorySlides(reportSource.value, props.displayName) : [],
 )
 
 const currentSlide = computed(() => storySlides.value[currentSlideIndex.value] ?? null)
@@ -90,10 +74,6 @@ const progressPercent = computed(() => {
   if (totalSlides.value <= 1) return 0
   return (currentSlideIndex.value / (totalSlides.value - 1)) * 100
 })
-
-function getMetricIcon(metric: StoryMetric) {
-  return METRIC_ICON_MAP[metric.id] ?? IconBarChart3
-}
 
 function getTagTone(index: number) {
   return ['tone-blue', 'tone-amber', 'tone-violet', 'tone-teal', 'tone-rose', 'tone-gold'][index % 6]
@@ -127,72 +107,11 @@ function handleKeydown(event: KeyboardEvent) {
   }
 }
 
-function clearCountUpFrame() {
-  if (countUpFrame !== null) {
-    cancelAnimationFrame(countUpFrame)
-    countUpFrame = null
-  }
-}
-
 function resetStoryState() {
-  clearCountUpFrame()
   currentSlideIndex.value = 0
   slideDirection.value = 'forward'
   isSlideReady.value = false
-  animatedMetricValues.value = {}
   visibleTagCount.value = 0
-}
-
-function getMetricDisplay(metric: StoryMetric) {
-  if (metric.id === 'earliest-start') {
-    return metric.suffix ?? '--'
-  }
-
-  const animated = animatedMetricValues.value[metric.id]
-  const value = animated ?? metric.value
-
-  if (metric.displayAsDuration) {
-    return formatDurationMinutes(Math.round(value))
-  }
-
-  return `${Math.round(value)}${metric.suffix ?? ''}`
-}
-
-function animateMetrics(metrics: StoryMetric[] = []) {
-  clearCountUpFrame()
-  const nextValues: Record<string, number> = {}
-
-  metrics.forEach((metric) => {
-    if (metric.id === 'earliest-start') return
-    nextValues[metric.id] = 0
-  })
-
-  animatedMetricValues.value = nextValues
-
-  if (metrics.length === 0) return
-
-  const targets = metrics.filter((metric) => metric.id !== 'earliest-start')
-  if (targets.length === 0) return
-
-  const start = performance.now()
-
-  const tick = (now: number) => {
-    const progress = Math.min((now - start) / COUNT_UP_DURATION_MS, 1)
-    const eased = 1 - (1 - progress) ** 3
-    const updated: Record<string, number> = { ...animatedMetricValues.value }
-
-    targets.forEach((metric) => {
-      updated[metric.id] = metric.value * eased
-    })
-
-    animatedMetricValues.value = updated
-
-    if (progress < 1) {
-      countUpFrame = requestAnimationFrame(tick)
-    }
-  }
-
-  countUpFrame = requestAnimationFrame(tick)
 }
 
 function animateTags(tags: string[] = []) {
@@ -208,10 +127,8 @@ function animateTags(tags: string[] = []) {
 }
 
 function prepareSlideAnimations() {
-  clearCountUpFrame()
   isSlideReady.value = false
   visibleTagCount.value = 0
-  animatedMetricValues.value = {}
 
   window.setTimeout(() => {
     if (!props.open) return
@@ -219,10 +136,6 @@ function prepareSlideAnimations() {
 
     const slide = currentSlide.value
     if (!slide) return
-
-    if (slide.metrics?.length) {
-      animateMetrics(slide.metrics)
-    }
 
     if (slide.tags?.length) {
       animateTags(slide.tags)
@@ -305,15 +218,15 @@ async function loadReport() {
   resetStoryState()
 
   try {
-    const text = await fetchWorkReportText()
+    const source = await fetchWorkReportStorySource()
     if (activeRequest !== requestId) return
-    reportText.value = text
+    reportSource.value = source
     await nextTick()
     prepareSlideAnimations()
   } catch {
     if (activeRequest !== requestId) return
     loadError.value = true
-    reportText.value = ''
+    reportSource.value = ''
   } finally {
     if (activeRequest === requestId) isLoading.value = false
   }
@@ -347,7 +260,6 @@ watch(
 )
 
 onBeforeUnmount(() => {
-  clearCountUpFrame()
   document.removeEventListener('keydown', handleKeydown)
 })
 </script>
@@ -473,7 +385,7 @@ onBeforeUnmount(() => {
                 <article :key="currentSlide.id" class="work-report-story-slide">
                   <div
                     class="work-report-story-slide__panel"
-                    :class="{ 'is-cover': isCoverSlide, 'is-hero': isIntroSlide || currentSlide.kind === 'busiest' }"
+                    :class="{ 'is-cover': isCoverSlide, 'is-hero': isIntroSlide }"
                   >
                     <div v-if="!isCoverSlide" class="work-report-story-slide__badge-row">
                       <span class="work-report-story-slide__icon-badge" aria-hidden="true">
@@ -501,50 +413,11 @@ onBeforeUnmount(() => {
                     </p>
 
                     <p
-                      v-if="currentSlide.body && !['stats', 'busiest'].includes(currentSlide.kind)"
+                      v-if="currentSlide.body"
                       class="work-report-story-slide__body"
                     >
                       {{ currentSlide.body }}
                     </p>
-
-                    <p
-                      v-if="currentSlide.body && currentSlide.kind === 'busiest'"
-                      class="work-report-story-slide__body is-compact"
-                    >
-                      {{ currentSlide.body }}
-                    </p>
-
-                    <div
-                      v-if="currentSlide.metrics?.length && currentSlide.kind === 'stats'"
-                      class="work-report-story-metrics"
-                    >
-                      <div
-                        v-for="(metric, index) in currentSlide.metrics"
-                        :key="metric.id"
-                        class="work-report-story-metric"
-                        :class="`is-metric-${index + 1}`"
-                      >
-                        <span class="work-report-story-metric__icon" aria-hidden="true">
-                          <component :is="getMetricIcon(metric)" />
-                        </span>
-                        <div class="work-report-story-metric__content">
-                          <strong class="work-report-story-metric__value">{{ getMetricDisplay(metric) }}</strong>
-                          <span class="work-report-story-metric__label">{{ metric.label }}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div
-                      v-if="currentSlide.metrics?.length && currentSlide.kind === 'busiest'"
-                      class="work-report-story-hero-metric"
-                    >
-                      <span class="work-report-story-hero-metric__halo" aria-hidden="true" />
-                      <span class="work-report-story-hero-metric__icon" aria-hidden="true">
-                        <IconFlame />
-                      </span>
-                      <strong>{{ getMetricDisplay(currentSlide.metrics[0]) }}</strong>
-                      <span>{{ currentSlide.metrics[0].label }}</span>
-                    </div>
 
                     <div v-if="currentSlide.tags?.length" class="work-report-story-tags">
                       <span

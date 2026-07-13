@@ -50,6 +50,25 @@ describe('workReportStory.helpers', () => {
     ])
   })
 
+  it('uses backend storyboard entries directly and preserves their order', () => {
+    const slides = buildWorkReportStorySlides(
+      [
+        { title: '工作过往', content: '第一段内容', summary: '第一段摘要' },
+        { title: '高光时刻', content: '第二段内容', summary: '第二段摘要' },
+        { title: '寄语展望', content: '第三段内容', summary: '第三段摘要' },
+      ],
+      '美华',
+    )
+
+    expect(slides).toHaveLength(4)
+    expect(slides.slice(1).map((slide) => [slide.title, slide.body, slide.subtitle])).toEqual([
+      ['工作过往', '第一段内容', '第一段摘要'],
+      ['高光时刻', '第二段内容', '第二段摘要'],
+      ['寄语展望', '第三段内容', '第三段摘要'],
+    ])
+    expect(slides.at(-1)?.kind).toBe('closing')
+  })
+
   it('formats duration minutes for story metrics', () => {
     expect(formatDurationMinutes(210)).toBe('3小时30分钟')
     expect(formatDurationMinutes(45)).toBe('45分钟')

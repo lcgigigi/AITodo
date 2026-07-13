@@ -23,8 +23,16 @@ interface SmartTodoBackendUser {
   name?: string
 }
 
+export interface WorkReportStoryboardItem {
+  title?: string | null
+  content?: string | null
+  summary?: string | null
+}
+
+export type WorkReportSource = string | WorkReportStoryboardItem[]
+
 interface SmartTodoWorkSummary {
-  aiReportText?: string | null
+  aiReportText?: WorkReportSource | null
 }
 
 interface SmartTodoBackendItem {
@@ -899,7 +907,11 @@ export async function loadLatestWorkSummary() {
     '获取工作总结失败',
   )
 
-  return data?.aiReportText?.trim() ?? ''
+  const report = Array.isArray(data) ? data : data?.aiReportText
+
+  if (typeof report === 'string') return report.trim()
+  if (Array.isArray(report)) return report
+  return ''
 }
 
 export function listTodos(events: CalendarEvent[], currentUser: CalendarUser) {

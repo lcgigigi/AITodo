@@ -27,6 +27,24 @@ export interface StorySlide {
   quote?: string
 }
 
+export function normalizeWorkReportStoryboardItems(source: WorkReportSource): WorkReportStoryboardItem[] {
+  if (Array.isArray(source)) return source.filter((scene) => scene.title || scene.content || scene.summary)
+
+  try {
+    const parsed: unknown = JSON.parse(source)
+    if (!Array.isArray(parsed)) return []
+
+    return parsed.filter(
+      (scene): scene is WorkReportStoryboardItem =>
+        typeof scene === 'object' &&
+        scene !== null &&
+        ('title' in scene || 'content' in scene || 'summary' in scene),
+    )
+  } catch {
+    return []
+  }
+}
+
 function splitParagraphs(text: string) {
   return text
     .split(/\r?\n/)
@@ -50,7 +68,41 @@ function extractClosingQuote(text: string) {
   return matched?.[1]?.trim() ?? ''
 }
 
-export function buildWorkReportStorySlides(text: string, displayName: string): StorySlide[] {
+export function buildWorkReportStorySlides(source: WorkReportSource, displayName: string): StorySlide[] {
+  const storyboardItems = normalizeWorkReportStoryboardItems(source)
+
+  if (storyboardItems.length > 0) {
+    const accents: StorySlideAccent[] = ['blue', 'amber', 'violet', 'teal']
+
+    return [
+      {
+        id: 'cover',
+        kind: 'cover',
+        accent: 'blue',
+        eyebrow: 'AI Work Review',
+        title: '你的工作回顾',
+        subtitle: '工作回顾',
+        body: '把每一段投入，化成值得回看的成长故事。',
+      },
+      ...storyboardItems.map((scene, index) => {
+        const isClosing = index === storyboardItems.length - 1
+        const body = scene.content?.trim() || ''
+
+        return {
+          id: `scene-${index + 1}`,
+          kind: (isClosing ? 'closing' : 'content') as StorySlideKind,
+          accent: isClosing ? 'gold' : accents[index % accents.length],
+          eyebrow: `工作片段 ${String(index + 1).padStart(2, '0')}`,
+          title: scene.title?.trim() || '工作回顾',
+          subtitle: scene.summary?.trim() || undefined,
+          body,
+          quote: isClosing ? extractClosingQuote(body) || undefined : undefined,
+        }
+      }),
+    ]
+  }
+
+  const text = typeof source === 'string' ? source : ''
   const paragraphs = splitParagraphs(text)
   const greeting = extractGreeting(text, displayName)
   const period = extractReportPeriod(text)
@@ -122,3 +174,4 @@ export function formatDurationMinutes(totalMinutes: number) {
   if (minutes <= 0) return `${hours}小时`
   return `${hours}小时${minutes}分钟`
 }
+import type { WorkReportSource, WorkReportStoryboardItem } from '@/modules/home/dashboard/services/todo.service'

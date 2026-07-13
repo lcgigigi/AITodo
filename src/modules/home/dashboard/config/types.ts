@@ -3,7 +3,7 @@ export type CalendarEventStatus = 'todo' | 'done'
 export type CalendarUserRole = 'leader' | 'employee'
 export type CalendarTodoScope = 'self' | 'assigned_by_me' | 'assigned_to_me'
 export type CalendarTodoFormMode = 'scheduled' | 'deadline'
-/** 1 普通待办，2 会议 */
+/** 1 智能待办，2 会议 */
 export type SmartTodoKind = 1 | 2
 
 export type CalendarSpecialDayType = 'holiday' | 'workday' | 'solar-term'

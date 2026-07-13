@@ -259,7 +259,7 @@ export function formatTodoDetailTimeField(event: CalendarEvent): string | string
 }
 
 export function getSmartTodoKindLabel(event: CalendarEvent) {
-  return event.type === 'meeting' ? '会议' : '普通待办'
+  return event.type === 'meeting' ? '会议' : '智能待办'
 }
 
 export function getBackendTodoStatusLabel(event: CalendarEvent) {
