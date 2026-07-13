@@ -24,20 +24,30 @@ describe('workReportStory.helpers', () => {
     expect(extractGreeting(SAMPLE_WORK_REPORT, '你')).toBe('美华')
   })
 
-  it('builds a multi-slide story from sample report text', () => {
+  it('builds one content slide for every newline-separated middle paragraph', () => {
     const slides = buildWorkReportStorySlides(SAMPLE_WORK_REPORT, '美华')
 
-    expect(slides.length).toBeGreaterThanOrEqual(6)
+    expect(slides.length).toBe(6)
     expect(slides[0]?.kind).toBe('cover')
+    expect(slides[1]?.kind).toBe('intro')
     expect(slides.at(-1)?.kind).toBe('closing')
 
-    const statsSlide = slides.find((slide) => slide.kind === 'stats')
-    expect(statsSlide?.metrics?.some((metric) => metric.value === 8)).toBe(true)
-    expect(statsSlide?.metrics?.some((metric) => metric.displayAsDuration)).toBe(true)
+    const contentSlides = slides.filter((slide) => slide.kind === 'content')
+    expect(contentSlides).toHaveLength(3)
+    expect(contentSlides[0]?.body).toContain('3月18日是你最为忙碌的一天')
+    expect(contentSlides[1]?.body).toContain('核心精力主要聚焦')
+    expect(contentSlides[2]?.body).toContain('会议与协同是你工作的重要组成部分')
+  })
 
-    const busiestSlide = slides.find((slide) => slide.kind === 'busiest')
-    expect(busiestSlide?.title).toBe('3月18日')
-    expect(busiestSlide?.tags?.length).toBeGreaterThan(0)
+  it('uses a single newline as a paragraph boundary', () => {
+    const slides = buildWorkReportStorySlides('美华，你好！\n第一段\n第二段\n第三段', '美华')
+
+    expect(slides.map((slide) => slide.body)).toEqual([
+      '把上半年的投入，化成一段值得回看的成长故事。',
+      '第一段',
+      '第二段',
+      '第三段',
+    ])
   })
 
   it('formats duration minutes for story metrics', () => {

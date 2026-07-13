@@ -3,7 +3,6 @@ import type { Component } from 'vue'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import IconAward from '~icons/lucide/award'
 import IconBarChart3 from '~icons/lucide/bar-chart-3'
-import IconBrainCircuit from '~icons/lucide/brain-circuit'
 import IconCalendarDays from '~icons/lucide/calendar-days'
 import IconChevronLeft from '~icons/lucide/chevron-left'
 import IconChevronRight from '~icons/lucide/chevron-right'
@@ -15,7 +14,6 @@ import IconRefreshCw from '~icons/lucide/refresh-cw'
 import IconRotateCcw from '~icons/lucide/rotate-ccw'
 import IconSparkles from '~icons/lucide/sparkles'
 import IconSunrise from '~icons/lucide/sunrise'
-import IconUsersRound from '~icons/lucide/users-round'
 import IconX from '~icons/lucide/x'
 import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
 import { fetchWorkReportText } from '@/modules/home/dashboard/helpers/workReport.shared'
@@ -32,10 +30,7 @@ const COUNT_UP_DURATION_MS = 1100
 const SLIDE_ICON_MAP: Record<StorySlideKind, Component> = {
   cover: IconSparkles,
   intro: IconCalendarDays,
-  stats: IconBarChart3,
-  busiest: IconFlame,
-  focus: IconBrainCircuit,
-  collaboration: IconUsersRound,
+  content: IconSparkles,
   closing: IconAward,
 }
 
