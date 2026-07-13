@@ -1,7 +1,9 @@
 import { httpClient } from '@/shared/request/http'
 import {
   SMART_TODO_REQUEST_TIMEOUT,
+  getOptionalText,
   getResponseMessage,
+  toId,
   type SmartTodoResponse,
 } from '@/shared/request/smart-todo-client'
 import type { CalendarUser } from '@/modules/home/dashboard/config/types'
@@ -11,6 +13,29 @@ const DEFAULT_LOGIN_PASSWORD = import.meta.env.VITE_APP_TODO_PASSWORD || 'admin1
 
 interface SmartTodoLoginResponse extends SmartTodoResponse {
   token?: string
+}
+
+interface SmartTodoInfoPayload {
+  user?: {
+    userId?: string | number
+    userName?: string
+    nickName?: string
+    avatar?: string
+    deptName?: string
+    department?: string
+    isSecurityPassword?: 'yes' | 'no'
+    checkEmail?: string | null
+  }
+  roles?: string[]
+  permissions?: string[]
+  checkEmail?: string | null
+}
+
+interface SmartTodoInfoResponse extends SmartTodoResponse<SmartTodoInfoPayload> {
+  user?: SmartTodoInfoPayload['user']
+  roles?: string[]
+  permissions?: string[]
+  checkEmail?: string | null
 }
 
 export interface SmartTodoLoginCredentials {
@@ -65,15 +90,40 @@ export async function logoutSmartTodo() {
   }
 }
 
-export async function loadCurrentUser(username?: string): Promise<SmartTodoCurrentUser> {
-  const id = username?.trim() || DEFAULT_LOGIN_USERNAME
+export async function loadCurrentUser(options?: {
+  silent?: boolean
+}): Promise<SmartTodoCurrentUser> {
+  const response = await httpClient.get<SmartTodoInfoResponse>('/getInfo', {
+    timeout: SMART_TODO_REQUEST_TIMEOUT,
+    showError: !options?.silent,
+  })
+  const result = response.data
+
+  if (typeof result.code === 'number' && result.code !== 200) {
+    throw new Error(getResponseMessage(result, '获取当前用户失败'))
+  }
+
+  const info = result.data && typeof result.data === 'object' ? result.data : result
+  const user = info.user
+
+  if (!user) {
+    throw new Error(getResponseMessage(result, '获取当前用户失败'))
+  }
+
+  const roles = info.roles ?? []
+  const id = user.userName || toId(user.userId)
+  const checkEmail = getOptionalText(user.checkEmail) || getOptionalText(info.checkEmail)
 
   return {
     id,
-    name: id || '未命名用户',
-    role: resolveRole(),
-    roles: [],
-    permissions: [],
+    name: user.nickName || user.userName || id || '未命名用户',
+    avatar: user.avatar,
+    department: user.department || user.deptName,
+    role: resolveRole(roles),
+    roles,
+    permissions: info.permissions ?? [],
+    isSecurityPassword: user.isSecurityPassword,
+    checkEmail,
   }
 }
 

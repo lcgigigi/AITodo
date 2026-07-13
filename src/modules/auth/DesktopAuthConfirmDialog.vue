@@ -49,7 +49,7 @@ async function ensureProfile() {
 
   isLoadingProfile.value = true
   try {
-    const profile = await loadCurrentUser()
+    const profile = await loadCurrentUser({ silent: true })
     userStore.setProfile(profile)
     return Boolean(profile.id)
   } catch {

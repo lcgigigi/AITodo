@@ -130,7 +130,7 @@ async function submitLogin() {
     })
     userStore.setToken(token)
 
-    const profile = await loadCurrentUser(form.username)
+    const profile = await loadCurrentUser({ silent: true })
     userStore.setProfile(profile)
 
     const desktopAuthRequest = getDesktopAuthRequest(route.query)

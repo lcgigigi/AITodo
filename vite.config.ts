@@ -32,6 +32,10 @@ export default defineConfig({
           }
         },
       },
+      '/getInfo': {
+        target: smartTodoApiTarget,
+        changeOrigin: true,
+      },
       '/logout': {
         target: smartTodoApiTarget,
         changeOrigin: true,
