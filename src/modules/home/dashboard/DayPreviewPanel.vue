@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import IconArrowLeft from '~icons/lucide/arrow-left'
 import IconCalendarPlus from '~icons/lucide/calendar-plus'
+import IconLoaderCircle from '~icons/lucide/loader-circle'
 import IconPlus from '~icons/lucide/plus'
 import IconX from '~icons/lucide/x'
 import { Button } from '@/components/ui/button'
@@ -66,6 +67,7 @@ const props = defineProps<{
   presetCreateTime?: string
   presetCreateKey?: number
   statusUpdatingIds?: Set<string>
+  formSubmitting?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -146,7 +148,12 @@ const formTitle = computed(() => {
   if (panelMode.value === 'edit') return '编辑待办'
   return '新增待办'
 })
-const isFormReadonly = computed(() => isParsing.value || isViewMode.value)
+const isFormReadonly = computed(
+  () => isParsing.value || isViewMode.value || Boolean(props.formSubmitting),
+)
+const isSaveDisabled = computed(
+  () => isParsing.value || Boolean(props.formSubmitting) || isViewMode.value,
+)
 const isDeadlineMode = computed(() => todoForm.value.mode === 'deadline')
 const canChooseAssignee = computed(() => props.assignableUsers.length > 1)
 const hasUnsavedChanges = computed(
@@ -381,6 +388,12 @@ function confirmDiscardWarning() {
   if (discardAction) {
     discardAction()
   }
+}
+
+function markFormSaved() {
+  syncFormSnapshot()
+  hideDiscardWarning()
+  emit('dirtyChange', false)
 }
 
 function confirmDiscardChanges(onConfirm?: () => void) {
@@ -709,7 +722,7 @@ function setTodoType(type: 1 | 2) {
 }
 
 function submitTodo() {
-  if (!canEditForm.value) return
+  if (!canEditForm.value || props.formSubmitting) return
 
   if (!todoForm.value.title.trim()) {
     isTitleInvalid.value = true
@@ -756,13 +769,6 @@ function submitTodo() {
       type: payload.type,
     })
   }
-
-  if (props.formOnly) {
-    syncFormSnapshot()
-    hideDiscardWarning()
-  } else {
-    resetFormState()
-  }
 }
 
 function requestDeleteTodo(event: CalendarEvent) {
@@ -807,6 +813,7 @@ defineExpose({
   openEventDetailById,
   openEditFormById,
   showDiscardWarning,
+  markFormSaved,
   applyStatusFilter,
   applyTypeFilter,
 })
@@ -1101,7 +1108,12 @@ defineExpose({
       </button>
     </template>
 
-    <form v-else class="inline-todo-form" :aria-busy="isParsing" @submit.prevent="submitTodo">
+    <form
+      v-else
+      class="inline-todo-form"
+      :aria-busy="isParsing || formSubmitting"
+      @submit.prevent="submitTodo"
+    >
       <Transition name="discard-warning">
         <div v-if="discardWarningVisible" class="inline-discard-warning" role="alert">
           <div>
@@ -1364,8 +1376,15 @@ defineExpose({
           <Button type="button" @click="requestCancelForm">返回</Button>
         </template>
         <template v-else>
-          <Button type="button" :disabled="isParsing" @click="requestCancelForm">取消</Button>
-          <Button type="submit">保存</Button>
+          <Button type="button" :disabled="isSaveDisabled" @click="requestCancelForm">取消</Button>
+          <Button type="submit" :disabled="isSaveDisabled">
+            <IconLoaderCircle
+              v-if="formSubmitting"
+              class="form-actions__spinner"
+              aria-hidden="true"
+            />
+            <span>{{ formSubmitting ? '保存中…' : '保存' }}</span>
+          </Button>
         </template>
       </div>
     </form>
@@ -1857,6 +1876,10 @@ defineExpose({
 .add-btn,
 .form-actions button[type='submit'],
 .ai-inline-row button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   border-color: var(--todo-primary);
   background: var(--todo-primary);
   color: #ffffff;
@@ -3140,6 +3163,19 @@ p {
   background: rgba(226, 232, 240, 0.58);
   color: #94a3b8;
   box-shadow: none;
+  cursor: wait;
+}
+
+.form-actions__spinner {
+  width: 15px;
+  height: 15px;
+  animation: todo-form-save-spin 0.82s linear infinite;
+}
+
+@keyframes todo-form-save-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 760px) {

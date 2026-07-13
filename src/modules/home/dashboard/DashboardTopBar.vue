@@ -1089,6 +1089,10 @@ onBeforeUnmount(() => {
   display: none;
 }
 
+.dashboard-topbar.has-tool-dock .work-report-entry-btn__chevron {
+  display: none;
+}
+
 .dashboard-topbar.has-tool-dock .user-chip {
   max-width: 180px;
 }

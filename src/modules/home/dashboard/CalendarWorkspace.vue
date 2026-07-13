@@ -84,6 +84,7 @@ type HomePanelMode = 'view' | 'edit' | 'create'
 
 type DayPreviewPanelExpose = {
   showDiscardWarning: (onConfirm?: () => void) => void
+  markFormSaved: () => void
   openCreateForm: () => void
   openEditFormById: (id: string) => boolean
 }
@@ -116,6 +117,7 @@ const quickCreateKey = ref(0)
 const presetCreateTime = ref('')
 const presetCreateKey = ref(0)
 const isDayPreviewFormDirty = ref(false)
+const isTodoFormSubmitting = ref(false)
 const dayPreviewPanelRef = ref<DayPreviewPanelExpose | null>(null)
 const dayPreviewEditPanelRef = ref<DayPreviewPanelExpose | null>(null)
 const homeMainPanelRef = ref<HTMLElement | null>(null)
@@ -831,6 +833,23 @@ function confirmDiscardPreviewChanges(onConfirm?: () => void) {
   return false
 }
 
+function getActiveDayPreviewPanelRef() {
+  return homePanelMode.value === 'edit' ? dayPreviewEditPanelRef.value : dayPreviewPanelRef.value
+}
+
+function markPreviewFormSaved() {
+  isDayPreviewFormDirty.value = false
+  getActiveDayPreviewPanelRef()?.markFormSaved()
+}
+
+function forceCloseDayPreview() {
+  isDayPreviewOpen.value = false
+  isDayPreviewFormDirty.value = false
+  activePanelTaskId.value = ''
+  pendingDeleteTaskId.value = ''
+  panelTodoOpenSource.value = 'calendar'
+}
+
 function quickCreateTodo(prompt: string, date: string) {
   const createFromPrompt = () => {
     isDayPreviewFormDirty.value = false
@@ -863,30 +882,49 @@ function openHomePanelTool(tool: DashboardToolTarget) {
 }
 
 async function createTodo(payload: CalendarTodoDraft) {
-  await runDashboardTodoAction(async () => {
-    await serviceCreateTodo(payload)
-    await refreshTodos()
-    selectDate(payload.date)
-    closeDayPreview()
-    showToast('待办已创建')
-  })
+  if (isTodoFormSubmitting.value) return
+
+  isTodoFormSubmitting.value = true
+  try {
+    const success = await runDashboardTodoAction(async () => {
+      await serviceCreateTodo(payload)
+      await refreshTodos()
+      selectDate(payload.date)
+      showToast('待办已创建')
+    })
+    if (!success) return
+
+    markPreviewFormSaved()
+    forceCloseDayPreview()
+  } finally {
+    isTodoFormSubmitting.value = false
+  }
 }
 
 async function updateTodo(payload: CalendarTodoUpdate) {
-  await runDashboardTodoAction(async () => {
-    await serviceUpdateTodo(payload)
-    await refreshTodos()
-    isDayPreviewFormDirty.value = false
-    homePanelMode.value = 'view'
-    selectDate(payload.date)
-    if (activePanelTaskId.value) {
-      const task = selectedEvents.value.find((event) => event.id === activePanelTaskId.value)
-      if (task) {
-        await loadPanelTaskDetail(task)
+  if (isTodoFormSubmitting.value) return
+
+  isTodoFormSubmitting.value = true
+  try {
+    const success = await runDashboardTodoAction(async () => {
+      await serviceUpdateTodo(payload)
+      await refreshTodos()
+      homePanelMode.value = 'view'
+      selectDate(payload.date)
+      if (activePanelTaskId.value) {
+        const task = selectedEvents.value.find((event) => event.id === activePanelTaskId.value)
+        if (task) {
+          await loadPanelTaskDetail(task)
+        }
       }
-    }
-    showToast('待办已保存')
-  })
+      showToast('待办已保存')
+    })
+    if (!success) return
+
+    markPreviewFormSaved()
+  } finally {
+    isTodoFormSubmitting.value = false
+  }
 }
 
 async function updateTodoStatus(id: string, status: CalendarEventStatus) {
@@ -1096,6 +1134,7 @@ defineExpose({
             :special-days="selectedSpecialDays"
             :current-user="currentUser"
             :assignable-users="assignableUsers"
+            :form-submitting="isTodoFormSubmitting"
             @update-todo="updateTodo"
             @dirty-change="isDayPreviewFormDirty = $event"
             @notify="showToast"
@@ -1117,6 +1156,7 @@ defineExpose({
             :quick-create-key="quickCreateKey"
             :preset-create-time="presetCreateTime"
             :preset-create-key="presetCreateKey"
+            :form-submitting="isTodoFormSubmitting"
             @create-todo="createTodo"
             @dirty-change="isDayPreviewFormDirty = $event"
             @notify="showToast"

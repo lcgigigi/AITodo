@@ -45,7 +45,7 @@ const notificationPanelPortalRef = ref<HTMLElement | null>(null)
 const notificationPanelPosition = ref<NotificationPanelPosition>({
   top: 0,
   right: 16,
-  width: 400,
+  width: 420,
   arrowCenter: 123,
 })
 const notificationBackdropTop = ref(0)
@@ -127,8 +127,8 @@ const notificationPanelStyle = computed(() => {
 
     if (isScopedPortal.value) {
       style.top = `${position.top}px`
-      style.right = `${position.right}px`
-      style.left = 'auto'
+      style.left = `${position.left ?? 12}px`
+      style.right = 'auto'
     } else {
       style.top = `${position.top}px`
       style.left = `${position.left ?? 16}px`
@@ -160,25 +160,28 @@ function updateNotificationPanelPosition() {
         : 56
     notificationBackdropTop.value = topbarBottom
 
-    const bellRightOffset = Math.max(padding, containerRect.right - anchorRect.right)
-    const right = bellRightOffset
-    const maxWidthAtAnchor = containerRect.width - right - padding
-    const panelWidth = Math.min(400, containerRect.width - padding * 2, maxWidthAtAnchor)
+    const containerWidth = containerRect.width
+    const bellLeft = anchorRect.left - containerRect.left
+    const bellRight = anchorRect.right - containerRect.left
+    const bellCenter = (bellLeft + bellRight) / 2
+    const panelWidth = Math.min(420, containerWidth - padding * 2)
+
+    let left = bellRight - panelWidth + 8
+    left = Math.max(padding, Math.min(left, containerWidth - padding - panelWidth))
+
     const top = Math.max(topbarBottom + 4, anchorRect.bottom - containerRect.top + 6)
-    const panelRightAbs = containerRect.right - right
-    const bellCenterX = anchorRect.left + anchorRect.width / 2
-    const arrowCenter = Math.max(28, Math.min(panelWidth - 28, panelRightAbs - bellCenterX))
+    const arrowCenter = Math.max(28, Math.min(panelWidth - 28, left + panelWidth - bellCenter))
 
     notificationPanelPosition.value = {
       top,
-      right,
+      left,
       width: panelWidth,
       arrowCenter,
     }
     return
   }
 
-  const panelWidth = Math.min(400, window.innerWidth - 32)
+  const panelWidth = Math.min(420, window.innerWidth - 32)
   let left = anchorRect.right - panelWidth - 64
   left = Math.max(16, Math.min(left, window.innerWidth - panelWidth - 16))
 
@@ -655,29 +658,15 @@ defineExpose({
   left: auto;
   z-index: 12;
   max-height: min(560px, calc(100% - 72px));
-  overflow: visible;
-  display: flex;
-  flex-direction: column;
-  border: 1px solid rgba(255, 255, 255, var(--glass-border-opacity, 0.58));
+  overflow: hidden;
+  border: 1px solid rgba(226, 232, 240, 0.92);
   border-radius: 22px;
-  background: radial-gradient(
-      circle at 22% 20%,
-      rgba(255, 255, 255, var(--glass-highlight-opacity, 0.62)),
-      rgba(255, 255, 255, 0) 34%
-    ),
-    linear-gradient(
-      145deg,
-      rgba(255, 255, 255, var(--glass-gradient-start, 0.24)),
-      rgba(238, 246, 255, var(--glass-gradient-end, 0.16))
-    ),
-    rgba(248, 252, 255, calc(var(--glass-base-opacity, 0.18) + 0.04));
-  backdrop-filter: blur(calc(var(--glass-blur, 24px) + 4px))
-    saturate(calc(var(--glass-saturate, 1.16) + 0.12));
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur, 24px) + 4px))
-    saturate(calc(var(--glass-saturate, 1.16) + 0.12));
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.68),
-    0 20px 36px -24px rgba(15, 23, 42, 0.24);
+    0 26px 58px -28px rgba(15, 23, 42, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
 }
 
 .notification-panel.is-scoped-portal .notification-panel__arrow {
@@ -689,29 +678,23 @@ defineExpose({
   width: 14px;
   height: 14px;
   bottom: -7px;
-  border-color: rgba(255, 255, 255, var(--glass-border-opacity, 0.64));
-  background: rgba(248, 252, 255, calc(var(--glass-base-opacity, 0.18) + 0.34));
-  backdrop-filter: blur(var(--glass-blur, 24px));
-  -webkit-backdrop-filter: blur(var(--glass-blur, 24px));
-  box-shadow:
-    inset 1px 1px 0 rgba(255, 255, 255, 0.72),
-    0 -2px 6px -4px rgba(15, 23, 42, 0.12);
+  border-color: rgba(226, 232, 240, 0.92);
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.82);
 }
 
 .notification-panel.is-scoped-portal .notification-tabs,
-.notification-panel.is-scoped-portal .notification-filter,
+.notification-panel.is-scoped-portal .notification-filter {
+  position: relative;
+  z-index: 1;
+}
+
 .notification-panel.is-scoped-portal .notification-list {
   position: relative;
   z-index: 1;
-  background: inherit;
-}
-
-.notification-panel.is-scoped-portal .notification-panel__header {
-  border-radius: 22px 22px 0 0;
-}
-
-.notification-panel.is-scoped-portal .notification-list {
-  max-height: min(420px, calc(100% - 240px));
+  max-height: min(430px, calc(100vh - 150px));
   border-radius: 0 0 22px 22px;
   overflow: auto;
 }

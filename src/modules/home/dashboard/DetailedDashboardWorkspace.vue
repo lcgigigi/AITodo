@@ -60,6 +60,7 @@ type DayPreviewPanelExpose = {
   openCreateForm: () => void
   openEditFormById: (id: string) => boolean
   showDiscardWarning: (onConfirm?: () => void) => void
+  markFormSaved: () => void
 }
 
 type LeftPanelMode = 'tools' | 'create' | 'detail' | 'edit'
@@ -101,6 +102,7 @@ const activeTaskId = ref('')
 const quickCreateText = ref('')
 const leftPanelMode = ref<LeftPanelMode>('tools')
 const isCreateFormDirty = ref(false)
+const isTodoFormSubmitting = ref(false)
 const quickCreatePrompt = ref('')
 const quickCreateKey = ref(0)
 const dayPreviewPanelRef = ref<DayPreviewPanelExpose | null>(null)
@@ -687,20 +689,31 @@ function requestCloseTaskEdit(onConfirm?: () => void) {
 }
 
 async function handleUpdateTodo(payload: CalendarTodoUpdate) {
-  await runDashboardTodoAction(async () => {
-    await serviceUpdateTodo(payload)
-    await refreshTodos()
-    closeTaskEdit()
-    if (activeTaskId.value) {
-      const task =
-        selectedDateEvents.value.find((event) => event.id === activeTaskId.value) ??
-        findEventById(activeTaskId.value)
-      if (task) {
-        await loadTaskDetail(task, true)
+  if (isTodoFormSubmitting.value) return
+
+  isTodoFormSubmitting.value = true
+  try {
+    const success = await runDashboardTodoAction(async () => {
+      await serviceUpdateTodo(payload)
+      await refreshTodos()
+      if (activeTaskId.value) {
+        const task =
+          selectedDateEvents.value.find((event) => event.id === activeTaskId.value) ??
+          findEventById(activeTaskId.value)
+        if (task) {
+          await loadTaskDetail(task, true)
+        }
       }
-    }
-    feedbackStore.success('待办已保存')
-  })
+      feedbackStore.success('待办已保存')
+    })
+    if (!success) return
+
+    dayPreviewEditPanelRef.value?.markFormSaved()
+    isEditFormDirty.value = false
+    closeTaskEdit()
+  } finally {
+    isTodoFormSubmitting.value = false
+  }
 }
 
 function closeTaskDetail() {
@@ -784,18 +797,29 @@ function submitQuickCreate() {
 }
 
 async function handleCreateTodo(payload: CalendarTodoDraft) {
-  await runDashboardTodoAction(async () => {
-    await serviceCreateTodo(payload)
-    if (payload.date) {
-      const parsedDate = new Date(`${payload.date}T12:00:00`)
-      currentMonth.value = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), 1)
-      updateSelectedDate(payload.date)
-    }
-    quickCreateText.value = ''
+  if (isTodoFormSubmitting.value) return
+
+  isTodoFormSubmitting.value = true
+  try {
+    const success = await runDashboardTodoAction(async () => {
+      await serviceCreateTodo(payload)
+      if (payload.date) {
+        const parsedDate = new Date(`${payload.date}T12:00:00`)
+        currentMonth.value = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), 1)
+        updateSelectedDate(payload.date)
+      }
+      quickCreateText.value = ''
+      await refreshTodos()
+      feedbackStore.success('待办已创建')
+    })
+    if (!success) return
+
+    dayPreviewPanelRef.value?.markFormSaved()
+    isCreateFormDirty.value = false
     closeCreateModal()
-    await refreshTodos()
-    feedbackStore.success('待办已创建')
-  })
+  } finally {
+    isTodoFormSubmitting.value = false
+  }
 }
 
 function notifyFromPreview(message: string, type: 'success' | 'error' | 'info' = 'info') {
@@ -1258,8 +1282,9 @@ function weekRangeLabel(anchorDate: string) {
                 : '任务详情'
           "
         >
-          <div v-if="leftPanelMode === 'create'" class="left-panel-create-card">
+          <div class="detail-drawer-body">
             <DayPreviewPanel
+              v-if="leftPanelMode === 'create'"
               ref="dayPreviewPanelRef"
               :key="quickCreateKey"
               form-only
@@ -1272,15 +1297,15 @@ function weekRangeLabel(anchorDate: string) {
               :assignable-users="assignableUsers"
               :quick-create-prompt="quickCreatePrompt"
               :quick-create-key="quickCreateKey"
+              :form-submitting="isTodoFormSubmitting"
               @create-todo="handleCreateTodo"
               @dirty-change="isCreateFormDirty = $event"
               @notify="notifyFromPreview"
               @close="requestCloseCreateModal()"
             />
-          </div>
 
-          <div v-else-if="leftPanelMode === 'edit' && activeTask" class="left-panel-create-card">
             <DayPreviewPanel
+              v-else-if="leftPanelMode === 'edit' && activeTask"
               ref="dayPreviewEditPanelRef"
               form-only
               show-close
@@ -1290,19 +1315,19 @@ function weekRangeLabel(anchorDate: string) {
               :special-days="[]"
               :current-user="currentUser"
               :assignable-users="assignableUsers"
+              :form-submitting="isTodoFormSubmitting"
               @update-todo="handleUpdateTodo"
               @dirty-change="isEditFormDirty = $event"
               @notify="notifyFromPreview"
               @close="requestCloseTaskEdit()"
             />
-          </div>
 
-          <TodoDetailViewPanel
-            v-else-if="leftPanelMode === 'detail' && activeTaskId"
-            :panel="taskDetailPanel"
-            :loading="isActiveDetailLoading"
-            @close="closeTaskDetail"
-          >
+            <TodoDetailViewPanel
+              v-else-if="leftPanelMode === 'detail' && activeTaskId"
+              :panel="taskDetailPanel"
+              :loading="isActiveDetailLoading"
+              @close="closeTaskDetail"
+            >
             <template v-if="showDetailFooter" #footer>
               <div
                 class="detail-panel-actions"
@@ -1393,7 +1418,8 @@ function weekRangeLabel(anchorDate: string) {
                 </template>
               </div>
             </template>
-          </TodoDetailViewPanel>
+            </TodoDetailViewPanel>
+          </div>
         </aside>
       </Transition>
     </section>
@@ -1501,7 +1527,7 @@ function weekRangeLabel(anchorDate: string) {
   top: 9px;
   right: 9px;
   bottom: 9px;
-  width: min(460px, calc(100% - 18px));
+  width: min(520px, calc(100% - 18px));
   min-height: 0;
   box-sizing: border-box;
   border: 1px solid rgba(255, 255, 255, 0.72);
@@ -1531,7 +1557,7 @@ function weekRangeLabel(anchorDate: string) {
   transform: translateX(18px);
 }
 
-.left-panel-create-card {
+.detail-drawer-body {
   flex: 1;
   min-height: 0;
   display: flex;
@@ -1544,7 +1570,8 @@ function weekRangeLabel(anchorDate: string) {
   box-sizing: border-box;
 }
 
-.left-panel-create-card :deep(.preview-panel) {
+.detail-drawer-body :deep(.preview-panel),
+.detail-drawer-body :deep(.todo-detail-view-panel) {
   flex: 1;
   min-height: 0;
 }
