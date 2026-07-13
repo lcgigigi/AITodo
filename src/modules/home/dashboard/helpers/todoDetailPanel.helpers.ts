@@ -5,10 +5,11 @@ import {
   getRejectedTodoMessage,
   getSmartTodoKindLabel,
   getTodoAssigneeDisplayName,
+  getTodoContentDisplay,
   getTodoRemarkDisplay,
-  hasTodoRemark,
   getTodoCreatorDisplayName,
   getTodoHandlerDisplayName,
+  hasTodoRemark,
   isCompletedTodoEvent,
   isRejectedTodo,
   shouldShowTodoAssignerField,
@@ -26,6 +27,8 @@ export type AssigneeProgressItem = {
 
 export type TodoDetailPanelViewModel = {
   title: string
+  content: string
+  contentIsEmpty: boolean
   typeLabel: string
   typeTone: 'meeting' | 'todo'
   statusLabel: string
@@ -271,7 +274,9 @@ export function buildTodoDetailPanelViewModel(
     : null
 
   return {
-    title: task.title || '未命名待办',
+    title: getTodoContentDisplay(task),
+    content: getTodoContentDisplay(task),
+    contentIsEmpty: !task.content?.trim(),
     typeLabel: getTaskTypeLabel(task),
     typeTone: task.type === 'meeting' ? 'meeting' : 'todo',
     statusLabel: progressSummary?.label ?? getBackendTodoStatusLabel(task),

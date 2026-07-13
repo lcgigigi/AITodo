@@ -116,20 +116,30 @@ describe('buildTodoDetailPanelViewModel assignee progress', () => {
     )
   })
 
-  it('shows remark in detail desc and falls back when empty', () => {
+  it('uses content as the detail title and keeps remark as the detail description', () => {
+    expect(
+      buildTodoDetailPanelViewModel(buildTask({ content: '下午 3 点开会' }), creator).title,
+    ).toBe('下午 3 点开会')
+    expect(
+      buildTodoDetailPanelViewModel(buildTask({ content: '会议室 317' }), creator).content,
+    ).toBe('会议室 317')
+    expect(
+      buildTodoDetailPanelViewModel(buildTask({ content: '会议室 317' }), creator)
+        .contentIsEmpty,
+    ).toBe(false)
+    expect(buildTodoDetailPanelViewModel(buildTask({ content: '' }), creator).content).toBe('暂无内容')
+    expect(
+      buildTodoDetailPanelViewModel(buildTask({ content: '' }), creator).contentIsEmpty,
+    ).toBe(true)
+    expect(buildTodoDetailPanelViewModel(buildTask({ content: '   ' }), creator).content).toBe(
+      '暂无内容',
+    )
     expect(
       buildTodoDetailPanelViewModel(buildTask({ remark: '会议室 317' }), creator).remark,
     ).toBe('会议室 317')
     expect(
-      buildTodoDetailPanelViewModel(buildTask({ remark: '会议室 317' }), creator).remarkIsEmpty,
-    ).toBe(false)
-    expect(buildTodoDetailPanelViewModel(buildTask({ remark: '' }), creator).remark).toBe('暂无备注')
-    expect(
-      buildTodoDetailPanelViewModel(buildTask({ remark: '' }), creator).remarkIsEmpty,
-    ).toBe(true)
-    expect(buildTodoDetailPanelViewModel(buildTask({ remark: '   ' }), creator).remark).toBe(
-      '暂无备注',
-    )
+      buildTodoDetailPanelViewModel(buildTask({ remark: '' }), creator).remark,
+    ).toBe('暂无备注')
   })
 })
 

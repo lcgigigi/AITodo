@@ -357,7 +357,7 @@ onBeforeUnmount(() => {
     <div
       v-if="hasContextualNav"
       class="brand-block brand-block--contextual"
-      aria-label="AI办公平台"
+      aria-label="AI辅助办公"
     >
       <button type="button" class="contextual-back-btn" @click="goHome">
         <IconArrowLeft aria-hidden="true" />
@@ -365,11 +365,11 @@ onBeforeUnmount(() => {
       </button>
       <span class="contextual-divider" aria-hidden="true" />
       <img class="brand-logo" :src="homeCardLogoImage" alt="" />
-      <span class="brand-title">AI办公平台</span>
+      <span class="brand-title">AI辅助办公</span>
     </div>
-    <div v-else class="brand-block" :class="{ 'is-embedded': props.embedded }" aria-label="AI办公平台">
+    <div v-else class="brand-block" :class="{ 'is-embedded': props.embedded }" aria-label="AI辅助办公">
       <img class="brand-logo" :src="homeCardLogoImage" alt="" />
-      <span class="brand-title">AI办公平台</span>
+      <span class="brand-title">AI辅助办公</span>
     </div>
 
     <TopbarToolDock
