@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   buildTodoDetailPanelViewModel,
   buildDispatchProgressSummary,
+  canAddTodoProcess,
   isPendingAcceptanceTask,
   mergeCalendarEventWithDetail,
+  resolveProgressTargetTodo,
 } from '../dashboard/helpers/todoDetailPanel.helpers'
 import type { CalendarEvent, CalendarUser } from '../dashboard/config/types'
 
@@ -45,8 +47,10 @@ function buildTask(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
         status: 'done',
         creatorId: '1110691',
         assigneeId: '1102080',
+        currentHandlerId: '1102080',
         handlerName: '李四',
         backendStatus: 6,
+        lastProcess: '联调已完成',
       },
       {
         id: '102',
@@ -58,9 +62,11 @@ function buildTask(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
         status: 'todo',
         creatorId: '1110691',
         assigneeId: '1102081',
+        currentHandlerId: '1102081',
         handlerName: '王五',
-        backendStatus: 0,
-        receiveStatus: 2,
+        backendStatus: 3,
+        receiveStatus: 1,
+        lastProcess: '正在测试验证',
       },
     ],
     ...overrides,
@@ -78,14 +84,16 @@ describe('buildTodoDetailPanelViewModel assignee progress', () => {
       {
         id: '102',
         name: '王五',
-        statusLabel: '待接受',
-        statusTone: 'pending',
+        statusLabel: '已接受',
+        statusTone: 'accepted',
+        lastProcess: '正在测试验证',
       },
       {
         id: '101',
         name: '李四',
         statusLabel: '已完成',
         statusTone: 'done',
+        lastProcess: '联调已完成',
       },
     ])
   })
@@ -95,6 +103,61 @@ describe('buildTodoDetailPanelViewModel assignee progress', () => {
       label: '1/2 已完成',
       tone: 'accepted',
     })
+  })
+
+  it('shows process section for accepted handler and hides it for dispatch creator', () => {
+    const handlerPanel = buildTodoDetailPanelViewModel(
+      buildTask({
+        scope: 'assigned_to_me',
+        assigneeId: '1102080',
+        currentHandlerId: '1102080',
+        backendStatus: 3,
+        childTodos: undefined,
+        processList: [
+          {
+            processId: '10001',
+            todoId: '100',
+            todoProcess: '正在联调',
+            creatorId: '1102080',
+            createTime: '2026-07-14T09:30:00',
+            updateTime: '2026-07-14T09:30:00',
+          },
+        ],
+      }),
+      assignee,
+      [assignee],
+    )
+
+    expect(handlerPanel.processSection).toMatchObject({
+      targetTodoId: '100',
+      canAdd: true,
+      items: [
+        expect.objectContaining({
+          processId: '10001',
+          todoProcess: '正在联调',
+          editable: true,
+        }),
+      ],
+    })
+
+    const creatorPanel = buildTodoDetailPanelViewModel(buildTask(), creator, [assignee])
+    expect(creatorPanel.processSection).toBeUndefined()
+    expect(creatorPanel.assigneeProgress?.[0].lastProcess).toBe('正在测试验证')
+  })
+
+  it('resolves child todo as progress target for dispatched assignee', () => {
+    const task = buildTask({ scope: 'assigned_to_me', assigneeId: '1102080,1102081' })
+    const target = resolveProgressTargetTodo(task, assignee)
+
+    expect(target?.id).toBe('101')
+    expect(canAddTodoProcess(task, assignee)).toBe(false)
+
+    const acceptedTask = buildTask({
+      childTodos: task.childTodos?.map((child) =>
+        child.id === '101' ? { ...child, backendStatus: 3 } : child,
+      ),
+    })
+    expect(canAddTodoProcess(acceptedTask, assignee)).toBe(true)
   })
 
   it('preserves child todos when merging list item with cached detail', () => {
@@ -107,12 +170,125 @@ describe('buildTodoDetailPanelViewModel assignee progress', () => {
     })
   })
 
+  it('preserves process list and last process when merging list item with cached detail', () => {
+    const listEvent = buildTask({ title: '列表标题', status: 'done', backendStatus: 6 })
+    const cachedDetail = buildTask({
+      title: '详情标题',
+      lastProcess: '第二次进展',
+      processList: [
+        {
+          processId: '10001',
+          todoId: '100',
+          todoProcess: '第一次进展',
+          creatorId: '1102080',
+          createTime: '2026-07-14T09:30:00',
+          updateTime: '2026-07-14T09:30:00',
+        },
+        {
+          processId: '10002',
+          todoId: '100',
+          todoProcess: '第二次进展',
+          creatorId: '1102080',
+          createTime: '2026-07-14T10:30:00',
+          updateTime: '2026-07-14T10:30:00',
+        },
+      ],
+    })
+
+    expect(mergeCalendarEventWithDetail(listEvent, cachedDetail)).toMatchObject({
+      title: '列表标题',
+      status: 'done',
+      lastProcess: '第二次进展',
+      processList: [
+        expect.objectContaining({ processId: '10001' }),
+        expect.objectContaining({ processId: '10002' }),
+      ],
+    })
+  })
+
+  it('shows full process history for dispatch creator in assignee progress', () => {
+    const panel = buildTodoDetailPanelViewModel(
+      buildTask({
+        childTodos: [
+          {
+            id: '101',
+            date: '2026-07-16',
+            time: '11:20',
+            title: '跟进需求',
+            type: 'task',
+            owner: '李四',
+            status: 'todo',
+            creatorId: '1110691',
+            assigneeId: '1102080',
+            currentHandlerId: '1102080',
+            handlerName: '李四',
+            backendStatus: 3,
+            lastProcess: '第二次进展',
+            processList: [
+              {
+                processId: '10001',
+                todoId: '101',
+                todoProcess: '第一次进展',
+                creatorId: '1102080',
+                createTime: '2026-07-14T09:30:00',
+                updateTime: '2026-07-14T09:30:00',
+              },
+              {
+                processId: '10002',
+                todoId: '101',
+                todoProcess: '第二次进展',
+                creatorId: '1102080',
+                createTime: '2026-07-14T10:30:00',
+                updateTime: '2026-07-14T10:30:00',
+              },
+            ],
+          },
+        ],
+      }),
+      creator,
+      [assignee],
+    )
+
+    expect(panel.assigneeProgress?.[0].processHistory).toEqual([
+      {
+        processId: '10001',
+        todoProcess: '第一次进展',
+        createTime: '2026-07-14 09:30',
+      },
+      {
+        processId: '10002',
+        todoProcess: '第二次进展',
+        createTime: '2026-07-14 10:30',
+      },
+    ])
+  })
+
   it('does not show assignee progress for assignee viewer', () => {
     const panel = buildTodoDetailPanelViewModel(buildTask({ scope: 'assigned_to_me' }), assignee)
 
     expect(panel.assigneeProgress).toBeUndefined()
     expect(panel.meta).toEqual(
       expect.arrayContaining([expect.objectContaining({ key: 'receiver', label: '接受人' })]),
+    )
+  })
+
+  it('uses handler fields for receiver display in detail panel', () => {
+    const panel = buildTodoDetailPanelViewModel(
+      buildTask({
+        scope: 'assigned_to_me',
+        assigneeId: '1110691',
+        assigneeName: '田坤坤',
+        currentHandlerId: '1102080',
+        handlerName: '徐逸臣',
+      }),
+      assignee,
+      [assignee],
+    )
+
+    expect(panel.meta).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'receiver', label: '接受人', value: '徐逸臣' }),
+      ]),
     )
   })
 

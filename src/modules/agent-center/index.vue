@@ -37,6 +37,7 @@ defineOptions({
 type AgentVisual = {
   icon?: Component
   iconSrc?: string
+  iconText?: string
   tone: string
 }
 
@@ -354,7 +355,11 @@ function getAgentTool(agent: AgentCatalogItem) {
 function getAgentVisual(agent: AgentCatalogItem): AgentVisual {
   const tool = getAgentTool(agent)
   if (!tool) {
-    return { tone: 'tone-slate' }
+    return {
+      iconSrc: agent.iconSrc,
+      iconText: agent.icon,
+      tone: `tone-${agent.theme}`,
+    }
   }
 
   return {
@@ -597,7 +602,10 @@ watch(selectedTokenPeriodCode, () => {
 
               <span
                 class="agent-card-icon"
-                :class="[getAgentVisual(agent).tone, { 'has-image': getAgentVisual(agent).iconSrc }]"
+                :class="[
+                  getAgentVisual(agent).tone,
+                  { 'has-image': getAgentVisual(agent).iconSrc },
+                ]"
               >
                 <img
                   v-if="getAgentVisual(agent).iconSrc"
@@ -605,7 +613,13 @@ watch(selectedTokenPeriodCode, () => {
                   alt=""
                   class="agent-card-icon-image"
                 />
-                <component v-else-if="getAgentVisual(agent).icon" :is="getAgentVisual(agent).icon" />
+                <component
+                  v-else-if="getAgentVisual(agent).icon"
+                  :is="getAgentVisual(agent).icon"
+                />
+                <span v-else class="agent-card-icon-text">{{
+                  getAgentVisual(agent).iconText
+                }}</span>
               </span>
 
               <div class="agent-card-copy">
@@ -747,8 +761,11 @@ watch(selectedTokenPeriodCode, () => {
 
 .agent-center-topbar-wrap :deep(.dashboard-topbar) {
   border: 1px solid rgba(255, 255, 255, 0.72);
-  background:
-    radial-gradient(circle at 22% 20%, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0) 36%),
+  background: radial-gradient(
+      circle at 22% 20%,
+      rgba(255, 255, 255, 0.72),
+      rgba(255, 255, 255, 0) 36%
+    ),
     linear-gradient(145deg, rgba(255, 255, 255, 0.52), rgba(214, 228, 248, 0.42)),
     rgba(226, 236, 250, 0.58) !important;
   box-shadow:
@@ -1089,9 +1106,15 @@ watch(selectedTokenPeriodCode, () => {
 .agent-grid {
   display: grid;
   grid-template-columns: repeat(var(--agent-grid-columns), minmax(0, 1fr));
+  grid-auto-rows: var(--agent-card-min-height);
   align-content: start;
   gap: var(--grid-gap-y) var(--grid-gap-x);
+  height: calc(
+    var(--agent-card-min-height) + var(--agent-card-min-height) + var(--grid-gap-y) + 2px
+  );
   padding: 2px 2px 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .agent-grid::-webkit-scrollbar {
@@ -1201,6 +1224,12 @@ watch(selectedTokenPeriodCode, () => {
   stroke-width: 2.5;
 }
 
+.agent-card-icon-text {
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+}
+
 .tone-orange.agent-card-icon {
   background: #ffe5d7;
   color: #ff7a3d;
@@ -1293,7 +1322,6 @@ watch(selectedTokenPeriodCode, () => {
   font-size: 12px;
   font-weight: 800;
 }
-
 
 .agent-grid-empty {
   grid-column: 1 / -1;

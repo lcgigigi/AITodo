@@ -5,6 +5,7 @@ import {
   analyzeTodoText,
   completeTodo,
   createTodo,
+  createTodoProcess,
   deleteTodo,
   listTodos,
   loadAssignableUsers,
@@ -23,6 +24,7 @@ import {
   syncCalendar,
   transferTodos,
   updateTodo,
+  updateTodoProcess,
   updateTodoStatus,
 } from '../dashboard/services/todo.service'
 import type { CalendarUser } from '../dashboard/config/types'
@@ -904,6 +906,92 @@ describe('todo.service real backend adapter', () => {
       childTodos: [
         { id: '101', handlerName: '李四' },
         { id: '102', handlerName: '王五' },
+      ],
+    })
+  })
+
+  it('creates and updates todo process through smart-todo/process endpoints', async () => {
+    vi.mocked(httpClient.request).mockImplementation((config) => {
+      if (config.url === '/smart-todo/process' && config.method === 'POST') {
+        expect(config.data).toEqual({
+          todoId: 124,
+          todoProcess: '正在推进开发联调',
+        })
+        return backendResponse(10001) as never
+      }
+
+      if (config.url === '/smart-todo/process' && config.method === 'PUT') {
+        expect(config.data).toEqual({
+          processId: 10001,
+          todoProcess: '开发已完成，正在进行测试验证',
+        })
+        return backendResponse(true) as never
+      }
+
+      return backendResponse(true) as never
+    })
+
+    await expect(createTodoProcess('124', '正在推进开发联调')).resolves.toBe(10001)
+    await expect(
+      updateTodoProcess('10001', '开发已完成，正在进行测试验证'),
+    ).resolves.toBe(true)
+  })
+
+  it('loads todo detail with process list and last process fields', async () => {
+    vi.mocked(httpClient.request).mockImplementation((config) => {
+      if (config.url === '/smart-todo/123' && config.method === 'GET') {
+        return backendResponse({
+          mainTodo: {
+            id: 123,
+            title: '项目复盘',
+            timeType: 1,
+            startDateShow: '2026-06-07 17:00:00',
+            content: '完成项目复盘',
+            status: 3,
+            assigneeIds: '1102080',
+            creatorId: '1101001',
+            handlerId: '1102080',
+            receiveStatus: 1,
+            type: 1,
+            lastProcess: '已完成需求梳理，正在推进开发联调。',
+            processList: [
+              {
+                processId: 10001,
+                todoId: 123,
+                todoProcess: '已完成需求梳理，正在推进开发联调。',
+                creatorId: '1102080',
+                createTime: '2026-07-14T09:30:00',
+                updateTime: '2026-07-14T09:30:00',
+                deleteFlag: 1,
+              },
+              {
+                processId: 10002,
+                todoId: 123,
+                todoProcess: '已删除进展',
+                creatorId: '1102080',
+                createTime: '2026-07-14T08:30:00',
+                updateTime: '2026-07-14T08:30:00',
+                deleteFlag: 2,
+              },
+            ],
+          },
+          childTodoList: [],
+        }) as never
+      }
+
+      return backendResponse(true) as never
+    })
+
+    await expect(loadTodoDetail('123', currentUser, assignableUsers)).resolves.toMatchObject({
+      id: '123',
+      lastProcess: '已完成需求梳理，正在推进开发联调。',
+      processList: [
+        {
+          processId: '10001',
+          todoId: '123',
+          todoProcess: '已完成需求梳理，正在推进开发联调。',
+          creatorId: '1102080',
+        },
       ],
     })
   })

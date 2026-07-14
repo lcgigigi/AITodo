@@ -56,6 +56,10 @@ export function setupRouterGuards(router: Router) {
       return routeConfig.defaultRoute
     }
 
+    if (to.meta.requiresTokensPower && !userStore.hasTokensPower) {
+      return routeConfig.defaultRoute
+    }
+
     return true
   })
 

@@ -1,4 +1,4 @@
-import type { CalendarEvent, CalendarUser } from '../config/types'
+import type { CalendarEvent, CalendarUser, TodoProcess } from '../config/types'
 import {
   formatTodoDetailTimeField,
   getBackendTodoStatusLabel,
@@ -8,7 +8,6 @@ import {
   getTodoContentDisplay,
   getTodoRemarkDisplay,
   getTodoCreatorDisplayName,
-  getTodoHandlerDisplayName,
   hasTodoRemark,
   isCompletedTodoEvent,
   isRejectedTodo,
@@ -17,12 +16,37 @@ import {
 
 export type DetailStatusTone = 'accepted' | 'done' | 'rejected' | 'pending' | 'waiting'
 
+export type AssigneeProcessHistoryItem = {
+  processId: string
+  todoProcess: string
+  createTime: string
+}
+
 export type AssigneeProgressItem = {
   id: string
   name: string
   statusLabel: string
   statusTone: DetailStatusTone
   note?: string
+  lastProcess?: string
+  processHistory?: AssigneeProcessHistoryItem[]
+}
+
+export type TodoProcessPanelItem = {
+  processId: string
+  todoProcess: string
+  creatorId: string
+  creatorName: string
+  createTime: string
+  updateTime: string
+  editable: boolean
+}
+
+export type TodoProcessSection = {
+  targetTodoId: string
+  canAdd: boolean
+  maxLength: number
+  items: TodoProcessPanelItem[]
 }
 
 export type TodoDetailPanelViewModel = {
@@ -38,6 +62,7 @@ export type TodoDetailPanelViewModel = {
   remarkIsEmpty: boolean
   meta: Array<{ key: string; label: string; value: string }>
   assigneeProgress?: AssigneeProgressItem[]
+  processSection?: TodoProcessSection
 }
 
 export function getTaskTypeLabel(event: CalendarEvent) {
@@ -109,6 +134,99 @@ export function canDeleteTodoEvent(event: CalendarEvent, currentUser: CalendarUs
   return false
 }
 
+export const TODO_PROCESS_MAX_LENGTH = 200
+
+function formatProcessTime(value?: string) {
+  if (!value?.trim()) return ''
+  return value.trim().replace('T', ' ').slice(0, 16)
+}
+
+function resolveProcessCreatorName(
+  creatorId: string,
+  users: CalendarUser[],
+  currentUser: CalendarUser,
+) {
+  if (creatorId === currentUser.id) return currentUser.name || creatorId
+  return users.find((user) => user.id === creatorId)?.name || creatorId
+}
+
+export function resolveProgressTargetTodo(
+  task: CalendarEvent,
+  currentUser: CalendarUser,
+): CalendarEvent | null {
+  if (!currentUser.id) return null
+
+  if (task.childTodos?.length) {
+    const childMatch = task.childTodos.find(
+      (child) => child.currentHandlerId === currentUser.id,
+    )
+    if (childMatch) return childMatch
+  }
+
+  if (task.currentHandlerId === currentUser.id) {
+    return task
+  }
+
+  return null
+}
+
+export function canAddTodoProcess(task: CalendarEvent, currentUser: CalendarUser) {
+  const target = resolveProgressTargetTodo(task, currentUser)
+  return Boolean(target && target.backendStatus === 3)
+}
+
+function canEditTodoProcess(process: TodoProcess, currentUser: CalendarUser) {
+  return Boolean(currentUser.id && process.creatorId === currentUser.id)
+}
+
+function shouldShowProcessSection(task: CalendarEvent, currentUser: CalendarUser) {
+  if (task.childTodos?.length && task.creatorId === currentUser.id) return false
+
+  const target = resolveProgressTargetTodo(task, currentUser)
+  if (!target) return false
+
+  return canAddTodoProcess(task, currentUser) || Boolean(target.processList?.length)
+}
+
+function buildTodoProcessPanelItems(
+  task: CalendarEvent,
+  currentUser: CalendarUser,
+  users: CalendarUser[] = [],
+): TodoProcessPanelItem[] {
+  const target = resolveProgressTargetTodo(task, currentUser)
+  if (!target?.processList?.length) return []
+
+  return [...target.processList]
+    .sort((left, right) => right.createTime.localeCompare(left.createTime))
+    .map((item) => ({
+      processId: item.processId,
+      todoProcess: item.todoProcess,
+      creatorId: item.creatorId,
+      creatorName: resolveProcessCreatorName(item.creatorId, users, currentUser),
+      createTime: formatProcessTime(item.createTime),
+      updateTime: formatProcessTime(item.updateTime),
+      editable: canEditTodoProcess(item, currentUser),
+    }))
+}
+
+function buildTodoProcessSection(
+  task: CalendarEvent,
+  currentUser: CalendarUser,
+  users: CalendarUser[] = [],
+): TodoProcessSection | undefined {
+  if (!shouldShowProcessSection(task, currentUser)) return undefined
+
+  const target = resolveProgressTargetTodo(task, currentUser)
+  if (!target) return undefined
+
+  return {
+    targetTodoId: target.id,
+    canAdd: canAddTodoProcess(task, currentUser),
+    maxLength: TODO_PROCESS_MAX_LENGTH,
+    items: buildTodoProcessPanelItems(task, currentUser, users),
+  }
+}
+
 export function getAssigneeProgressStatusLabel(event: CalendarEvent) {
   if (isRejectedTodo(event)) return '已拒绝'
   if (isCompletedTodoEvent(event)) return '已完成'
@@ -127,11 +245,7 @@ export function getAssigneeProgressStatusTone(event: CalendarEvent): DetailStatu
 }
 
 export function getAssigneeProgressDisplayName(event: CalendarEvent) {
-  const handlerName = getTodoHandlerDisplayName(event)
-  if (handlerName !== '未指定') return handlerName
-
-  const assigneeName = getTodoAssigneeDisplayName(event)
-  return assigneeName !== '未指定' ? assigneeName : handlerName
+  return getTodoAssigneeDisplayName(event)
 }
 
 export function buildDispatchProgressSummary(childTodos: CalendarEvent[]): {
@@ -163,6 +277,28 @@ export function buildDispatchProgressSummary(childTodos: CalendarEvent[]): {
   return { label: '进行中', tone: 'waiting' }
 }
 
+function mergeChildTodosWithDetail(
+  listChildTodos: CalendarEvent[] | undefined,
+  detailChildTodos: CalendarEvent[] | undefined,
+) {
+  if (!detailChildTodos?.length) return listChildTodos
+  if (!listChildTodos?.length) return detailChildTodos
+
+  const listChildMap = new Map(listChildTodos.map((child) => [child.id, child]))
+
+  return detailChildTodos.map((detailChild) => {
+    const listChild = listChildMap.get(detailChild.id)
+    if (!listChild) return detailChild
+
+    return {
+      ...detailChild,
+      ...listChild,
+      processList: detailChild.processList,
+      lastProcess: detailChild.lastProcess,
+    }
+  })
+}
+
 export function mergeCalendarEventWithDetail(
   listEvent: CalendarEvent,
   detail?: CalendarEvent | null,
@@ -172,7 +308,9 @@ export function mergeCalendarEventWithDetail(
   return {
     ...detail,
     ...listEvent,
-    childTodos: detail.childTodos,
+    childTodos: mergeChildTodosWithDetail(listEvent.childTodos, detail.childTodos) ?? detail.childTodos,
+    processList: detail.processList,
+    lastProcess: detail.lastProcess,
   }
 }
 
@@ -223,15 +361,29 @@ function compareAssigneeProgressItems(left: CalendarEvent, right: CalendarEvent)
   return left.id.localeCompare(right.id)
 }
 
+function buildAssigneeProcessHistory(child: CalendarEvent): AssigneeProcessHistoryItem[] {
+  return [...(child.processList ?? [])]
+    .sort((left, right) => left.createTime.localeCompare(right.createTime))
+    .map((item) => ({
+      processId: item.processId,
+      todoProcess: item.todoProcess,
+      createTime: formatProcessTime(item.createTime),
+    }))
+}
+
 export function buildAssigneeProgressItems(childTodos: CalendarEvent[]): AssigneeProgressItem[] {
   return [...childTodos].sort(compareAssigneeProgressItems).map((child) => {
     const note = getRejectedTodoMessage(child)
+    const processHistory = buildAssigneeProcessHistory(child)
+
     return {
       id: child.id,
       name: getAssigneeProgressDisplayName(child),
       statusLabel: getAssigneeProgressStatusLabel(child),
       statusTone: getAssigneeProgressStatusTone(child),
       note: note || undefined,
+      lastProcess: child.lastProcess?.trim() || undefined,
+      processHistory: processHistory.length ? processHistory : undefined,
     }
   })
 }
@@ -243,6 +395,7 @@ function shouldShowAssigneeProgress(task: CalendarEvent, currentUser: CalendarUs
 export function buildTodoDetailPanelViewModel(
   task: CalendarEvent,
   currentUser: CalendarUser,
+  users: CalendarUser[] = [],
 ): TodoDetailPanelViewModel {
   const showAssigneeProgress = shouldShowAssigneeProgress(task, currentUser)
   const meta: TodoDetailPanelViewModel['meta'] = [
@@ -288,5 +441,6 @@ export function buildTodoDetailPanelViewModel(
     assigneeProgress: showAssigneeProgress
       ? buildAssigneeProgressItems(task.childTodos ?? [])
       : undefined,
+    processSection: buildTodoProcessSection(task, currentUser, users),
   }
 }

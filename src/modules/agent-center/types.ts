@@ -15,6 +15,7 @@ export interface AgentCatalogItem {
   description: string
   category: AgentCategory
   icon: string
+  iconSrc?: string
   theme: 'blue' | 'green' | 'purple' | 'orange' | 'indigo' | 'pink' | 'cyan' | 'violet'
   permissionState: PermissionState
   level: AgentTier

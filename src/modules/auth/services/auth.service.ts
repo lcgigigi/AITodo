@@ -28,6 +28,8 @@ interface SmartTodoInfoPayload {
   }
   roles?: string[]
   permissions?: string[]
+  tokensPower?: boolean
+  managerDashboardUrl?: string | null
   checkEmail?: string | null
 }
 
@@ -35,6 +37,8 @@ interface SmartTodoInfoResponse extends SmartTodoResponse<SmartTodoInfoPayload> 
   user?: SmartTodoInfoPayload['user']
   roles?: string[]
   permissions?: string[]
+  tokensPower?: boolean
+  managerDashboardUrl?: string | null
   checkEmail?: string | null
 }
 
@@ -46,6 +50,8 @@ export interface SmartTodoLoginCredentials {
 export interface SmartTodoCurrentUser extends CalendarUser {
   roles: string[]
   permissions: string[]
+  tokensPower: boolean
+  managerDashboardUrl?: string
   isSecurityPassword?: 'yes' | 'no'
   checkEmail?: string | null
 }
@@ -122,6 +128,8 @@ export async function loadCurrentUser(options?: {
     role: resolveRole(roles),
     roles,
     permissions: info.permissions ?? [],
+    tokensPower: info.tokensPower === true,
+    managerDashboardUrl: getOptionalText(info.managerDashboardUrl),
     isSecurityPassword: user.isSecurityPassword,
     checkEmail,
   }

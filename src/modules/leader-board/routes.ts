@@ -9,6 +9,7 @@ export const leaderBoardRoutes: RouteRecordRaw[] = [
     meta: {
       title: 'Token 使用Token看板',
       requiresAuth: true,
+      requiresTokensPower: true,
       permission: PERMISSIONS.AGENT_LIST_VIEW,
     },
   },

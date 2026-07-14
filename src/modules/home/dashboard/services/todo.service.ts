@@ -15,6 +15,7 @@ import type {
   CalendarUser,
   ParsedTodoDraft,
   SmartTodoKind,
+  TodoProcess,
 } from '../config/types'
 import { compareEvents, ymd } from '../helpers/todoDisplay'
 
@@ -33,6 +34,16 @@ export type WorkReportSource = string | WorkReportStoryboardItem[]
 
 interface SmartTodoWorkSummary {
   aiReportText?: WorkReportSource | null
+}
+
+interface SmartTodoProcessBackendItem {
+  processId?: string | number
+  todoId?: string | number
+  todoProcess?: string | null
+  creatorId?: string | number | null
+  createTime?: string | null
+  updateTime?: string | null
+  deleteFlag?: number | null
 }
 
 interface SmartTodoBackendItem {
@@ -63,6 +74,8 @@ interface SmartTodoBackendItem {
   thirdId?: string | number | null
   fid?: string | number | null
   type?: number | string
+  lastProcess?: string | null
+  processList?: SmartTodoProcessBackendItem[] | null
 }
 
 interface SmartTodoAnalyzeData {
@@ -337,6 +350,33 @@ function mapBackendEventType(value?: number | string | null): CalendarEvent['typ
   return resolveTodoKind(value) === 2 ? 'meeting' : 'task'
 }
 
+function normalizeProcessList(items?: SmartTodoProcessBackendItem[] | null): TodoProcess[] {
+  return (items ?? [])
+    .filter((item) => item.deleteFlag !== 2)
+    .map((item): TodoProcess | null => {
+      const processId = toId(item.processId)
+      const todoId = toId(item.todoId)
+      const todoProcess = item.todoProcess?.trim()
+      const creatorId = toId(item.creatorId)
+      const createTime = item.createTime?.trim()
+      const updateTime = item.updateTime?.trim()
+
+      if (!processId || !todoId || !todoProcess || !creatorId || !createTime || !updateTime) {
+        return null
+      }
+
+      return {
+        processId,
+        todoId,
+        todoProcess,
+        creatorId,
+        createTime,
+        updateTime,
+      }
+    })
+    .filter((item): item is TodoProcess => Boolean(item))
+}
+
 function normalizeBackendTodo(
   item: SmartTodoBackendItem,
   currentUser: CalendarUser,
@@ -416,6 +456,9 @@ function normalizeBackendTodo(
     handlerIds: item.handlerIds ?? undefined,
     content: item.content ?? undefined,
     remark: item.remark ?? undefined,
+    fid: toId(item.fid) || undefined,
+    lastProcess: item.lastProcess?.trim() || undefined,
+    processList: normalizeProcessList(item.processList),
   }
 }
 
@@ -805,6 +848,44 @@ export async function loadTodoDetail(
   }
 
   return todo
+}
+
+export async function createTodoProcess(todoId: string, todoProcess: string) {
+  const content = todoProcess.trim()
+  if (!content) {
+    throw new Error('进展内容不能为空')
+  }
+
+  return requestSmartTodoData<string | number>(
+    {
+      method: 'POST',
+      url: '/smart-todo/process',
+      data: {
+        todoId: Number(todoId) || todoId,
+        todoProcess: content,
+      },
+    },
+    '新增待办进展失败',
+  )
+}
+
+export async function updateTodoProcess(processId: string, todoProcess: string) {
+  const content = todoProcess.trim()
+  if (!content) {
+    throw new Error('进展内容不能为空')
+  }
+
+  return requestSmartTodoData<boolean>(
+    {
+      method: 'PUT',
+      url: '/smart-todo/process',
+      data: {
+        processId: Number(processId) || processId,
+        todoProcess: content,
+      },
+    },
+    '编辑待办进展失败',
+  )
 }
 
 export async function createTodo(payload: CalendarTodoDraft) {

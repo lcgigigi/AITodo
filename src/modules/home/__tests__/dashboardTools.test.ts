@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { dashboardTools, homePanelTools, toDashboardToolTarget } from '../dashboard/config/dashboardTools'
+import {
+  dashboardTools,
+  homePanelTools,
+  prependManagerDashboardTool,
+  toDashboardToolTarget,
+} from '../dashboard/config/dashboardTools'
 
 describe('dashboardTools catalog', () => {
   it('uses the same display names for shared tools in both docks', () => {
@@ -27,5 +32,18 @@ describe('dashboardTools catalog', () => {
       externalUrl: tool.externalUrl,
       isMore: tool.isMore,
     })
+  })
+
+  it('prepends the manager dashboard only when its URL is available', () => {
+    expect(prependManagerDashboardTool(homePanelTools, '   ')).toBe(homePanelTools)
+
+    const tools = prependManagerDashboardTool(homePanelTools, ' https://example.com/dashboard ')
+
+    expect(tools[0]).toMatchObject({
+      id: 'manager-dashboard',
+      name: '领导者看板',
+      externalUrl: 'https://example.com/dashboard',
+    })
+    expect(tools.slice(1)).toEqual(homePanelTools)
   })
 })

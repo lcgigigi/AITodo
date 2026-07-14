@@ -1,10 +1,13 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import {
   homePanelTools,
+  prependManagerDashboardTool,
   type DashboardTool,
   type DashboardToolTarget,
   toDashboardToolTarget,
 } from '@/modules/home/dashboard/config/dashboardTools'
+import { useUserStore } from '@/stores/user.store'
 
 defineOptions({
   name: 'HomePanelToolDock',
@@ -14,6 +17,11 @@ const emit = defineEmits<{
   select: [payload: DashboardToolTarget]
 }>()
 
+const userStore = useUserStore()
+const visibleTools = computed(() =>
+  prependManagerDashboardTool(homePanelTools, userStore.managerDashboardUrl),
+)
+
 function selectTool(tool: DashboardTool) {
   emit('select', toDashboardToolTarget(tool))
 }
@@ -22,7 +30,7 @@ function selectTool(tool: DashboardTool) {
 <template>
   <nav class="home-panel-tool-dock" aria-label="AI 工具">
     <button
-      v-for="tool in homePanelTools"
+      v-for="tool in visibleTools"
       :key="tool.id"
       class="home-panel-tool-item"
       :class="`tone-${tool.tone}`"

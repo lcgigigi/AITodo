@@ -68,11 +68,13 @@ import {
 import {
   acceptTodos,
   createTodo as serviceCreateTodo,
+  createTodoProcess,
   deleteTodo as serviceDeleteTodo,
   getTodoMonthRange,
   getTodoWeekRange,
   loadTodoDetail,
   rejectTodo,
+  updateTodoProcess,
   updateTodo as serviceUpdateTodo,
 } from './services/todo.service'
 import { useDashboardTodos } from './composables/useDashboardTodos'
@@ -111,6 +113,8 @@ const pendingActionProcessing = ref(false)
 const panelTodoOpenSource = ref<TodoOpenSource>('calendar')
 const deleteActionProcessing = ref(false)
 const listDeleteActionProcessing = ref(false)
+const processSubmitting = ref(false)
+const processComposeResetKey = ref(0)
 const quickCreatePrompt = ref('')
 const homeQuickTodoText = ref('')
 const quickCreateKey = ref(0)
@@ -211,6 +215,7 @@ const panelTaskDetail = computed(() => {
   return buildTodoDetailPanelViewModel(
     resolveCalendarEventDetail(taskDetails.value, task),
     currentUser.value,
+    assignableUsers.value,
   )
 })
 const isPanelDetailLoading = computed(() =>
@@ -465,6 +470,40 @@ async function loadPanelTaskDetail(task: CalendarEvent, options?: { silent?: boo
     force: true,
     silent: options?.silent,
   })
+}
+
+async function handleSubmitTodoProcess(payload: { todoId: string; todoProcess: string }) {
+  const task = activePanelTask.value
+  if (!task || processSubmitting.value) return
+
+  processSubmitting.value = true
+  try {
+    await createTodoProcess(payload.todoId, payload.todoProcess)
+    processComposeResetKey.value += 1
+    showToast('进展已提交', 'success')
+    await loadPanelTaskDetail(task)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '提交进展失败', 'error')
+  } finally {
+    processSubmitting.value = false
+  }
+}
+
+async function handleUpdateTodoProcess(payload: { processId: string; todoProcess: string }) {
+  const task = activePanelTask.value
+  if (!task || processSubmitting.value) return
+
+  processSubmitting.value = true
+  try {
+    await updateTodoProcess(payload.processId, payload.todoProcess)
+    processComposeResetKey.value += 1
+    showToast('进展已更新', 'success')
+    await loadPanelTaskDetail(task)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '更新进展失败', 'error')
+  } finally {
+    processSubmitting.value = false
+  }
 }
 
 async function refreshCalendarTodos() {
@@ -1030,7 +1069,11 @@ defineExpose({
             v-if="homePanelMode === 'view' && activePanelTask"
             :panel="panelTaskDetail"
             :loading="isPanelDetailLoading"
+            :process-submitting="processSubmitting"
+            :process-compose-reset-key="processComposeResetKey"
             @close="closeDayPreview"
+            @submit-process="handleSubmitTodoProcess"
+            @update-process="handleUpdateTodoProcess"
           >
             <template v-if="showPanelDetailFooter" #footer>
               <div

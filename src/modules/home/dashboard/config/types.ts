@@ -8,6 +8,15 @@ export type SmartTodoKind = 1 | 2
 
 export type CalendarSpecialDayType = 'holiday' | 'workday' | 'solar-term'
 
+export interface TodoProcess {
+  processId: string
+  todoId: string
+  todoProcess: string
+  creatorId: string
+  createTime: string
+  updateTime: string
+}
+
 export interface CalendarEvent {
   id: string
   date: string
@@ -37,6 +46,9 @@ export interface CalendarEvent {
   handlerIds?: string
   content?: string
   remark?: string
+  fid?: string
+  lastProcess?: string
+  processList?: TodoProcess[]
   /** 详情接口返回的子待办，用于展示各接受人的执行状态 */
   childTodos?: CalendarEvent[]
 }

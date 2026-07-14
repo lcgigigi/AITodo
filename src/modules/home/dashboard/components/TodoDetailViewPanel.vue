@@ -4,15 +4,20 @@ import IconTag from '~icons/lucide/tag'
 import IconUser from '~icons/lucide/user'
 import IconUserCheck from '~icons/lucide/user-check'
 import IconX from '~icons/lucide/x'
+import TodoProcessSection from './TodoProcessSection.vue'
 import type { TodoDetailPanelViewModel } from '../helpers/todoDetailPanel.helpers'
 
 defineProps<{
   panel: TodoDetailPanelViewModel | null
   loading?: boolean
+  processSubmitting?: boolean
+  processComposeResetKey?: number
 }>()
 
 const emit = defineEmits<{
   close: []
+  submitProcess: [payload: { todoId: string; todoProcess: string }]
+  updateProcess: [payload: { processId: string; todoProcess: string }]
 }>()
 </script>
 
@@ -125,10 +130,39 @@ const emit = defineEmits<{
                   {{ item.statusLabel }}
                 </span>
               </div>
-              <p v-if="item.note" class="detail-assignee-progress-note">{{ item.note }}</p>
+              <p v-if="item.note" class="detail-assignee-progress-note is-rejected">{{ item.note }}</p>
+              <ul
+                v-if="item.processHistory?.length"
+                class="detail-assignee-process-history"
+                :aria-label="`${item.name}的进展记录`"
+              >
+                <li
+                  v-for="history in item.processHistory"
+                  :key="history.processId"
+                  class="detail-assignee-process-history-item"
+                >
+                  <time :datetime="history.createTime">{{ history.createTime }}</time>
+                  <p>{{ history.todoProcess }}</p>
+                </li>
+              </ul>
+              <p
+                v-else-if="item.lastProcess"
+                class="detail-assignee-progress-note is-process"
+              >
+                最新进展：{{ item.lastProcess }}
+              </p>
             </li>
           </ul>
         </section>
+
+        <TodoProcessSection
+          v-if="panel.processSection"
+          :section="panel.processSection"
+          :submitting="processSubmitting"
+          :compose-reset-key="processComposeResetKey"
+          @submit="emit('submitProcess', $event)"
+          @update="emit('updateProcess', $event)"
+        />
       </template>
     </div>
 
@@ -379,8 +413,8 @@ const emit = defineEmits<{
   min-width: 0;
   padding: 14px;
   border-radius: 15px;
-  background: rgba(255, 255, 255, 0.58);
-  border: 1px solid rgba(255, 255, 255, 0.78);
+  background: rgba(244, 245, 247, 0.96);
+  border: 1px solid rgba(220, 223, 228, 0.92);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
@@ -482,6 +516,46 @@ const emit = defineEmits<{
   color: #64748b;
   font-size: 12px;
   line-height: 1.5;
+}
+
+.detail-assignee-progress-note.is-rejected {
+  color: #b91c1c;
+}
+
+.detail-assignee-progress-note.is-process {
+  color: #1d4fbf;
+}
+
+.detail-assignee-process-history {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-assignee-process-history-item {
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(239, 246, 255, 0.88);
+  border: 1px solid rgba(191, 219, 254, 0.72);
+}
+
+.detail-assignee-process-history-item time {
+  display: block;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.detail-assignee-process-history-item p {
+  margin: 4px 0 0;
+  color: #1e3a8a;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .detail-panel-footer {

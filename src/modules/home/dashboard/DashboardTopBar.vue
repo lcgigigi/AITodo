@@ -84,6 +84,7 @@ const displayName = computed(() => userStore.profile?.name ?? '刘美华')
 const department = computed(() => userStore.profile?.department ?? '信息技术部')
 const avatarUrl = computed(() => userStore.profile?.avatar ?? DEFAULT_USER_AVATAR)
 const isAdminUser = computed(() => userStore.isAdmin)
+const hasTokensPower = computed(() => userStore.hasTokensPower)
 
 const hasContextualNav = computed(() => Boolean(props.pageTitle?.trim()) && !props.embedded)
 
@@ -367,7 +368,12 @@ onBeforeUnmount(() => {
       <img class="brand-logo" :src="homeCardLogoImage" alt="" />
       <span class="brand-title">AI辅助办公</span>
     </div>
-    <div v-else class="brand-block" :class="{ 'is-embedded': props.embedded }" aria-label="AI辅助办公">
+    <div
+      v-else
+      class="brand-block"
+      :class="{ 'is-embedded': props.embedded }"
+      aria-label="AI辅助办公"
+    >
       <img class="brand-logo" :src="homeCardLogoImage" alt="" />
       <span class="brand-title">AI辅助办公</span>
     </div>
@@ -442,7 +448,11 @@ onBeforeUnmount(() => {
                 <em>长文时间线，适合细读回看</em>
               </span>
             </button>
-            <button type="button" class="work-report-menu-item is-featured" @click="openWorkReportStory">
+            <button
+              type="button"
+              class="work-report-menu-item is-featured"
+              @click="openWorkReportStory"
+            >
               <IconSparkles aria-hidden="true" />
               <span>
                 <strong>版本二 · 分镜回顾</strong>
@@ -499,7 +509,12 @@ onBeforeUnmount(() => {
                 <IconRefreshCw aria-hidden="true" :class="{ 'is-spinning': isSyncingCalendar }" />
                 <span>{{ isSyncingCalendar ? '同步中…' : '同步邮箱日程' }}</span>
               </button>
-              <button type="button" class="settings-menu-item" @click="openLeaderBoard">
+              <button
+                v-if="hasTokensPower"
+                type="button"
+                class="settings-menu-item"
+                @click="openLeaderBoard"
+              >
                 <IconLayoutDashboard aria-hidden="true" />
                 <span>Token看板</span>
               </button>
@@ -580,7 +595,10 @@ onBeforeUnmount(() => {
       :view-mode="props.viewMode"
     />
     <EmployeeWorkReportDialog v-model:open="isWorkReportClassicOpen" :display-name="displayName" />
-    <EmployeeWorkReportStoryDialog v-model:open="isWorkReportStoryOpen" :display-name="displayName" />
+    <EmployeeWorkReportStoryDialog
+      v-model:open="isWorkReportStoryOpen"
+      :display-name="displayName"
+    />
   </header>
 </template>
 

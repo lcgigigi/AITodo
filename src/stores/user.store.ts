@@ -16,6 +16,8 @@ export interface UserProfile {
   teamMemberIds?: string[]
   roles?: string[]
   permissions?: string[]
+  tokensPower?: boolean
+  managerDashboardUrl?: string
   isSecurityPassword?: 'yes' | 'no'
   checkEmail?: string | null
 }
@@ -32,6 +34,8 @@ export const useUserStore = defineStore('user', {
   getters: {
     isLoggedIn: (state) => Boolean(state.token),
     isAdmin: (state) => state.profile?.roles?.includes('admin') ?? false,
+    hasTokensPower: (state) => state.profile?.tokensPower === true,
+    managerDashboardUrl: (state) => state.profile?.managerDashboardUrl?.trim() || '',
   },
   actions: {
     setToken(token: string) {

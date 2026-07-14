@@ -3,6 +3,7 @@ import type { Component } from 'vue'
 import IconCompass from '~icons/lucide/compass'
 import dmfzIcon from '@/assets/dmfz.png'
 import hyjyIcon from '@/assets/hyjy.png'
+import leaderIcon from '@/assets/leader.png'
 import lbbwIcon from '@/assets/lbbw.png'
 import mszxIcon from '@/assets/mszx.png'
 import pptIcon from '@/assets/ppt.png'
@@ -11,6 +12,7 @@ import ztgfIcon from '@/assets/ztgf.png'
 import { agentLaunchUrls, openUrlInNewTab } from '@/modules/agent-center/links'
 
 export type DashboardToolId =
+  | 'manager-dashboard'
   | 'image-analysis'
   | 'policy-qa'
   | 'meeting-notes'
@@ -38,6 +40,12 @@ export type DashboardToolTarget = Pick<
 >
 
 const dashboardToolCatalog: Record<DashboardToolId, DashboardTool> = {
+  'manager-dashboard': {
+    id: 'manager-dashboard',
+    name: '领导者看板',
+    iconSrc: leaderIcon,
+    tone: 'blue',
+  },
   'image-analysis': {
     id: 'image-analysis',
     name: '图文分析',
@@ -121,6 +129,22 @@ function pickDashboardTools(ids: DashboardToolId[]) {
 
 export const homePanelTools = pickDashboardTools(HOME_PANEL_TOOL_IDS)
 export const dashboardTools = pickDashboardTools(DASHBOARD_TOOL_IDS)
+
+export function prependManagerDashboardTool(
+  tools: readonly DashboardTool[],
+  managerDashboardUrl?: string,
+) {
+  const externalUrl = managerDashboardUrl?.trim()
+  if (!externalUrl) return tools
+
+  return [
+    {
+      ...dashboardToolCatalog['manager-dashboard'],
+      externalUrl,
+    },
+    ...tools,
+  ]
+}
 
 export function toDashboardToolTarget(tool: DashboardTool): DashboardToolTarget {
   return {

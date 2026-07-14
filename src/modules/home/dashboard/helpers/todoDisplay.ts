@@ -372,12 +372,15 @@ export function shouldShowTodoAssignerField(event: CalendarEvent) {
   return !isSelfAssignedTodo(event)
 }
 
-export function getTodoAssigneeDisplayName(event: CalendarEvent) {
-  return event.assigneeName || event.owner || '未指定'
-}
-
 export function getTodoHandlerDisplayName(event: CalendarEvent) {
   return event.handlerName || event.currentHandlerId || '未指定'
+}
+
+export function getTodoAssigneeDisplayName(event: CalendarEvent) {
+  const handlerName = getTodoHandlerDisplayName(event)
+  if (handlerName !== '未指定') return handlerName
+
+  return event.assigneeName || event.owner || '未指定'
 }
 
 export function getTodoContentDisplay(event: CalendarEvent) {

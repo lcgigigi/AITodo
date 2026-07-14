@@ -1,4 +1,6 @@
 import type { AgentCatalogItem, AgentCategory, SkillCatalogItem, SkillCategory } from './types'
+import dwIcon from '@/assets/dw.png'
+import zcIcon from '@/assets/zc.png'
 import { agentLaunchUrls } from './links'
 
 export const agentCategories: AgentCategory[] = ['文字', '办公', '创作', '研发', '生活']
@@ -104,6 +106,34 @@ export const agents: AgentCatalogItem[] = [
     level: 'L1',
     scenarios: ['面试安排', '候选人管理', '招聘协同'],
     launchUrl: agentLaunchUrls['interview-center'],
+  },
+  {
+    id: 'agent-party-affairs',
+    key: 'party-affairs',
+    name: '党务工作智能体',
+    description: '辅助党务工作材料撰写、规范查询与日常工作问答。',
+    category: '办公',
+    icon: '党',
+    iconSrc: dwIcon,
+    theme: 'orange',
+    permissionState: 'available',
+    level: 'L1',
+    scenarios: ['党务材料撰写', '工作规范查询', '日常党务问答'],
+    launchUrl: agentLaunchUrls['party-affairs'],
+  },
+  {
+    id: 'agent-policy-consulting',
+    key: 'policy-consulting',
+    name: '政策咨询智能体',
+    description: '提供政策内容查询、要点解读与相关咨询辅助。',
+    category: '文字',
+    icon: '政',
+    iconSrc: zcIcon,
+    theme: 'blue',
+    permissionState: 'available',
+    level: 'L1',
+    scenarios: ['政策查询', '政策解读', '咨询问答'],
+    launchUrl: agentLaunchUrls['policy-consulting'],
   },
 ]
 

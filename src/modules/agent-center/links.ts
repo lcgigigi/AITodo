@@ -7,6 +7,8 @@ export const agentLaunchUrls = {
   'code-assistant': 'http://10.8.7.57:5500/aicode',
   'compliance-assistant': 'http://10.8.7.57:5500/inspection',
   'agent-workshop': 'http://10.8.7.57:5500/agent/center',
+  'party-affairs': 'http://10.8.2.21:5500/agent/chat/new?agentId=17',
+  'policy-consulting': 'http://10.8.2.21:5500/agent/chat/new?agentId=19',
 } as const
 
 export function openUrlInNewTab(url: string) {
