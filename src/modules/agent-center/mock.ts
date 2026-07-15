@@ -1,6 +1,6 @@
 import type { AgentCatalogItem, AgentCategory, SkillCatalogItem, SkillCategory } from './types'
-import dwIcon from '@/assets/dw.png'
-import zcIcon from '@/assets/zc.png'
+import dwIcon from '@/assets/dw.webp'
+import zcIcon from '@/assets/zc.webp'
 import { agentLaunchUrls } from './links'
 
 export const agentCategories: AgentCategory[] = ['文字', '办公', '创作', '研发', '生活']

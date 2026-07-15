@@ -352,7 +352,7 @@ function renderTrendChart() {
   chart.setOption(
     {
       animationDuration: 820,
-      grid: { top: 34, right: 28, bottom: 34, left: 54 },
+      grid: { top: 48, right: 28, bottom: 34, left: 54 },
       color: ['#126fff'],
       tooltip: {
         trigger: 'axis',
@@ -405,7 +405,23 @@ function renderTrendChart() {
           type: 'line',
           data: dataset.total,
           smooth: false,
-          symbol: 'none',
+          symbol: 'circle',
+          symbolSize: 7,
+          itemStyle: {
+            color: '#126fff',
+            borderColor: '#ffffff',
+            borderWidth: 2,
+          },
+          label: {
+            show: true,
+            position: 'top',
+            distance: 8,
+            formatter: (params: { value: number }) => formatTokenCompact(Number(params.value)),
+            color: '#126fff',
+            fontSize: 12,
+            fontWeight: 700,
+            fontFamily: chartTextStyle.fontFamily,
+          },
           lineStyle: { width: 3, color: '#126fff' },
           areaStyle: { color: makeAreaGradient('rgba(18, 111, 255, 0.2)') },
           markLine: {
@@ -582,7 +598,7 @@ onBeforeUnmount(() => {
       <header class="leader-topbar">
         <div class="title-stack">
           <h1>
-            <span>Token 使用Token看板</span>
+            <span>Token看板</span>
             <IconSparkles aria-hidden="true" />
           </h1>
           <p>全局视角 · 实时洞察 · 智能决策</p>
@@ -1256,6 +1272,7 @@ onBeforeUnmount(() => {
 .department-table th:nth-child(4),
 .department-table td:nth-child(4) {
   width: 94px;
+  text-align: center;
 }
 
 .rank-pill {

@@ -3,7 +3,7 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import Icons from 'unplugin-icons/vite'
 
-const smartTodoApiTarget = 'http://192.168.0.210:8066'
+const smartTodoApiTarget = 'http://223.244.82.97:18086'
 
 export default defineConfig({
   plugins: [

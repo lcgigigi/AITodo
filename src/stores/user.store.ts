@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import defaultUserAvatar from '@/assets/touxiang.png'
+import defaultUserAvatar from '@/assets/touxiang.webp'
 import { storage } from '@/shared/utils/storage'
 
 const TOKEN_STORAGE_KEY = 'ai-workbench:user-token'

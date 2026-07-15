@@ -1,14 +1,14 @@
 import type { Router } from 'vue-router'
 import type { Component } from 'vue'
 import IconCompass from '~icons/lucide/compass'
-import dmfzIcon from '@/assets/dmfz.png'
+import dmfzIcon from '@/assets/dmfz.webp'
 import hyjyIcon from '@/assets/hyjy.png'
-import leaderIcon from '@/assets/leader.png'
+import leaderIcon from '@/assets/leader.webp'
 import lbbwIcon from '@/assets/lbbw.png'
 import mszxIcon from '@/assets/mszx.png'
 import pptIcon from '@/assets/ppt.png'
 import twfxIcon from '@/assets/twfx.png'
-import ztgfIcon from '@/assets/ztgf.png'
+import ztgfIcon from '@/assets/ztgf.webp'
 import { agentLaunchUrls, openUrlInNewTab } from '@/modules/agent-center/links'
 
 export type DashboardToolId =

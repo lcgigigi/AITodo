@@ -9,7 +9,7 @@ import IconShieldCheck from '~icons/lucide/shield-check'
 import IconTrendingDown from '~icons/lucide/trending-down'
 import IconTrendingUp from '~icons/lucide/trending-up'
 import IconX from '~icons/lucide/x'
-import agentBgUrl from '@/assets/agentbg.png'
+import agentBgUrl from '@/assets/agentbg.webp'
 import DashboardTopBar from '@/modules/home/dashboard/DashboardTopBar.vue'
 import SimpleTodoListPanel from '@/modules/home/dashboard/components/SimpleTodoListPanel.vue'
 import {
@@ -216,12 +216,13 @@ function renderUsageTrendChart() {
   const labels = timeline.map((point) => point.label)
   const values = timeline.map((point) => point.value)
   const peakIndex = values.length ? values.indexOf(Math.max(...values)) : -1
+  const maxTrendValue = values.length ? Math.max(...values) : 0
 
   chart.setOption(
     {
       animationDuration: 620,
       textStyle: chartTextStyle,
-      grid: { top: 12, right: 12, bottom: 24, left: 40 },
+      grid: { top: 30, right: 12, bottom: 24, left: 40 },
       tooltip: {
         trigger: 'axis',
         confine: true,
@@ -242,10 +243,12 @@ function renderUsageTrendChart() {
         data: labels,
         axisTick: { show: false },
         axisLine: { lineStyle: { color: '#d9e2ef', width: 1.4 } },
-        axisLabel: { ...chartTextStyle, fontSize: 13, fontWeight: 500 },
+        axisLabel: { ...chartTextStyle, fontSize: 14, fontWeight: 500 },
       },
       yAxis: {
         type: 'value',
+        min: 0,
+        max: maxTrendValue > 0 ? Math.ceil(maxTrendValue * 1.18) : undefined,
         splitNumber: 5,
         axisLine: { show: false },
         axisTick: { show: false },
@@ -281,6 +284,7 @@ function renderUsageTrendChart() {
           markLine: {
             silent: true,
             symbol: 'none',
+            label: { show: false },
             lineStyle: {
               color: 'rgba(69, 126, 224, 0.24)',
               width: 3,
@@ -295,7 +299,15 @@ function renderUsageTrendChart() {
               borderColor: '#ffffff',
               borderWidth: 5,
             },
-            label: { show: false },
+            label: {
+              show: peakIndex >= 0,
+              position: 'top',
+              distance: 8,
+              color: '#2e7bff',
+              fontSize: 12,
+              fontWeight: 700,
+              formatter: () => formatTokenNumber(values[peakIndex] ?? 0),
+            },
             data:
               peakIndex >= 0
                 ? [{ name: '峰值', coord: [labels[peakIndex], values[peakIndex]] }]
@@ -523,13 +535,6 @@ watch(selectedTokenPeriodCode, () => {
             />
 
             <template v-else>
-              <div class="token-usage-metrics">
-                <div class="token-metric">
-                  <span>总消耗</span>
-                  <strong>{{ formatTokenNumber(tokenTotalConsumption) }} Token</strong>
-                </div>
-              </div>
-
               <div
                 ref="usageTrendChartRef"
                 class="token-usage-chart"
@@ -537,10 +542,16 @@ watch(selectedTokenPeriodCode, () => {
               />
 
               <footer class="token-usage-footer">
-                <p>
-                  今日消耗
-                  <strong>{{ formatTokenNumber(tokenTodayConsumption) }} Token</strong>
-                </p>
+                <div class="token-usage-footer-stats">
+                  <p>
+                    总消耗
+                    <strong>{{ formatTokenNumber(tokenTotalConsumption) }} Token</strong>
+                  </p>
+                  <p>
+                    今日消耗
+                    <strong>{{ formatTokenNumber(tokenTodayConsumption) }} Token</strong>
+                  </p>
+                </div>
                 <p class="token-day-change" :class="tokenDayChangeIsDown ? 'is-down' : 'is-up'">
                   较昨日
                   <component
@@ -827,6 +838,43 @@ watch(selectedTokenPeriodCode, () => {
   height: 100%;
 }
 
+.agent-center-shell :deep(.simple-todo-stat-copy > span) {
+  font-size: 12px;
+}
+
+.agent-center-shell :deep(.simple-todo-stat-copy strong) {
+  font-size: 19px;
+}
+
+.agent-center-shell :deep(.simple-todo-item-title) {
+  font-size: 15px;
+}
+
+.agent-center-shell :deep(.simple-todo-item-remark) {
+  font-size: 14px;
+}
+
+.agent-center-shell :deep(.simple-todo-item-time) {
+  font-size: 15px;
+}
+
+.agent-center-shell :deep(.simple-todo-type-tag),
+.agent-center-shell :deep(.simple-todo-status-tag) {
+  font-size: 12px;
+}
+
+.agent-center-shell :deep(.app-state-block.is-sm .app-state-block__copy h3) {
+  font-size: 14px;
+}
+
+.agent-center-shell :deep(.app-state-block.is-sm .app-state-block__copy p) {
+  font-size: 13px;
+}
+
+.agent-center-shell :deep(.app-state-block__actions button) {
+  font-size: 15px;
+}
+
 .token-usage-card {
   display: flex;
   min-width: 0;
@@ -859,7 +907,7 @@ watch(selectedTokenPeriodCode, () => {
 
 .token-usage-title h2 {
   margin: 0;
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 900;
   line-height: 1.2;
 }
@@ -886,7 +934,7 @@ watch(selectedTokenPeriodCode, () => {
   box-shadow: 0 6px 15px rgba(69, 101, 148, 0.08);
   color: #475569;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   outline: none;
   padding: 0 34px 0 12px;
@@ -912,36 +960,11 @@ watch(selectedTokenPeriodCode, () => {
   margin-top: 16px;
 }
 
-.token-usage-metrics {
-  display: flex;
-  gap: 24px;
-  margin-top: 14px;
-}
-
-.token-metric {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.token-metric span {
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.token-metric strong {
-  color: #0f172a;
-  font-size: 22px;
-  font-weight: 900;
-  line-height: 1.1;
-}
-
 .token-usage-chart {
   flex: 1;
   width: 100%;
   min-height: 150px;
-  margin-top: 4px;
+  margin-top: 12px;
 }
 
 .token-usage-footer {
@@ -954,19 +977,26 @@ watch(selectedTokenPeriodCode, () => {
   padding-top: 12px;
 }
 
+.token-usage-footer-stats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px 20px;
+}
+
 .token-usage-footer p {
   display: flex;
   align-items: center;
   gap: 6px;
   margin: 0;
   color: #475569;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
 }
 
 .token-usage-footer strong {
   color: #0f172a;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 900;
 }
 
@@ -1023,14 +1053,14 @@ watch(selectedTokenPeriodCode, () => {
 .agent-catalog-heading h2 {
   margin: 0;
   color: #172033;
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 900;
   line-height: 1.2;
 }
 
 .agent-catalog-count {
   color: #64748b;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -1061,7 +1091,7 @@ watch(selectedTokenPeriodCode, () => {
   box-shadow: 0 6px 15px rgba(69, 101, 148, 0.08);
   color: #172033;
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 650;
   outline: none;
   padding: 0 36px;
@@ -1161,7 +1191,7 @@ watch(selectedTokenPeriodCode, () => {
   border-radius: 999px;
   display: inline-flex;
   align-items: center;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 900;
   line-height: 1;
   letter-spacing: 0.04em;
@@ -1225,7 +1255,7 @@ watch(selectedTokenPeriodCode, () => {
 }
 
 .agent-card-icon-text {
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 800;
   line-height: 1;
 }
@@ -1298,7 +1328,7 @@ watch(selectedTokenPeriodCode, () => {
 .agent-card h2 {
   margin: 0;
   color: #0f172a;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 900;
   line-height: 1.25;
 }
@@ -1310,7 +1340,7 @@ watch(selectedTokenPeriodCode, () => {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   color: #64748b;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   line-height: 1.52;
 }
@@ -1319,7 +1349,7 @@ watch(selectedTokenPeriodCode, () => {
   display: inline-flex;
   margin-top: 10px;
   color: #126cff;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 800;
 }
 
@@ -1336,7 +1366,7 @@ watch(selectedTokenPeriodCode, () => {
   border-radius: 7px;
   background: #edf5ff;
   color: #42628d;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   line-height: 1;
   padding: 0 8px;
@@ -1352,7 +1382,7 @@ watch(selectedTokenPeriodCode, () => {
   background: #0f1a2f;
   box-shadow: 0 14px 32px rgba(15, 26, 47, 0.18);
   color: #ffffff;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 700;
   padding: 9px 17px;
 }
@@ -1384,14 +1414,14 @@ watch(selectedTokenPeriodCode, () => {
 .agent-detail-panel header p {
   margin: 0 0 8px;
   color: #126cff;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 900;
 }
 
 .agent-detail-panel header h2 {
   margin: 0;
   color: #101827;
-  font-size: 24px;
+  font-size: 25px;
   font-weight: 900;
 }
 
@@ -1414,7 +1444,7 @@ watch(selectedTokenPeriodCode, () => {
 .detail-description {
   margin: 18px 0 22px;
   color: #405d86;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   line-height: 1.7;
 }
@@ -1422,7 +1452,7 @@ watch(selectedTokenPeriodCode, () => {
 .agent-detail-panel h3 {
   margin: 0 0 12px;
   color: #101827;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 900;
 }
 
@@ -1443,7 +1473,7 @@ watch(selectedTokenPeriodCode, () => {
 .detail-primary {
   height: 38px;
   border-radius: 999px;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 800;
   padding: 0 17px;
 }
@@ -1556,6 +1586,10 @@ watch(selectedTokenPeriodCode, () => {
   .token-usage-footer {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .token-usage-footer-stats {
+    width: 100%;
   }
 
   .agent-catalog-toolbar {
