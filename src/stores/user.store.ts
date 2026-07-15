@@ -20,6 +20,7 @@ export interface UserProfile {
   managerDashboardUrl?: string
   isSecurityPassword?: 'yes' | 'no'
   checkEmail?: string | null
+  usedFeatureCodes?: string[]
 }
 
 function normalizeUserProfile(profile: UserProfile | null) {
@@ -52,6 +53,17 @@ export const useUserStore = defineStore('user', {
       this.profile = {
         ...this.profile,
         checkEmail,
+      }
+      storage.set(PROFILE_STORAGE_KEY, this.profile)
+    },
+    markFeatureUsed(featureCode: string) {
+      if (!this.profile || !featureCode.trim()) return
+
+      this.profile = {
+        ...this.profile,
+        usedFeatureCodes: Array.from(
+          new Set([...(this.profile.usedFeatureCodes ?? []), featureCode.trim()]),
+        ),
       }
       storage.set(PROFILE_STORAGE_KEY, this.profile)
     },

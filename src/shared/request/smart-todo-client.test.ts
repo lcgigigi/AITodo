@@ -14,6 +14,19 @@ describe('smart todo response helpers', () => {
     ).toThrow('业务失败')
   })
 
+  it('uses the fallback instead of exposing technical backend details', () => {
+    expect(() =>
+      unwrapSmartTodoResponse(
+        {
+          code: 500,
+          msg: "java.sql.SQLSyntaxErrorException: Unknown column 'u.smart_mode' in 'field list'",
+          data: null,
+        },
+        '加载数据失败',
+      ),
+    ).toThrow('加载数据失败')
+  })
+
   it('rejects explicit unsuccessful responses', () => {
     expect(() =>
       unwrapSmartTodoResponse({ success: false, message: '操作失败' }, '请求失败'),

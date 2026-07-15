@@ -97,7 +97,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: 'switch-mode', mode: 'simple' | 'detail'): void
-  (event: 'start-onboarding'): void
   (event: 'open-email-provider'): void
   (event: 'update:selectedDate', date: string): void
 }>()
@@ -1221,7 +1220,6 @@ defineExpose({
           :portal-target="homeMainPanelRef"
           @calendar-refresh="refreshTodos"
           @open-todo="openTodoFromNotification"
-          @start-onboarding="emit('start-onboarding')"
           @switch-mode="emit('switch-mode', $event)"
           @open-email-provider="emit('open-email-provider')"
         />

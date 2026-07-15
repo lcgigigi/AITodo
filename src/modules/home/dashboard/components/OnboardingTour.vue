@@ -51,6 +51,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   'request-view-mode': [mode: DashboardViewMode]
+  finished: []
 }>()
 
 const CARD_WIDTH = 380
@@ -200,7 +201,7 @@ const steps: TourStep[] = [
     eyebrow: '体验反馈',
     title: '用「悄悄说」随时留下问题和建议',
     description: '使用中遇到问题、有功能建议或想补充细节，都可以从顶部入口快速反馈。',
-    action: '导览到这里就完成了，之后可在设置菜单里随时重新打开。',
+    action: '导览到这里就完成了，点击「开始使用」进入工作台。',
     accent: '#ec4899',
     spotlightPadding: 4,
     spotlightRadius: 14,
@@ -521,7 +522,7 @@ function startTour() {
   enterCurrentStep(true)
 }
 
-function finishTour() {
+function finishTour(notifyFinished = false) {
   if (!isOpen.value) return
 
   stepSequence += 1
@@ -532,6 +533,8 @@ function finishTour() {
   if (findTourTarget('notification-panel')) findTourTarget('notifications')?.click()
   isOpen.value = false
 
+  if (notifyFinished) emit('finished')
+
   void nextTick(() => {
     if (previousFocus && document.contains(previousFocus)) previousFocus.focus()
     previousFocus = null
@@ -539,12 +542,12 @@ function finishTour() {
 }
 
 function skipTour() {
-  finishTour()
+  finishTour(true)
 }
 
 function nextStep() {
   if (isLastStep.value) {
-    finishTour()
+    finishTour(true)
     return
   }
 

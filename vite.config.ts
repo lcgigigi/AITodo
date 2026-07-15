@@ -36,6 +36,10 @@ export default defineConfig({
         target: smartTodoApiTarget,
         changeOrigin: true,
       },
+      '/user-feature-status': {
+        target: smartTodoApiTarget,
+        changeOrigin: true,
+      },
       '/logout': {
         target: smartTodoApiTarget,
         changeOrigin: true,

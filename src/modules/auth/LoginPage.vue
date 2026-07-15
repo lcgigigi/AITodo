@@ -14,6 +14,7 @@ import { APP_TITLE } from '@/shared/constants/app'
 import { useUserStore } from '@/stores/user.store'
 import { loadCurrentUser, loginSmartTodo } from '@/modules/auth/services/auth.service'
 import { getDesktopAuthRequest } from './desktop-auth'
+import { getLoginErrorMessage } from './login-error'
 
 const route = useRoute()
 const router = useRouter()
@@ -122,6 +123,7 @@ async function submitLogin() {
   }
 
   isLoading.value = true
+  let hasAppliedToken = false
 
   try {
     const token = await loginSmartTodo({
@@ -129,6 +131,7 @@ async function submitLogin() {
       password: form.password,
     })
     userStore.setToken(token)
+    hasAppliedToken = true
 
     const profile = await loadCurrentUser({ silent: true })
     userStore.setProfile(profile)
@@ -157,7 +160,10 @@ async function submitLogin() {
 
     await enterWebWorkbench()
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '登录失败，请稍后再试'
+    if (hasAppliedToken) {
+      userStore.logout()
+    }
+    errorMessage.value = getLoginErrorMessage(error)
     triggerShake()
   } finally {
     isLoading.value = false

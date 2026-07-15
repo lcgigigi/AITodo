@@ -1,5 +1,6 @@
 import type { AxiosError, AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 import { useUserStore } from '@/stores/user.store'
+import { getSafeBackendMessage } from './backend-message'
 import { getErrorMessage } from './error-code'
 import { notifyRequestError } from './feedback'
 import { RequestError } from './request-error'
@@ -14,10 +15,10 @@ type BusinessErrorPayload = {
 
 function getBusinessErrorMessage(result: BusinessErrorPayload) {
   const message = result.msg || result.message
-  if (typeof message === 'string' && message.trim()) return message.trim()
-
   const code = typeof result.code === 'number' ? result.code : undefined
-  return getErrorMessage(code, '请求失败')
+  const fallback = getErrorMessage(code, '请求失败，请稍后再试')
+
+  return getSafeBackendMessage(message, fallback)
 }
 
 function rejectBusinessError(

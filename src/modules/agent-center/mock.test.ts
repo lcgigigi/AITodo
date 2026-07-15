@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { agentLaunchUrls } from './links'
-import { getAgentByKey } from './mock'
+import { agents, getAgentByKey } from './mock'
 
 describe('agent center catalog', () => {
+  it('only exposes L1 agents and omits the agent workshop entry', () => {
+    expect(agents.every((agent) => agent.level === 'L1')).toBe(true)
+    expect(getAgentByKey('agent-workshop')).toBeUndefined()
+  })
+
   it.each([
     ['party-affairs', '党务工作智能体', 'http://10.8.2.21:5500/agent/chat/new?agentId=17'],
     ['policy-consulting', '政策咨询智能体', 'http://10.8.2.21:5500/agent/chat/new?agentId=19'],

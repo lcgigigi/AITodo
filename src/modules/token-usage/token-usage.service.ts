@@ -1,4 +1,5 @@
 import { httpClient } from '@/shared/request/http'
+import { getSafeBackendMessage } from '@/shared/request/backend-message'
 import {
   type TokenUsageDateRange,
   type TokenUsageDailyPoint,
@@ -149,7 +150,7 @@ export interface AdminTokenUsageDashboard {
 }
 
 function getResponseMessage(response: TokenUsageResponse, fallbackMessage: string) {
-  return response.msg || response.message || fallbackMessage
+  return getSafeBackendMessage(response.msg || response.message, fallbackMessage)
 }
 
 function unwrapTokenUsageResponse<T>(response: TokenUsageResponse<T>, fallbackMessage: string): T {

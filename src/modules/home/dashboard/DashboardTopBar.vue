@@ -32,7 +32,6 @@ const emit = defineEmits<{
   'calendar-refresh': []
   'open-todo': [payload: { id: string; date?: string; source?: TodoOpenSource }]
   'open-email-provider': []
-  'start-onboarding': []
   'switch-mode': [mode: 'simple' | 'detail']
   'select-tool': [payload: DashboardToolTarget]
 }>()
@@ -219,17 +218,6 @@ async function syncCalendarFromEmail() {
   } finally {
     isSyncingCalendar.value = false
   }
-}
-
-function openOnboardingTour() {
-  closeNotificationPanel()
-  closeUserMenu()
-  closeSettingsMenu()
-  closeWorkReportMenu()
-  isSuggestionBoxOpen.value = false
-  isWorkReportClassicOpen.value = false
-  isWorkReportStoryOpen.value = false
-  emit('start-onboarding')
 }
 
 function openLeaderBoard() {
@@ -468,17 +456,6 @@ onBeforeUnmount(() => {
           </section>
         </Transition>
       </div>
-      <button
-        v-if="!props.embedded"
-        class="icon-button"
-        type="button"
-        aria-label="打开新手引导"
-        title="打开新手引导"
-        @click="openOnboardingTour"
-      >
-        <IconSparkles />
-      </button>
-
       <div ref="settingsMenuWrapRef" class="settings-menu-wrap">
         <button
           class="icon-button"
@@ -532,15 +509,6 @@ onBeforeUnmount(() => {
               >
                 <IconMailbox aria-hidden="true" />
                 <span>心声收件箱</span>
-              </button>
-              <button
-                v-if="props.embedded"
-                type="button"
-                class="settings-menu-item"
-                @click="openOnboardingTour"
-              >
-                <IconSparkles aria-hidden="true" />
-                <span>新手导览</span>
               </button>
               <button
                 v-if="props.embedded"

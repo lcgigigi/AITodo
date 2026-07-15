@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import { useRouter } from 'vue-router'
 import IconBuilding2 from '~icons/lucide/building-2'
@@ -23,6 +23,7 @@ import { useHomeClock } from './dashboard/composables/useHomeClock'
 import type { TodoOpenSource } from './dashboard/config/types'
 import { ymd } from './dashboard/helpers/todoDisplay'
 import { dispatchDashboardOnboardingTourStart } from './dashboard/helpers/onboardingTour'
+import { markUserFeatureUsed, USER_GUIDE_FEATURE_CODE } from '@/modules/auth/services/auth.service'
 import {
   selectEmailProvider as submitEmailProvider,
   type SmartTodoEmailProvider,
@@ -95,6 +96,9 @@ const selectedEmailProvider = ref<SmartTodoEmailProvider | ''>('')
 const isEmailProviderSaving = ref(false)
 const emailProviderGateSkipped = ref(sessionStorage.getItem(EMAIL_PROVIDER_SKIP_KEY) === '1')
 const emailProviderGateForcedOpen = ref(false)
+const isDashboardMounted = ref(false)
+const onboardingStartedForUserId = ref('')
+const isSavingOnboardingStatus = ref(false)
 const userStore = useUserStore()
 const feedbackStore = useFeedbackStore()
 const dashboardTodosStore = useDashboardTodosStore()
@@ -120,15 +124,20 @@ const shouldShowEmailProviderGate = computed(() => {
   return !emailProviderGateSkipped.value
 })
 
+const shouldAutoStartOnboarding = computed(
+  () =>
+    isDashboardMounted.value &&
+    userStore.isLoggedIn &&
+    Boolean(userStore.profile?.id) &&
+    !userStore.profile?.usedFeatureCodes?.includes(USER_GUIDE_FEATURE_CODE) &&
+    !shouldShowEmailProviderGate.value,
+)
+
 function handleCalendarRefresh() {
   void dashboardTodosStore.reloadCurrentRange()
 }
 
-async function handleOpenTodo(payload: {
-  id: string
-  date?: string
-  source?: TodoOpenSource
-}) {
+async function handleOpenTodo(payload: { id: string; date?: string; source?: TodoOpenSource }) {
   if (homeViewMode.value === 'detail') {
     await detailedDashboardWorkspaceRef.value?.openTodoFromNotification(payload)
     return
@@ -145,6 +154,45 @@ async function startOnboardingTour() {
 
   dispatchDashboardOnboardingTourStart()
 }
+
+async function saveOnboardingStatus() {
+  if (
+    isSavingOnboardingStatus.value ||
+    userStore.profile?.usedFeatureCodes?.includes(USER_GUIDE_FEATURE_CODE)
+  ) {
+    return
+  }
+
+  isSavingOnboardingStatus.value = true
+
+  try {
+    await markUserFeatureUsed(USER_GUIDE_FEATURE_CODE, {
+      version: 'v1',
+      remark: '已完成或关闭用户导览',
+    })
+    userStore.markFeatureUsed(USER_GUIDE_FEATURE_CODE)
+  } catch (error) {
+    feedbackStore.error(error instanceof Error ? error.message : '新手导览状态保存失败')
+  } finally {
+    isSavingOnboardingStatus.value = false
+  }
+}
+
+watch(
+  [shouldAutoStartOnboarding, () => userStore.profile?.id],
+  async ([shouldStart, userId]) => {
+    if (!shouldStart || !userId || onboardingStartedForUserId.value === userId) return
+
+    onboardingStartedForUserId.value = userId
+    await nextTick()
+    await startOnboardingTour()
+  },
+  { flush: 'post' },
+)
+
+onMounted(() => {
+  isDashboardMounted.value = true
+})
 
 function setHomeViewMode(mode: HomeViewMode) {
   homeViewMode.value = mode
@@ -205,7 +253,6 @@ function openEmailProviderGate() {
         view-mode="detail"
         @calendar-refresh="handleCalendarRefresh"
         @open-todo="handleOpenTodo"
-        @start-onboarding="startOnboardingTour"
         @select-tool="handleTopbarToolSelect"
         @switch-mode="setHomeViewMode"
         @open-email-provider="openEmailProviderGate"
@@ -217,7 +264,6 @@ function openEmailProviderGate() {
             ref="calendarWorkspaceRef"
             v-model:selected-date="sharedSelectedDate"
             @switch-mode="setHomeViewMode"
-            @start-onboarding="startOnboardingTour"
             @open-email-provider="openEmailProviderGate"
           />
           <DetailedDashboardWorkspace
@@ -232,6 +278,7 @@ function openEmailProviderGate() {
 
     <OnboardingTour
       :enabled="userStore.isLoggedIn && !shouldShowEmailProviderGate"
+      @finished="saveOnboardingStatus"
       @request-view-mode="setHomeViewMode"
     />
 

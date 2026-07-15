@@ -38,6 +38,33 @@ describe('request errors', () => {
     })
   })
 
+  it('replaces technical business errors before they reach pages or global feedback', async () => {
+    const instance = axios.create()
+    setupInterceptors(instance)
+
+    const request = instance.request({
+      url: '/test',
+      showError: false,
+      adapter: async (config) => ({
+        config,
+        data: {
+          code: 500,
+          msg: "### Error querying database. Cause: Unknown column 'u.smart_mode'",
+          traceId: 'trace-database',
+        },
+        headers: {},
+        status: 200,
+        statusText: 'OK',
+      }),
+    })
+
+    await expect(request).rejects.toMatchObject({
+      message: '服务异常，请稍后再试',
+      code: 500,
+      traceId: 'trace-database',
+    })
+  })
+
   it('preserves the HTTP status and original Axios error', async () => {
     const instance = axios.create()
     setupInterceptors(instance)

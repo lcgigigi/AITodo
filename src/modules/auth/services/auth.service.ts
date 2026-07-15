@@ -31,6 +31,7 @@ interface SmartTodoInfoPayload {
   tokensPower?: boolean
   managerDashboardUrl?: string | null
   checkEmail?: string | null
+  usedFeatureCodes?: string[]
 }
 
 interface SmartTodoInfoResponse extends SmartTodoResponse<SmartTodoInfoPayload> {
@@ -40,6 +41,7 @@ interface SmartTodoInfoResponse extends SmartTodoResponse<SmartTodoInfoPayload> 
   tokensPower?: boolean
   managerDashboardUrl?: string | null
   checkEmail?: string | null
+  usedFeatureCodes?: string[]
 }
 
 export interface SmartTodoLoginCredentials {
@@ -54,12 +56,28 @@ export interface SmartTodoCurrentUser extends CalendarUser {
   managerDashboardUrl?: string
   isSecurityPassword?: 'yes' | 'no'
   checkEmail?: string | null
+  usedFeatureCodes: string[]
 }
 
 export type SmartTodoEmailProvider = 'outlook' | 'coremail'
 
+export const USER_GUIDE_FEATURE_CODE = 'user_guide_init'
+
 function resolveRole(roles: string[] = []): CalendarUser['role'] {
   return roles.some((role) => ['admin', 'leader'].includes(role)) ? 'leader' : 'employee'
+}
+
+function normalizeFeatureCodes(value: unknown) {
+  if (!Array.isArray(value)) return []
+
+  return Array.from(
+    new Set(
+      value
+        .filter((featureCode): featureCode is string => typeof featureCode === 'string')
+        .map((featureCode) => featureCode.trim())
+        .filter(Boolean),
+    ),
+  )
 }
 
 export async function loginSmartTodo(credentials: SmartTodoLoginCredentials = {}) {
@@ -119,6 +137,7 @@ export async function loadCurrentUser(options?: {
   const roles = info.roles ?? []
   const id = user.userName || toId(user.userId)
   const checkEmail = getOptionalText(user.checkEmail) || getOptionalText(info.checkEmail)
+  const usedFeatureCodes = normalizeFeatureCodes(info.usedFeatureCodes ?? result.usedFeatureCodes)
 
   return {
     id,
@@ -132,7 +151,36 @@ export async function loadCurrentUser(options?: {
     managerDashboardUrl: getOptionalText(info.managerDashboardUrl),
     isSecurityPassword: user.isSecurityPassword,
     checkEmail,
+    usedFeatureCodes,
   }
+}
+
+export async function markUserFeatureUsed(
+  featureCode: string,
+  options: { version?: string; remark?: string } = {},
+) {
+  const response = await httpClient.post<SmartTodoResponse<boolean>>(
+    '/user-feature-status/mark-used',
+    {
+      featureCode,
+      ...options,
+    },
+    {
+      timeout: SMART_TODO_REQUEST_TIMEOUT,
+      showError: false,
+    },
+  )
+  const result = response.data
+
+  if (typeof result.code === 'number' && result.code !== 200) {
+    throw new Error(getResponseMessage(result, '保存用户功能状态失败'))
+  }
+
+  if (result.success === false || result.data === false) {
+    throw new Error(getResponseMessage(result, '保存用户功能状态失败'))
+  }
+
+  return true
 }
 
 export async function selectEmailProvider(provider: SmartTodoEmailProvider) {

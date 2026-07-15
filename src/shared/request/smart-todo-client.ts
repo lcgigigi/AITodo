@@ -9,6 +9,8 @@
  * 供 auth 认证服务与 home 待办服务共同复用，避免二者相互依赖。
  */
 
+import { getSafeBackendMessage } from './backend-message'
+
 export const SMART_TODO_REQUEST_TIMEOUT = 60_000
 
 export interface SmartTodoResponse<T = unknown> {
@@ -21,7 +23,7 @@ export interface SmartTodoResponse<T = unknown> {
 }
 
 export function getResponseMessage(response: SmartTodoResponse, fallbackMessage: string) {
-  return response.msg || response.message || fallbackMessage
+  return getSafeBackendMessage(response.msg || response.message, fallbackMessage)
 }
 
 export function unwrapSmartTodoResponse<T>(
