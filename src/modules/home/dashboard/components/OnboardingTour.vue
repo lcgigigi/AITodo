@@ -12,17 +12,21 @@ import {
 } from '@/modules/home/dashboard/helpers/onboardingTour'
 
 type TourAnchor = 'left' | 'right' | 'top' | 'bottom' | 'center'
+type DashboardViewMode = 'simple' | 'detail'
 
 type TourStep = {
   target: string
   fallbackTarget?: string
   openTarget?: string
+  placement?: TourAnchor
+  viewMode?: DashboardViewMode
   eyebrow: string
   title: string
   description: string
   action: string
   accent: string
   closeDayPreview?: boolean
+  closeNotificationPanel?: boolean
   spotlightPadding?: number
   spotlightRadius?: number
 }
@@ -45,8 +49,12 @@ const props = withDefaults(
   },
 )
 
+const emit = defineEmits<{
+  'request-view-mode': [mode: DashboardViewMode]
+}>()
+
 const CARD_WIDTH = 380
-const CARD_HEIGHT = 392
+const CARD_ESTIMATED_HEIGHT = 360
 const VIEWPORT_PADDING = 16
 
 const steps: TourStep[] = [
@@ -58,99 +66,61 @@ const steps: TourStep[] = [
       '问候、模式切换、本周日期、今日统计和待办列表都集中在这张卡片里，点日期或统计卡就能打开当天详情。',
     action: '从这里判断今天先处理什么，避免在多个入口之间来回找。',
     accent: '#2f7cff',
+    placement: 'center',
     spotlightPadding: 0,
     spotlightRadius: 24,
   },
   {
-    target: 'dashboard-topbar',
+    target: 'home-calendar',
     fallbackTarget: 'today-panel',
-    eyebrow: '工作台头部',
-    title: '个人信息和模式切换在卡片顶部',
-    description: '总览视角下，问候语、部门、视角切换和通知入口都整合在卡片里，背景更干净。',
-    action: '需要全量复盘时，点顶栏展开图标切换到深度工作台。',
+    eyebrow: '日期导航',
+    title: '先选中你要处理的一天',
+    description: '顶部周日历可以前后切换周次，日期下方的色点会提示当天是否有待办或会议。',
+    action: '点击日期后，下方统计和列表会同步切换。',
     accent: '#2563eb',
-    spotlightPadding: 8,
+    spotlightPadding: 4,
+    spotlightRadius: 16,
+  },
+  {
+    target: 'home-todo-overview',
+    fallbackTarget: 'today-panel',
+    eyebrow: '待办总览',
+    title: '统计、筛选和待办列表在同一区域',
+    description: '可以按全部、待办、会议以及派发关系快速筛选；点击待办查看详情，也可直接标记完成。',
+    action: '先用统计缩小范围，再在列表里集中处理。',
+    accent: '#8b5cf6',
+    spotlightPadding: 0,
     spotlightRadius: 18,
   },
   {
-    target: 'add-todo',
-    fallbackTarget: 'quick-create',
-    eyebrow: '创建入口',
-    title: '列表底部统一两种创建方式',
-    description: '「完整创建」适合手动填写负责人、时间、备注；输入框适合一句话快速预填后再确认。',
-    action: '下一步会自动打开完整创建卡片，只展示流程，不会帮你保存任何待办。',
-    accent: '#2f7cff',
+    target: 'quick-create',
+    fallbackTarget: 'home-todo-overview',
+    eyebrow: '快速创建',
+    title: '一句话创建，或进入完整表单',
+    description: '直接输入一句待办后回车，系统会先预填创建卡片；需要精确设置时，点「完整创建」。',
+    action: '下一步会自动打开创建卡片，不会保存数据。',
+    accent: '#10b981',
     spotlightPadding: 4,
-    spotlightRadius: 12,
+    spotlightRadius: 14,
   },
   {
     target: 'todo-create-panel',
     fallbackTarget: 'today-panel',
     openTarget: 'add-todo',
     eyebrow: '创建卡片',
-    title: '这是新增待办后的编辑卡片',
-    description: '打开后可以在同一张卡片里补齐智能解析、事项类型、日期时间、负责人和备注。',
-    action: '卡片是临时编辑态，取消或关闭都不会产生新数据。',
+    title: '在一张卡片里补齐所有关键信息',
+    description: '可先用 AI 解析自然语言，再确认事项类型、日期时间、负责人、内容和备注。',
+    action: '导览只展示编辑流程；离开这一步时会关闭草稿，不会自动保存。',
     accent: '#2f7cff',
     spotlightPadding: 0,
-    spotlightRadius: 26,
-  },
-  {
-    target: 'todo-ai-parser',
-    fallbackTarget: 'todo-create-panel',
-    openTarget: 'add-todo',
-    eyebrow: 'AI 解析',
-    title: '先用一句话让系统预填',
-    description: '输入自然语言后点 AI 解析，标题、日期、时间、负责人等字段会尽量自动落到表单里。',
-    action: '适合从聊天、会议或口头安排里快速生成待办草稿。',
-    accent: '#10b981',
-    spotlightPadding: 0,
-    spotlightRadius: 16,
-  },
-  {
-    target: 'todo-detail-fields',
-    fallbackTarget: 'todo-create-panel',
-    openTarget: 'add-todo',
-    eyebrow: '细节确认',
-    title: '这里确认待办的关键字段',
-    description:
-      '事项类型、时间模式、日期时间、负责人、内容和备注都在这一段，AI 解析后也可以手动修正。',
-    action: '保存前建议扫一遍这块，确保责任人和时间没有偏差。',
-    accent: '#8b5cf6',
-    spotlightPadding: 0,
-    spotlightRadius: 16,
-  },
-  {
-    target: 'todo-save-actions',
-    fallbackTarget: 'todo-create-panel',
-    openTarget: 'add-todo',
-    eyebrow: '保存动作',
-    title: '最后在这里保存或取消',
-    description: '确认内容无误后点保存；如果只是试了一下流程，点取消就能回到工作台。',
-    action: '引导不会自动点击保存，避免产生脏数据。',
-    accent: '#f59e0b',
-    spotlightPadding: 2,
-    spotlightRadius: 14,
-  },
-  {
-    target: 'quick-create',
-    fallbackTarget: 'today-panel',
-    eyebrow: '快速入口',
-    title: '一句话也能快速创建',
-    description: '在输入框描述待办后按 Enter，系统会先预填创建卡片，确认无误后再保存。',
-    action: '「完整创建」和「快速创建」都在列表底部，位置和文案两种模式一致。',
-    accent: '#10b981',
-    closeDayPreview: true,
-    spotlightPadding: 4,
-    spotlightRadius: 12,
+    spotlightRadius: 24,
   },
   {
     target: 'tool-dock',
     fallbackTarget: 'today-panel',
     eyebrow: '工具坞',
     title: '常用 AI 能力在卡片底部',
-    description:
-      '图文分析、会议纪要、智能PPT 和更多智能体都放在今日待办卡片底部，点击后直接进入对应工具。',
+    description: '力宝百问、图文分析、会议纪要、智能 PPT 和更多工具都放在工作台底部。',
     action: '把它当成工作台的快捷启动器，少走菜单层级。',
     accent: '#f59e0b',
     closeDayPreview: true,
@@ -160,6 +130,7 @@ const steps: TourStep[] = [
   {
     target: 'detail-mode',
     fallbackTarget: 'today-panel',
+    viewMode: 'simple',
     eyebrow: '深度工作台',
     title: '需要全量复盘时切换深度工作台',
     description:
@@ -171,8 +142,23 @@ const steps: TourStep[] = [
     spotlightRadius: 12,
   },
   {
+    target: 'detail-workspace',
+    viewMode: 'detail',
+    placement: 'center',
+    eyebrow: '详细模式',
+    title: '这就是展开后的深度工作台',
+    description:
+      '左侧用月历或周历选择日期，右侧会展示当天待办，并可按类型、状态和派发关系进一步筛选。',
+    action: '适合集中复盘、跨日查看和批量整理；下一步会自动回到总览。',
+    accent: '#ef4444',
+    closeDayPreview: true,
+    spotlightPadding: 0,
+    spotlightRadius: 22,
+  },
+  {
     target: 'notifications',
     fallbackTarget: 'today-panel',
+    viewMode: 'simple',
     eyebrow: '协作提醒',
     title: '消息中心会收住协作变更',
     description: '别人派发给你的待办、站内消息和会议通知会在这里聚合，未读数会主动提示。',
@@ -187,27 +173,37 @@ const steps: TourStep[] = [
     fallbackTarget: 'notifications',
     openTarget: 'notifications',
     eyebrow: '消息弹层',
-    title: '点击铃铛后会打开消息中心',
-    description: '待办通知、会议提醒和系统消息都会汇总在这里，弹层出现时不会离开当前工作台。',
-    action: '下一步会继续看列表里的处理方式。',
+    title: '消息中心会在当前工作台内展开',
+    description:
+      '可在「待处理」和「全部」之间筛选；派发给你的待办可直接接受或拒绝，其他消息也可标记已读。',
+    action: '处理完后可留在当前页面，不需要来回跳转。',
     accent: '#06b6d4',
     closeDayPreview: true,
     spotlightPadding: 0,
     spotlightRadius: 22,
   },
   {
-    target: 'notification-list',
-    fallbackTarget: 'notification-panel',
-    openTarget: 'notifications',
-    eyebrow: '消息收件箱',
-    title: '所有通知都汇总在一个列表里',
-    description:
-      '别人派发给你的待办会直接出现在这里，待接受时可接受或拒绝；可跳转的消息点击卡片查看详情，未读消息可标记已读，已读消息可在列表中删除。',
-    action: '这里是协作入口，日常建议先用「待处理」筛一遍。',
-    accent: '#06b6d4',
-    closeDayPreview: true,
-    spotlightPadding: 0,
-    spotlightRadius: 16,
+    target: 'work-report',
+    fallbackTarget: 'dashboard-topbar',
+    eyebrow: '工作回顾',
+    title: '从日常待办中直接生成工作总结',
+    description: '「工作总结」提供经典阅读和分镜回顾两种呈现方式，适合不同的回看场景。',
+    action: '需要周报、阶段复盘或年终回顾时，从这里开始。',
+    accent: '#7c3aed',
+    closeNotificationPanel: true,
+    spotlightPadding: 4,
+    spotlightRadius: 14,
+  },
+  {
+    target: 'suggestion-entry',
+    fallbackTarget: 'dashboard-topbar',
+    eyebrow: '体验反馈',
+    title: '用「悄悄说」随时留下问题和建议',
+    description: '使用中遇到问题、有功能建议或想补充细节，都可以从顶部入口快速反馈。',
+    action: '导览到这里就完成了，之后可在设置菜单里随时重新打开。',
+    accent: '#ec4899',
+    spotlightPadding: 4,
+    spotlightRadius: 14,
   },
 ]
 
@@ -230,6 +226,9 @@ const cardPosition = ref({
 
 let positionFrame = 0
 let previousFocus: HTMLElement | null = null
+let positionResizeObserver: ResizeObserver | null = null
+let stepSequence = 0
+const delayedPositionTimers = new Set<number>()
 
 const currentStep = computed(() => steps[stepIndex.value])
 const isFirstStep = computed(() => stepIndex.value === 0)
@@ -289,8 +288,16 @@ function findStepTarget(step: TourStep) {
 }
 
 function prepareStep(step: TourStep) {
+  if (step.viewMode) {
+    emit('request-view-mode', step.viewMode)
+  }
+
   if (step.closeDayPreview) {
     dispatchDashboardOnboardingTourCloseDayPreview()
+  }
+
+  if (step.closeNotificationPanel && findTourTarget('notification-panel')) {
+    findTourTarget('notifications')?.click()
   }
 
   if (!step.openTarget || findTourTarget(step.target)) return
@@ -298,13 +305,23 @@ function prepareStep(step: TourStep) {
   findTourTarget(step.openTarget)?.click()
 }
 
-function calculateCardPosition(targetRect: DOMRect | null) {
+function getDialogSize() {
+  const rect = dialogRef.value?.getBoundingClientRect()
+
+  return {
+    width: rect?.width || CARD_WIDTH,
+    height: rect?.height || CARD_ESTIMATED_HEIGHT,
+  }
+}
+
+function calculateCardPosition(targetRect: DOMRect | null, placement?: TourAnchor) {
   const viewportWidth = window.innerWidth
   const viewportHeight = window.innerHeight
-  const cardWidth = Math.min(CARD_WIDTH, viewportWidth - VIEWPORT_PADDING * 2)
-  const cardHeight = Math.min(CARD_HEIGHT, viewportHeight - VIEWPORT_PADDING * 2)
+  const dialogSize = getDialogSize()
+  const cardWidth = Math.min(dialogSize.width, viewportWidth - VIEWPORT_PADDING * 2)
+  const cardHeight = Math.min(dialogSize.height, viewportHeight - VIEWPORT_PADDING * 2)
 
-  if (!targetRect) {
+  if (!targetRect || placement === 'center') {
     return {
       top: Math.max(VIEWPORT_PADDING, (viewportHeight - cardHeight) / 2),
       left: Math.max(VIEWPORT_PADDING, (viewportWidth - cardWidth) / 2),
@@ -312,31 +329,64 @@ function calculateCardPosition(targetRect: DOMRect | null) {
     }
   }
 
-  const gap = 32
-  let anchor: TourAnchor = 'left'
-  let left = targetRect.right + gap
-  let top = targetRect.top + (targetRect.height - cardHeight) / 2
+  const gap = 28
+  const candidates = [
+    {
+      anchor: 'left' as TourAnchor,
+      top: targetRect.top + (targetRect.height - cardHeight) / 2,
+      left: targetRect.right + gap,
+    },
+    {
+      anchor: 'right' as TourAnchor,
+      top: targetRect.top + (targetRect.height - cardHeight) / 2,
+      left: targetRect.left - cardWidth - gap,
+    },
+    {
+      anchor: 'top' as TourAnchor,
+      top: targetRect.bottom + gap,
+      left: targetRect.left + (targetRect.width - cardWidth) / 2,
+    },
+    {
+      anchor: 'bottom' as TourAnchor,
+      top: targetRect.top - cardHeight - gap,
+      left: targetRect.left + (targetRect.width - cardWidth) / 2,
+    },
+  ]
 
-  if (left + cardWidth > viewportWidth - VIEWPORT_PADDING) {
-    left = targetRect.left - cardWidth - gap
-    anchor = 'right'
+  if (placement) {
+    candidates.sort((a, b) => Number(b.anchor === placement) - Number(a.anchor === placement))
   }
 
-  if (left < VIEWPORT_PADDING) {
-    left = targetRect.left + targetRect.width / 2 - cardWidth / 2
-    top = targetRect.bottom + gap
-    anchor = 'top'
+  const fitsViewport = (candidate: (typeof candidates)[number]) =>
+    candidate.top >= VIEWPORT_PADDING &&
+    candidate.left >= VIEWPORT_PADDING &&
+    candidate.top + cardHeight <= viewportHeight - VIEWPORT_PADDING &&
+    candidate.left + cardWidth <= viewportWidth - VIEWPORT_PADDING
+
+  const visibleArea = (candidate: (typeof candidates)[number]) => {
+    const visibleWidth = Math.max(
+      0,
+      Math.min(candidate.left + cardWidth, viewportWidth - VIEWPORT_PADDING) -
+        Math.max(candidate.left, VIEWPORT_PADDING),
+    )
+    const visibleHeight = Math.max(
+      0,
+      Math.min(candidate.top + cardHeight, viewportHeight - VIEWPORT_PADDING) -
+        Math.max(candidate.top, VIEWPORT_PADDING),
+    )
+    return visibleWidth * visibleHeight
   }
 
-  if (top + cardHeight > viewportHeight - VIEWPORT_PADDING) {
-    top = targetRect.top - cardHeight - gap
-    anchor = anchor === 'top' ? 'bottom' : anchor
-  }
+  const selected =
+    candidates.find(fitsViewport) ??
+    candidates.reduce((best, candidate) =>
+      visibleArea(candidate) > visibleArea(best) ? candidate : best,
+    )
 
   return {
-    top: clamp(top, VIEWPORT_PADDING, viewportHeight - cardHeight - VIEWPORT_PADDING),
-    left: clamp(left, VIEWPORT_PADDING, viewportWidth - cardWidth - VIEWPORT_PADDING),
-    anchor,
+    top: clamp(selected.top, VIEWPORT_PADDING, viewportHeight - cardHeight - VIEWPORT_PADDING),
+    left: clamp(selected.left, VIEWPORT_PADDING, viewportWidth - cardWidth - VIEWPORT_PADDING),
+    anchor: selected.anchor,
   }
 }
 
@@ -346,7 +396,15 @@ function updatePosition() {
   const target = findStepTarget(currentStep.value)
   const targetRect = target?.getBoundingClientRect() ?? null
 
-  if (target && targetRect) {
+  const targetIntersectsViewport = Boolean(
+    targetRect &&
+      targetRect.bottom > 8 &&
+      targetRect.right > 8 &&
+      targetRect.top < window.innerHeight - 8 &&
+      targetRect.left < window.innerWidth - 8,
+  )
+
+  if (target && targetRect && targetIntersectsViewport) {
     const padding = currentStep.value.spotlightPadding ?? (targetRect.height < 44 ? 10 : 14)
     const top = Math.max(8, targetRect.top - padding)
     const left = Math.max(8, targetRect.left - padding)
@@ -372,7 +430,7 @@ function updatePosition() {
     }
   }
 
-  cardPosition.value = calculateCardPosition(targetRect)
+  cardPosition.value = calculateCardPosition(targetRect, currentStep.value.placement)
 }
 
 function schedulePositionUpdate() {
@@ -384,8 +442,30 @@ function schedulePositionUpdate() {
   })
 }
 
+function scheduleDelayedPositionUpdate(delay: number) {
+  const timer = window.setTimeout(() => {
+    delayedPositionTimers.delete(timer)
+    schedulePositionUpdate()
+  }, delay)
+  delayedPositionTimers.add(timer)
+}
+
+function clearDelayedPositionUpdates() {
+  delayedPositionTimers.forEach((timer) => window.clearTimeout(timer))
+  delayedPositionTimers.clear()
+}
+
+function observePositionElements(target: HTMLElement | null) {
+  positionResizeObserver?.disconnect()
+  if (!positionResizeObserver) return
+
+  if (dialogRef.value) positionResizeObserver.observe(dialogRef.value)
+  if (target && target !== dialogRef.value) positionResizeObserver.observe(target)
+}
+
 function syncCurrentStep() {
   const target = findStepTarget(currentStep.value)
+  observePositionElements(target)
 
   if (target) {
     target.scrollIntoView({
@@ -396,7 +476,7 @@ function syncCurrentStep() {
   }
 
   schedulePositionUpdate()
-  window.setTimeout(schedulePositionUpdate, prefersReducedMotion() ? 0 : 260)
+  scheduleDelayedPositionUpdate(prefersReducedMotion() ? 0 : 260)
 }
 
 function focusDialog() {
@@ -412,13 +492,20 @@ function focusDialog() {
 }
 
 function enterCurrentStep(shouldFocus = false) {
-  void nextTick(() => {
+  const sequence = ++stepSequence
+  clearDelayedPositionUpdates()
+
+  void nextTick(async () => {
     prepareStep(currentStep.value)
+    await nextTick()
+    if (sequence !== stepSequence || !isOpen.value) return
+
     syncCurrentStep()
     if (shouldFocus) focusDialog()
 
-    window.setTimeout(syncCurrentStep, prefersReducedMotion() ? 0 : 180)
-    window.setTimeout(syncCurrentStep, prefersReducedMotion() ? 0 : 360)
+    scheduleDelayedPositionUpdate(prefersReducedMotion() ? 0 : 120)
+    scheduleDelayedPositionUpdate(prefersReducedMotion() ? 0 : 280)
+    scheduleDelayedPositionUpdate(prefersReducedMotion() ? 0 : 480)
   })
 }
 
@@ -426,14 +513,29 @@ function startTour() {
   if (!props.enabled) return
 
   previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  emit('request-view-mode', 'simple')
+  dispatchDashboardOnboardingTourCloseDayPreview()
+  if (findTourTarget('notification-panel')) findTourTarget('notifications')?.click()
   stepIndex.value = 0
   isOpen.value = true
   enterCurrentStep(true)
 }
 
 function finishTour() {
+  if (!isOpen.value) return
+
+  stepSequence += 1
+  clearDelayedPositionUpdates()
+  positionResizeObserver?.disconnect()
+  emit('request-view-mode', 'simple')
+  dispatchDashboardOnboardingTourCloseDayPreview()
+  if (findTourTarget('notification-panel')) findTourTarget('notifications')?.click()
   isOpen.value = false
-  previousFocus?.focus()
+
+  void nextTick(() => {
+    if (previousFocus && document.contains(previousFocus)) previousFocus.focus()
+    previousFocus = null
+  })
 }
 
 function skipTour() {
@@ -514,7 +616,7 @@ function handleStartTourEvent() {
 watch(
   () => props.enabled,
   (enabled) => {
-    if (!enabled) isOpen.value = false
+    if (!enabled) finishTour()
   },
 )
 
@@ -524,6 +626,10 @@ watch(stepIndex, () => {
 })
 
 onMounted(() => {
+  if ('ResizeObserver' in window) {
+    positionResizeObserver = new ResizeObserver(schedulePositionUpdate)
+  }
+
   window.addEventListener(DASHBOARD_ONBOARDING_TOUR_EVENT, handleStartTourEvent)
   window.addEventListener('resize', schedulePositionUpdate)
   window.addEventListener('scroll', schedulePositionUpdate, true)
@@ -531,6 +637,9 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  stepSequence += 1
+  clearDelayedPositionUpdates()
+  positionResizeObserver?.disconnect()
   if (positionFrame) window.cancelAnimationFrame(positionFrame)
   window.removeEventListener(DASHBOARD_ONBOARDING_TOUR_EVENT, handleStartTourEvent)
   window.removeEventListener('resize', schedulePositionUpdate)
@@ -542,7 +651,7 @@ onBeforeUnmount(() => {
 <template>
   <Teleport to="body">
     <Transition name="tour-layer">
-      <div v-if="isOpen" class="tour-layer" aria-live="polite">
+      <div v-if="isOpen" class="tour-layer" :class="{ 'has-spotlight': spotlight.visible }">
         <div v-if="spotlight.visible" class="tour-spotlight" :style="spotlightStyle" />
 
         <section
@@ -575,7 +684,7 @@ onBeforeUnmount(() => {
           </div>
 
           <Transition name="tour-copy" mode="out-in">
-            <div :key="currentStep.target" class="tour-copy">
+            <div :key="currentStep.target" class="tour-copy" aria-live="polite" aria-atomic="true">
               <h2 id="dashboard-tour-title">{{ currentStep.title }}</h2>
               <p id="dashboard-tour-description">{{ currentStep.description }}</p>
 
@@ -591,9 +700,10 @@ onBeforeUnmount(() => {
           <div
             class="tour-progress"
             role="progressbar"
-            :aria-valuenow="progressPercent"
-            aria-valuemin="0"
-            aria-valuemax="100"
+            :aria-valuenow="stepIndex + 1"
+            aria-valuemin="1"
+            :aria-valuemax="steps.length"
+            :aria-valuetext="`第 ${stepIndex + 1} 步，共 ${steps.length} 步`"
             aria-label="新手引导进度"
           >
             <span :style="{ width: progressWidth }" />
@@ -615,7 +725,7 @@ onBeforeUnmount(() => {
               </button>
 
               <button type="button" class="tour-primary" @click="nextStep">
-                <span>{{ isLastStep ? '完成引导' : '下一步' }}</span>
+                <span>{{ isLastStep ? '开始使用' : '下一步' }}</span>
                 <IconCheck v-if="isLastStep" aria-hidden="true" />
                 <IconArrowRight v-else aria-hidden="true" />
               </button>
@@ -632,8 +742,14 @@ onBeforeUnmount(() => {
   position: fixed;
   inset: 0;
   z-index: 140;
+  background: rgba(8, 17, 31, 0.58);
   color: #0f172a;
   pointer-events: auto;
+  transition: background 180ms ease;
+}
+
+.tour-layer.has-spotlight {
+  background: transparent;
 }
 
 .tour-spotlight {
@@ -658,6 +774,7 @@ onBeforeUnmount(() => {
 .tour-card {
   position: fixed;
   width: min(380px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
   box-sizing: border-box;
   border: 1px solid rgba(226, 232, 240, 0.86);
   border-top: 3px solid var(--tour-accent);
@@ -737,8 +854,15 @@ onBeforeUnmount(() => {
 .tour-close:focus-visible {
   background: #e2e8f0;
   color: #0f172a;
-  outline: none;
   transform: translateY(-1px);
+}
+
+.tour-close:focus-visible,
+.tour-skip:focus-visible,
+.tour-icon-button:focus-visible:not(:disabled),
+.tour-primary:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--tour-accent) 42%, #ffffff);
+  outline-offset: 2px;
 }
 
 .tour-close svg {
@@ -897,7 +1021,6 @@ onBeforeUnmount(() => {
 .tour-skip:focus-visible {
   background: #f1f5f9;
   color: #0f172a;
-  outline: none;
 }
 
 .tour-icon-button {
@@ -914,7 +1037,6 @@ onBeforeUnmount(() => {
 .tour-icon-button:hover:not(:disabled),
 .tour-icon-button:focus-visible:not(:disabled) {
   background: #e2e8f0;
-  outline: none;
 }
 
 .tour-icon-button:disabled {
@@ -947,7 +1069,6 @@ onBeforeUnmount(() => {
 
 .tour-primary:hover,
 .tour-primary:focus-visible {
-  outline: none;
   transform: translateY(-1px);
   box-shadow: 0 18px 30px -16px color-mix(in srgb, var(--tour-accent) 92%, #0f172a);
 }
@@ -1019,6 +1140,12 @@ onBeforeUnmount(() => {
 
   .tour-primary {
     width: 100%;
+  }
+}
+
+@media (max-height: 520px) {
+  .tour-card {
+    overflow-y: auto;
   }
 }
 

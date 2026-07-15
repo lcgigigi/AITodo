@@ -1226,7 +1226,7 @@ defineExpose({
           @open-email-provider="emit('open-email-provider')"
         />
 
-        <header class="home-todo-calendar-header">
+        <header class="home-todo-calendar-header" data-tour-target="home-calendar">
           <div class="home-todo-calendar-card">
             <div class="home-todo-calendar-left">
               <div class="home-week-row">
@@ -1278,7 +1278,7 @@ defineExpose({
           </div>
         </header>
 
-        <div class="home-todo-body">
+        <div class="home-todo-body" data-tour-target="home-todo-overview">
           <div
             class="home-todo-filter-row"
             :style="{ '--home-todo-filter-columns': homeTodoFilterColumns }"
@@ -2004,7 +2004,6 @@ defineExpose({
 .home-todo-item.scope-assigned_to_me {
   background: linear-gradient(90deg, rgba(255, 251, 235, 0.82), rgba(255, 255, 255, 0)), #ffffff;
 }
-
 
 .home-todo-item-leading {
   display: flex;

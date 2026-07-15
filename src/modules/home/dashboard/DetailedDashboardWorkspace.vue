@@ -1056,7 +1056,7 @@ function weekRangeLabel(anchorDate: string) {
 </script>
 
 <template>
-  <section class="detail-workspace" aria-label="首页详细模式">
+  <section class="detail-workspace" aria-label="首页详细模式" data-tour-target="detail-workspace">
     <section class="detail-board" aria-label="首页详细模式工作区">
       <section
         class="detail-calendar-panel"

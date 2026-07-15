@@ -230,7 +230,10 @@ function openEmailProviderGate() {
       </div>
     </main>
 
-    <OnboardingTour :enabled="userStore.isLoggedIn && !shouldShowEmailProviderGate" />
+    <OnboardingTour
+      :enabled="userStore.isLoggedIn && !shouldShowEmailProviderGate"
+      @request-view-mode="setHomeViewMode"
+    />
 
     <Transition name="email-provider-gate">
       <div

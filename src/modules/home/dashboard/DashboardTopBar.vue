@@ -225,6 +225,10 @@ function openOnboardingTour() {
   closeNotificationPanel()
   closeUserMenu()
   closeSettingsMenu()
+  closeWorkReportMenu()
+  isSuggestionBoxOpen.value = false
+  isWorkReportClassicOpen.value = false
+  isWorkReportStoryOpen.value = false
   emit('start-onboarding')
 }
 
@@ -403,6 +407,7 @@ onBeforeUnmount(() => {
         type="button"
         aria-label="打开体验建议箱"
         title="悄悄说 — 体验建议箱"
+        data-tour-target="suggestion-entry"
         @click="openSuggestionBox"
       >
         <span class="suggestion-entry-btn__icon" aria-hidden="true">
@@ -419,6 +424,7 @@ onBeforeUnmount(() => {
           aria-controls="dashboard-work-report-menu"
           :aria-expanded="isWorkReportMenuOpen"
           title="工作总结"
+          data-tour-target="work-report"
           @click.stop="toggleWorkReportMenu"
         >
           <IconFileText aria-hidden="true" />
@@ -526,6 +532,15 @@ onBeforeUnmount(() => {
               >
                 <IconMailbox aria-hidden="true" />
                 <span>心声收件箱</span>
+              </button>
+              <button
+                v-if="props.embedded"
+                type="button"
+                class="settings-menu-item"
+                @click="openOnboardingTour"
+              >
+                <IconSparkles aria-hidden="true" />
+                <span>新手导览</span>
               </button>
               <button
                 v-if="props.embedded"

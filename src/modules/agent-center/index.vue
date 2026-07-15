@@ -71,7 +71,6 @@ const tokenUsageError = ref('')
 const selectedTokenPeriodCode = ref<TokenUsagePeriodCode>('last7Days')
 
 const tokenPeriodOptions: TokenRangeTab[] = [
-  { label: '今日', periodCode: 'today' },
   { label: '近7天', periodCode: 'last7Days' },
   { label: '近30天', periodCode: 'last30Days' },
 ]
