@@ -7,6 +7,7 @@ import { useFeedbackStore } from '@/stores/feedback.store'
 import { useRouter } from 'vue-router'
 import CalendarMonth from './CalendarMonth.vue'
 import TodoQuickCreateBar from './components/TodoQuickCreateBar.vue'
+import TodoDetailPanelFooterActions from './components/TodoDetailPanelFooterActions.vue'
 import TodoDetailViewPanel from './components/TodoDetailViewPanel.vue'
 import DayPreviewPanel from './DayPreviewPanel.vue'
 import type { CalendarDay, CalendarEvent, CalendarTodoDraft, CalendarTodoUpdate, TodoOpenSource } from './config/types'
@@ -1375,94 +1376,30 @@ function weekRangeLabel(anchorDate: string) {
               @update-process="handleUpdateTodoProcess"
             >
             <template v-if="showDetailFooter" #footer>
-              <div
-                class="detail-panel-actions"
-                :class="{
-                  'is-pending-inbox': showPendingInboxActions,
-                  'is-completed-detail':
-                    (showDetailDeleteAction || showDetailEditAction) && !isDetailDeleteConfirming,
-                  'is-delete-confirm': isDetailDeleteConfirming,
-                }"
-              >
-                <template v-if="showPendingInboxActions">
-                  <button
-                    type="button"
-                    class="detail-action accept"
-                    :disabled="pendingActionProcessing || isActiveDetailLoading"
-                    @click="handleAcceptPendingTodo"
-                  >
-                    {{ pendingActionProcessing ? '处理中…' : '接受' }}
-                  </button>
-                  <button
-                    type="button"
-                    class="detail-action reject"
-                    :disabled="pendingActionProcessing || isActiveDetailLoading"
-                    @click="handleRejectPendingTodo"
-                  >
-                    拒绝
-                  </button>
-                </template>
-                <template v-else-if="isDetailDeleteConfirming">
-                  <span class="detail-delete-confirm">确定删除？</span>
-                  <button
-                    type="button"
-                    class="detail-action secondary"
-                    :disabled="deleteActionProcessing"
-                    @click="cancelDeleteActiveTask"
-                  >
-                    取消
-                  </button>
-                  <button
-                    type="button"
-                    class="detail-action delete"
-                    :disabled="deleteActionProcessing"
-                    @click="confirmDeleteActiveTask"
-                  >
-                    {{ deleteActionProcessing ? '删除中…' : '确认删除' }}
-                  </button>
-                </template>
-                <template v-else>
-                  <button
-                    v-if="showDetailDeleteAction"
-                    type="button"
-                    class="detail-action delete"
-                    :disabled="isActiveDetailLoading"
-                    @click="requestDeleteActiveTask"
-                  >
-                    删除
-                  </button>
-                  <button
-                    v-if="showDetailEditAction"
-                    type="button"
-                    class="detail-action secondary"
-                    :disabled="isActiveDetailLoading"
-                    @click="openTaskEdit"
-                  >
-                    编辑
-                  </button>
-                  <button
-                    v-if="activeTask"
-                    type="button"
-                    class="detail-action primary"
-                    :class="{ 'is-syncing': isTodoStatusUpdating(activeTask.id) }"
-                    :disabled="
-                      activeTask.completable === false ||
-                      isActiveDetailLoading ||
-                      isTodoStatusUpdating(activeTask.id)
-                    "
-                    :aria-busy="isTodoStatusUpdating(activeTask.id)"
-                    @click="toggleDetailTaskStatus"
-                  >
-                    {{
-                      isTodoStatusUpdating(activeTask.id)
-                        ? '处理中...'
-                        : activeTask.status === 'done'
-                          ? '恢复待处理'
-                          : '标记完成'
-                    }}
-                  </button>
-                </template>
-              </div>
+              <TodoDetailPanelFooterActions
+                :mode="
+                  showPendingInboxActions
+                    ? 'pending-inbox'
+                    : isDetailDeleteConfirming
+                      ? 'delete-confirm'
+                      : 'actions'
+                "
+                :show-delete="showDetailDeleteAction"
+                :show-edit="showDetailEditAction"
+                :is-done="activeTask?.status === 'done'"
+                :completable="activeTask?.completable !== false"
+                :loading="isActiveDetailLoading"
+                :pending-processing="pendingActionProcessing"
+                :delete-processing="deleteActionProcessing"
+                :syncing="activeTask ? isTodoStatusUpdating(activeTask.id) : false"
+                @accept="handleAcceptPendingTodo"
+                @reject="handleRejectPendingTodo"
+                @cancel-delete="cancelDeleteActiveTask"
+                @confirm-delete="confirmDeleteActiveTask"
+                @delete="requestDeleteActiveTask"
+                @edit="openTaskEdit"
+                @toggle-status="toggleDetailTaskStatus"
+              />
             </template>
             </TodoDetailViewPanel>
           </div>
@@ -1584,7 +1521,7 @@ function weekRangeLabel(anchorDate: string) {
     inset 0 1px 0 rgba(255, 255, 255, 0.82);
   backdrop-filter: blur(26px) saturate(1.18);
   -webkit-backdrop-filter: blur(26px) saturate(1.18);
-  padding: 10px;
+  padding: 6px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1622,96 +1559,14 @@ function weekRangeLabel(anchorDate: string) {
   min-height: 0;
 }
 
-.detail-panel-actions {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 10px;
+.detail-drawer-body :deep(.detail-panel-head) {
+  padding-left: 12px;
+  padding-right: 12px;
 }
 
-.detail-panel-actions.is-pending-inbox {
-  grid-template-columns: 1fr 1fr;
-}
-
-.detail-panel-actions.is-completed-detail {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 10px;
-}
-
-.detail-panel-actions.is-completed-detail .detail-action {
-  flex: 1 1 0;
-  min-width: 0;
-}
-
-.detail-panel-actions.is-delete-confirm {
-  grid-template-columns: minmax(0, 1.1fr) 1fr 1fr;
-  align-items: center;
-}
-
-.detail-delete-confirm {
-  color: #64748b;
-  font-size: 14px;
-  font-weight: 700;
-  line-height: 1.35;
-}
-
-.detail-action {
-  height: 46px;
-  border: 0;
-  border-radius: 14px;
-  font-size: 15px;
-  font-weight: 800;
-  cursor: pointer;
-  transition:
-    transform 0.18s ease,
-    box-shadow 0.18s ease,
-    opacity 0.18s ease;
-}
-
-.detail-action:hover:not(:disabled) {
-  transform: translateY(-1px);
-}
-
-.detail-action.accept {
-  color: #047857;
-  background: rgba(220, 252, 231, 0.96);
-  border: 1px solid rgba(16, 185, 129, 0.14);
-}
-
-.detail-action.reject {
-  color: #b91c1c;
-  background: rgba(254, 226, 226, 0.96);
-  border: 1px solid rgba(239, 68, 68, 0.12);
-}
-
-.detail-action.secondary {
-  color: #475569;
-  background: rgba(241, 245, 249, 0.96);
-  border: 1px solid rgba(226, 232, 240, 0.92);
-}
-
-.detail-action.delete {
-  color: #b91c1c;
-  background: rgba(254, 226, 226, 0.96);
-  border: 1px solid rgba(239, 68, 68, 0.12);
-}
-
-.detail-action.primary {
-  color: #fff;
-  background: linear-gradient(135deg, #2f72ed, #4d91ff);
-  box-shadow: 0 10px 20px rgba(52, 120, 246, 0.24);
-}
-
-.detail-action:disabled {
-  opacity: 0.48;
-  cursor: not-allowed;
-  box-shadow: none;
-  transform: none;
-}
-
-.detail-action.is-syncing:disabled {
-  opacity: 0.72;
-  cursor: wait;
+.detail-drawer-body :deep(.detail-panel-body) {
+  padding-left: 12px;
+  padding-right: 12px;
 }
 
 .detail-main-header {

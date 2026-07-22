@@ -53,6 +53,7 @@ export const agents: AgentCatalogItem[] = [
     level: 'L1',
     scenarios: ['周会纪要', '项目复盘', '行动项拆解'],
     launchUrl: agentLaunchUrls['meeting-notes'],
+    requiresToken: false,
   },
   {
     id: 'agent-ppt-creator',
@@ -93,6 +94,7 @@ export const agents: AgentCatalogItem[] = [
     level: 'L1',
     scenarios: ['面试安排', '候选人管理', '招聘协同'],
     launchUrl: agentLaunchUrls['interview-center'],
+    requiresToken: false,
   },
   {
     id: 'agent-party-affairs',

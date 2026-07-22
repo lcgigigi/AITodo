@@ -89,3 +89,47 @@ export function handlePickerPopoverOutside(
 
   close()
 }
+
+export type PickerDocumentOutsideCloseOptions = {
+  isOpen: () => boolean
+  getContentEl: () => HTMLElement | null
+  close: () => void
+  triggerSelector?: string
+}
+
+export function bindPickerDocumentOutsideClose(options: PickerDocumentOutsideCloseOptions) {
+  function handleDocumentPointerDown(event: PointerEvent) {
+    if (!options.isOpen()) return
+
+    const target = event.target
+    if (!(target instanceof Element)) return
+
+    const contentEl = options.getContentEl()
+    if (contentEl?.contains(target)) return
+
+    if (options.triggerSelector && target.closest(options.triggerSelector)) {
+      return
+    }
+
+    options.close()
+  }
+
+  document.addEventListener('pointerdown', handleDocumentPointerDown, true)
+  return () => {
+    document.removeEventListener('pointerdown', handleDocumentPointerDown, true)
+  }
+}
+
+export function handlePickerPointerDownOutside(
+  event: PickerPopoverOutsideEvent,
+  close: () => void,
+  triggerSelector: string,
+): void {
+  const target = event.target
+  if (target instanceof Element && target.closest(triggerSelector)) {
+    event.preventDefault?.()
+    return
+  }
+
+  close()
+}

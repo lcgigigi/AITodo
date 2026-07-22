@@ -19,11 +19,10 @@ import { getLoginErrorMessage } from './login-error'
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
-const loginCardRef = ref<HTMLElement | null>(null)
 
 const form = reactive({
-  username: import.meta.env.VITE_APP_TODO_USERNAME || '',
-  password: import.meta.env.VITE_APP_TODO_PASSWORD || '',
+  username: '',
+  password: '',
 })
 const isPasswordVisible = ref(false)
 const isLoading = ref(false)
@@ -31,9 +30,6 @@ const errorMessage = ref('')
 const isExiting = ref(false)
 const shakeForm = ref(false)
 const activeSignal = ref(0)
-
-const mouse = reactive({ x: 0.5, y: 0.5 })
-const cardTilt = reactive({ rx: 0 })
 
 const signalItems = ['需求识别', '任务拆解', '日程锁定', 'AI 跟进']
 
@@ -55,35 +51,6 @@ const redirectTarget = computed(() => {
 const canSubmit = computed(
   () => Boolean(form.username.trim()) && Boolean(form.password) && !isLoading.value,
 )
-
-const pageStyle = computed(() => ({
-  '--mx': `${(mouse.x - 0.5) * 28}px`,
-  '--my': `${(mouse.y - 0.5) * 18}px`,
-  '--glow-x': `${mouse.x * 100}%`,
-  '--glow-y': `${mouse.y * 100}%`,
-}))
-
-const cardTiltStyle = computed(() => ({
-  transform: `rotateX(${cardTilt.rx}deg)`,
-}))
-
-function handlePointerMove(event: PointerEvent) {
-  mouse.x = event.clientX / window.innerWidth
-  mouse.y = event.clientY / window.innerHeight
-
-  const card = loginCardRef.value
-  if (!card) return
-
-  const rect = card.getBoundingClientRect()
-  const localY = (event.clientY - rect.top) / rect.height - 0.5
-  const inside =
-    event.clientX >= rect.left &&
-    event.clientX <= rect.right &&
-    event.clientY >= rect.top &&
-    event.clientY <= rect.bottom
-
-  cardTilt.rx = inside ? -localY * 8 : -localY * 2
-}
 
 function triggerShake() {
   shakeForm.value = false
@@ -171,14 +138,12 @@ async function submitLogin() {
 }
 
 onMounted(() => {
-  window.addEventListener('pointermove', handlePointerMove, { passive: true })
   signalTimer = setInterval(() => {
     activeSignal.value = (activeSignal.value + 1) % signalItems.length
   }, 2800)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('pointermove', handlePointerMove)
   unlockPageScroll()
   if (signalTimer) clearInterval(signalTimer)
   if (shakeTimer) clearTimeout(shakeTimer)
@@ -189,7 +154,6 @@ onUnmounted(() => {
   <main
     class="login-page"
     :class="{ 'is-exiting': isExiting }"
-    :style="pageStyle"
     aria-label="登录"
   >
     <section class="visual-plane" aria-label="工作台预览">
@@ -233,9 +197,7 @@ onUnmounted(() => {
     <div class="login-float-shell">
       <div class="login-float-shadow" aria-hidden="true"></div>
       <section
-        ref="loginCardRef"
         class="login-float-card"
-        :style="cardTiltStyle"
         aria-label="登录表单"
       >
         <div class="panel-glow" aria-hidden="true"></div>
@@ -313,10 +275,6 @@ onUnmounted(() => {
 
 <style scoped>
 .login-page {
-  --mx: 0px;
-  --my: 0px;
-  --glow-x: 50%;
-  --glow-y: 50%;
   position: fixed;
   inset: 0;
   width: 100%;
@@ -365,10 +323,7 @@ onUnmounted(() => {
   height: 100%;
   object-fit: cover;
   object-position: center;
-  transform: scale(1.06) translate3d(calc(var(--mx) * 0.35), calc(var(--my) * 0.35), 0);
-  animation: image-drift 14s ease-in-out infinite alternate;
-  transition: transform 0.35s ease-out;
-  will-change: transform;
+  transform: scale(1.06);
 }
 
 .visual-overlay {
@@ -435,8 +390,6 @@ onUnmounted(() => {
   border-radius: 8px;
   pointer-events: none;
   content: '';
-  transform: translate3d(calc(var(--mx) * 0.15), calc(var(--my) * 0.15), 0);
-  transition: transform 0.35s ease-out;
 }
 
 .hero-copy {
@@ -446,8 +399,7 @@ onUnmounted(() => {
   z-index: 2;
   max-width: min(620px, calc(100vw - 580px));
   animation: rise-in 0.58s 0.08s ease-out both;
-  transform: translate3d(calc(var(--mx) * 0.2), calc(-50% + var(--my) * 0.2), 0);
-  transition: transform 0.35s ease-out;
+  transform: translateY(-50%);
 }
 
 .eyebrow {
@@ -529,9 +481,7 @@ onUnmounted(() => {
   translate: 0 -50%;
   transform: rotateX(5deg);
   transform-origin: center center;
-  animation:
-    shell-rise 0.72s 0.1s cubic-bezier(0.22, 1, 0.36, 1) both,
-    shell-float 5.5s 0.82s ease-in-out infinite;
+  animation: shell-rise 0.72s 0.1s cubic-bezier(0.22, 1, 0.36, 1) both;
   pointer-events: none;
 }
 
@@ -545,7 +495,6 @@ onUnmounted(() => {
   background: radial-gradient(ellipse, rgba(15, 23, 42, 0.28), transparent 72%);
   filter: blur(10px);
   transform: rotateX(72deg);
-  animation: shadow-pulse 5.5s ease-in-out infinite;
 }
 
 .login-float-card {
@@ -645,7 +594,7 @@ onUnmounted(() => {
   position: absolute;
   inset: -50%;
   background: radial-gradient(
-    circle at var(--glow-x) var(--glow-y),
+    circle at 50% 50%,
     rgba(37, 99, 235, 0.16),
     transparent 40%
   );
@@ -900,16 +849,6 @@ onUnmounted(() => {
   }
 }
 
-@keyframes image-drift {
-  from {
-    transform: scale(1.06) translate3d(calc(-1.5% + var(--mx) * 0.35), calc(var(--my) * 0.35), 0);
-  }
-  to {
-    transform: scale(1.1)
-      translate3d(calc(1.5% + var(--mx) * 0.35), calc(-1% + var(--my) * 0.35), 0);
-  }
-}
-
 @keyframes orb-drift {
   from {
     transform: translate3d(0, 0, 0) scale(1);
@@ -999,28 +938,6 @@ onUnmounted(() => {
   }
 }
 
-@keyframes shell-float {
-  0%,
-  100% {
-    translate: 0 calc(-50% - 4px);
-  }
-  50% {
-    translate: 0 calc(-50% - 14px);
-  }
-}
-
-@keyframes shadow-pulse {
-  0%,
-  100% {
-    opacity: 0.72;
-    transform: rotateX(72deg) scale(0.96);
-  }
-  50% {
-    opacity: 0.95;
-    transform: rotateX(72deg) scale(1.04);
-  }
-}
-
 @media (max-width: 1080px) {
   .login-page:not(.is-exiting) {
     overflow: auto;
@@ -1041,7 +958,7 @@ onUnmounted(() => {
     position: relative;
     top: auto;
     padding: 54px 0 24px;
-    transform: translate3d(calc(var(--mx) * 0.2), calc(var(--my) * 0.2), 0);
+    transform: none;
   }
 
   .hero-copy h1 {
@@ -1137,7 +1054,6 @@ onUnmounted(() => {
 
   .campus-image,
   .hero-copy,
-  .visual-plane::after,
   .login-float-card {
     transform: none;
   }

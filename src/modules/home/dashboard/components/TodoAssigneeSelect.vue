@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import IconCheck from '~icons/lucide/check'
 import IconChevronDown from '~icons/lucide/chevron-down'
 import IconSearch from '~icons/lucide/search'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
+import { searchUsers } from '../services/todo.service'
 import type { CalendarUser } from '../config/types'
 
 const props = withDefaults(
   defineProps<{
     modelValue: string | string[]
     users: CalendarUser[]
+    selectedLabels?: string
     disabled?: boolean
     highlighted?: boolean
     multiple?: boolean
@@ -22,6 +24,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   'update:modelValue': [value: string[]]
+  'update:selectedLabels': [value: string]
 }>()
 
 const open = ref(false)
@@ -29,20 +32,51 @@ const query = ref('')
 const rootRef = ref<HTMLElement | null>(null)
 const searchInputRef = ref<HTMLInputElement | null>(null)
 const popoverWidth = ref(0)
+const searchResults = ref<CalendarUser[]>([])
+const searching = ref(false)
+const searchError = ref<string | null>(null)
+const knownUsers = ref(new Map<string, CalendarUser>())
+
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+let searchRequestId = 0
 
 const selectedIds = computed(() => normalizeIds(props.modelValue))
 
 const selectedSet = computed(() => new Set(selectedIds.value))
 
-const userMap = computed(() => new Map(props.users.map((user) => [user.id, user])))
+const userMap = computed(() => {
+  const map = new Map<string, CalendarUser>()
 
-const filteredUsers = computed(() => {
-  const keyword = query.value.trim().toLowerCase()
-  if (!keyword) return props.users
+  for (const user of props.users) map.set(user.id, user)
+  for (const user of searchResults.value) map.set(user.id, user)
+  for (const user of knownUsers.value.values()) map.set(user.id, user)
 
-  return props.users.filter((user) => {
-    return user.name.toLowerCase().includes(keyword) || user.id.toLowerCase().includes(keyword)
-  })
+  return map
+})
+
+const hasSearchKeyword = computed(() => Boolean(query.value.trim()))
+
+const defaultUserIds = computed(() => new Set(props.users.map((user) => user.id)))
+
+const extraSelectedUsers = computed(() => {
+  const extras: CalendarUser[] = []
+
+  for (const id of selectedIds.value) {
+    if (defaultUserIds.value.has(id)) continue
+
+    const user = userMap.value.get(id)
+    if (user) extras.push(user)
+  }
+
+  return extras
+})
+
+const displayUsers = computed(() => {
+  if (hasSearchKeyword.value) return searchResults.value
+
+  if (extraSelectedUsers.value.length === 0) return props.users
+
+  return [...extraSelectedUsers.value, ...props.users]
 })
 
 const displayLabel = computed(() => {
@@ -57,6 +91,45 @@ const displayLabel = computed(() => {
 
 const hasSelection = computed(() => selectedIds.value.length > 0)
 
+function splitAssigneeLabels(value: string) {
+  return value
+    .split(/[、,，]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function syncKnownUsersFromLabels() {
+  const labels = props.selectedLabels?.trim()
+  if (!labels) return
+
+  const names = splitAssigneeLabels(labels)
+  if (!names.length) return
+
+  const extras: CalendarUser[] = []
+
+  for (const [index, id] of selectedIds.value.entries()) {
+    if (defaultUserIds.value.has(id)) continue
+    if (knownUsers.value.has(id)) continue
+
+    const name = names[index] ?? (names.length === 1 ? names[0] : '')
+    if (!name) continue
+
+    extras.push({ id, name, role: 'employee' })
+  }
+
+  if (extras.length) rememberUsers(extras)
+}
+
+function emitSelectedLabels(ids: string[]) {
+  if (!ids.length) return
+
+  const names = ids
+    .map((id) => userMap.value.get(id)?.name)
+    .filter((name): name is string => Boolean(name))
+
+  emit('update:selectedLabels', names.join('、'))
+}
+
 function normalizeIds(value: string | string[]) {
   if (Array.isArray(value)) return value.filter(Boolean)
   if (!value) return []
@@ -66,12 +139,53 @@ function normalizeIds(value: string | string[]) {
     .filter(Boolean)
 }
 
+function rememberUsers(users: CalendarUser[]) {
+  const next = new Map(knownUsers.value)
+  for (const user of users) next.set(user.id, user)
+  knownUsers.value = next
+}
+
 function syncPopoverWidth() {
   popoverWidth.value = rootRef.value?.getBoundingClientRect().width ?? 0
 }
 
+function resetSearchState() {
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+    searchTimer = null
+  }
+
+  searchResults.value = []
+  searching.value = false
+  searchError.value = null
+}
+
+async function runSearch(keyword: string) {
+  const requestId = ++searchRequestId
+  searching.value = true
+  searchError.value = null
+
+  try {
+    const users = await searchUsers(keyword)
+    if (requestId !== searchRequestId) return
+
+    searchResults.value = users
+    rememberUsers(users)
+  } catch {
+    if (requestId !== searchRequestId) return
+
+    searchResults.value = []
+    searchError.value = '搜索失败，请重试'
+  } finally {
+    if (requestId === searchRequestId) searching.value = false
+  }
+}
+
 function toggleUser(id: string) {
   if (props.disabled) return
+
+  const selectedUser = userMap.value.get(id)
+  if (selectedUser) rememberUsers([selectedUser])
 
   let nextIds: string[]
 
@@ -85,15 +199,52 @@ function toggleUser(id: string) {
   }
 
   emit('update:modelValue', nextIds)
+  emitSelectedLabels(nextIds)
 }
 
 function closePopover() {
   open.value = false
 }
 
+watch(
+  () => props.users,
+  (users) => {
+    rememberUsers(users)
+  },
+  { immediate: true },
+)
+
+watch(
+  () => [selectedIds.value, props.selectedLabels] as const,
+  () => {
+    syncKnownUsersFromLabels()
+  },
+  { immediate: true },
+)
+
+watch(query, (keyword) => {
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+    searchTimer = null
+  }
+
+  const trimmed = keyword.trim()
+  if (!trimmed) {
+    resetSearchState()
+    return
+  }
+
+  searching.value = true
+  searchError.value = null
+  searchTimer = setTimeout(() => {
+    void runSearch(trimmed)
+  }, 300)
+})
+
 watch(open, (isOpen) => {
   if (!isOpen) {
     query.value = ''
+    resetSearchState()
     return
   }
 
@@ -101,6 +252,10 @@ watch(open, (isOpen) => {
   nextTick(() => {
     searchInputRef.value?.focus()
   })
+})
+
+onBeforeUnmount(() => {
+  if (searchTimer) clearTimeout(searchTimer)
 })
 </script>
 
@@ -149,40 +304,77 @@ watch(open, (isOpen) => {
           <button type="button" class="assignee-cancel-btn" @click="closePopover">取消</button>
         </div>
 
-        <div
-          class="assignee-grid"
-          role="listbox"
-          aria-label="负责人列表"
-          aria-multiselectable="true"
-        >
-          <button
-            v-for="user in filteredUsers"
-            :key="user.id"
-            type="button"
-            role="option"
-            class="assignee-option"
-            :class="{ 'is-selected': selectedSet.has(user.id) }"
-            :aria-selected="selectedSet.has(user.id)"
-            @click="toggleUser(user.id)"
-          >
-            <span class="assignee-option-name">{{ user.name }}</span>
-            <IconCheck
-              v-if="selectedSet.has(user.id)"
-              class="assignee-option-check"
-              aria-hidden="true"
-            />
-          </button>
-        </div>
+        <div class="assignee-list-body">
+          <AppStateBlock
+            v-if="searching"
+            class="assignee-state"
+            type="loading"
+            title="正在搜索"
+            size="sm"
+            variant="inline"
+          />
 
-        <AppStateBlock
-          v-if="filteredUsers.length === 0"
-          class="assignee-empty"
-          type="empty"
-          title="未找到匹配人员"
-          description="换个姓名或工号继续搜索。"
-          size="sm"
-          variant="inline"
-        />
+          <AppStateBlock
+            v-else-if="searchError"
+            class="assignee-state"
+            type="error"
+            :title="searchError"
+            size="sm"
+            variant="inline"
+          />
+
+          <AppStateBlock
+            v-else-if="displayUsers.length === 0"
+            class="assignee-empty"
+            type="empty"
+            :title="hasSearchKeyword ? '未找到匹配人员' : '暂无可选负责人'"
+            :description="
+              hasSearchKeyword ? '换个姓名或工号继续搜索。' : '当前没有可分配的负责人。'
+            "
+            size="sm"
+            variant="inline"
+          />
+
+          <div
+            v-else
+            class="assignee-grid"
+            :class="{ 'is-search-mode': hasSearchKeyword }"
+            role="listbox"
+            aria-label="负责人列表"
+            aria-multiselectable="true"
+          >
+            <button
+              v-for="user in displayUsers"
+              :key="user.id"
+              type="button"
+              role="option"
+              class="assignee-option"
+              :class="{
+                'is-selected': selectedSet.has(user.id),
+                'is-search-mode': hasSearchKeyword,
+              }"
+              :aria-selected="selectedSet.has(user.id)"
+              @click="toggleUser(user.id)"
+            >
+              <span class="assignee-option-copy">
+                <span class="assignee-option-name">{{ user.name }}</span>
+                <span
+                  v-if="hasSearchKeyword && (user.department || user.id)"
+                  class="assignee-option-meta"
+                >
+                  <template v-if="user.department">{{ user.department }}</template>
+                  <template v-if="user.department && user.id"> · </template>
+                  <template v-if="user.id">{{ user.id }}</template>
+                </span>
+              </span>
+              <IconCheck
+                v-if="selectedSet.has(user.id)"
+                class="assignee-option-check"
+                aria-hidden="true"
+              />
+            </button>
+          </div>
+        </div>
 
         <div v-if="selectedIds.length > 0" class="assignee-footer">
           已选 {{ selectedIds.length }} 人
@@ -360,11 +552,21 @@ watch(open, (isOpen) => {
   color: #111827;
 }
 
+.todo-assignee-popover .assignee-list-body {
+  /* 固定 4 行高度：上下 padding 16px + 4 行 × 36px + 3 个行间距 × 4px */
+  height: 172px;
+  min-height: 172px;
+  flex-shrink: 0;
+}
+
 .todo-assignee-popover .assignee-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: 36px;
+  align-content: start;
   gap: 4px;
-  max-height: 200px;
+  height: 100%;
+  min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
   padding: 8px;
@@ -379,6 +581,12 @@ watch(open, (isOpen) => {
 .todo-assignee-popover .assignee-grid::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: #e2e8f0;
+}
+
+.todo-assignee-popover .assignee-grid.is-search-mode {
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: auto;
+  gap: 6px;
 }
 
 .todo-assignee-popover .assignee-option {
@@ -397,6 +605,24 @@ watch(open, (isOpen) => {
   transition:
     background-color 0.15s ease,
     border-color 0.15s ease;
+}
+
+.todo-assignee-popover .assignee-option.is-search-mode {
+  min-height: 48px;
+  padding: 8px 28px 8px 10px;
+  justify-content: flex-start;
+}
+
+.todo-assignee-popover .assignee-option-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.todo-assignee-popover .assignee-option.is-search-mode .assignee-option-copy {
+  align-items: flex-start;
 }
 
 .todo-assignee-popover .assignee-option:hover,
@@ -420,6 +646,22 @@ watch(open, (isOpen) => {
   text-align: center;
 }
 
+.todo-assignee-popover .assignee-option.is-search-mode .assignee-option-name {
+  text-align: left;
+  font-weight: 600;
+}
+
+.todo-assignee-popover .assignee-option-meta {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .todo-assignee-popover .assignee-option-check {
   position: absolute;
   right: 6px;
@@ -429,8 +671,17 @@ watch(open, (isOpen) => {
   color: #111827;
 }
 
+.todo-assignee-popover .assignee-state,
 .todo-assignee-popover .assignee-empty {
-  margin: 8px 0 0;
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 0 !important;
+  margin: 0;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 
 .todo-assignee-popover .assignee-footer {

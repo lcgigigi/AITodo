@@ -14,6 +14,7 @@ import { isDesktopUserMismatch } from '@/modules/auth/desktop-auth'
 import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
 import { useFeedbackStore } from '@/stores/feedback.store'
 import HomePanelToolDock from './components/HomePanelToolDock.vue'
+import TodoDetailPanelFooterActions from './components/TodoDetailPanelFooterActions.vue'
 import TodoDetailViewPanel from './components/TodoDetailViewPanel.vue'
 import TodoQuickCreateBar from './components/TodoQuickCreateBar.vue'
 import DashboardTopBar from './DashboardTopBar.vue'
@@ -123,7 +124,9 @@ const isDayPreviewFormDirty = ref(false)
 const isTodoFormSubmitting = ref(false)
 const dayPreviewPanelRef = ref<DayPreviewPanelExpose | null>(null)
 const dayPreviewEditPanelRef = ref<DayPreviewPanelExpose | null>(null)
+const dayPreviewPopoverRef = ref<HTMLElement | null>(null)
 const homeMainPanelRef = ref<HTMLElement | null>(null)
+let dayPreviewPointerStartedInPanel = false
 const calendarViewMode = ref<'month' | 'week'>('month')
 const homeTodoCategoryFilter = ref<TodoTypeFilter>('all')
 const homeTodoScopeFilter = ref<TodoScopeFilter>('all')
@@ -739,6 +742,27 @@ function closeDayPreview() {
   closePreview()
 }
 
+function handleDayPreviewPointerDown() {
+  dayPreviewPointerStartedInPanel = true
+}
+
+function handleWorkspacePointerDown(event: PointerEvent) {
+  const panel = dayPreviewPopoverRef.value
+  if (panel?.contains(event.target as Node)) return
+  dayPreviewPointerStartedInPanel = false
+}
+
+function handleWorkspaceClick() {
+  if (!isDayPreviewOpen.value) return
+
+  if (dayPreviewPointerStartedInPanel) {
+    dayPreviewPointerStartedInPanel = false
+    return
+  }
+
+  closeDayPreview()
+}
+
 function handleTourCloseDayPreview() {
   if (!isDayPreviewOpen.value) return
   closeDayPreview()
@@ -1035,7 +1059,7 @@ defineExpose({
 </script>
 
 <template>
-  <div class="calendar-workspace" @click="closeDayPreview">
+  <div class="calendar-workspace" @pointerdown="handleWorkspacePointerDown" @click="handleWorkspaceClick">
     <div class="home-time-mark" :aria-label="homeCornerClockAriaLabel" aria-live="polite">
       <time class="home-time-mark__date" :datetime="todayDate">
         <span>{{ homeCornerClockDateParts.year }}</span>
@@ -1056,13 +1080,14 @@ defineExpose({
       <Transition name="day-preview-float">
         <aside
           v-if="isDayPreviewOpen"
+          ref="dayPreviewPopoverRef"
           class="day-preview-popover"
           :class="{ 'is-detail-view': homePanelMode === 'view' }"
           :style="homePanelMode === 'view' ? undefined : glassStyle"
           aria-label="当天待办详情"
           data-tour-target="todo-create-panel"
           @click.stop
-          @pointerdown.stop
+          @pointerdown.stop="handleDayPreviewPointerDown"
         >
           <TodoDetailViewPanel
             v-if="homePanelMode === 'view' && activePanelTask"
@@ -1075,93 +1100,30 @@ defineExpose({
             @update-process="handleUpdateTodoProcess"
           >
             <template v-if="showPanelDetailFooter" #footer>
-              <div
-                class="detail-panel-actions"
-                :class="{
-                  'is-pending-inbox': showPanelPendingInboxActions,
-                  'is-completed-detail':
-                    (showPanelDeleteAction || showPanelEditAction) && !isPanelDeleteConfirming,
-                  'is-delete-confirm': isPanelDeleteConfirming,
-                }"
-              >
-                <template v-if="showPanelPendingInboxActions">
-                  <button
-                    type="button"
-                    class="detail-action accept"
-                    :disabled="pendingActionProcessing || isPanelDetailLoading"
-                    @click="handleAcceptPanelTodo"
-                  >
-                    {{ pendingActionProcessing ? '处理中…' : '接受' }}
-                  </button>
-                  <button
-                    type="button"
-                    class="detail-action reject"
-                    :disabled="pendingActionProcessing || isPanelDetailLoading"
-                    @click="handleRejectPanelTodo"
-                  >
-                    拒绝
-                  </button>
-                </template>
-                <template v-else-if="isPanelDeleteConfirming">
-                  <span class="detail-delete-confirm">确定删除？</span>
-                  <button
-                    type="button"
-                    class="detail-action secondary"
-                    :disabled="deleteActionProcessing"
-                    @click="cancelDeletePanelTask"
-                  >
-                    取消
-                  </button>
-                  <button
-                    type="button"
-                    class="detail-action delete"
-                    :disabled="deleteActionProcessing"
-                    @click="confirmDeletePanelTask"
-                  >
-                    {{ deleteActionProcessing ? '删除中…' : '确认删除' }}
-                  </button>
-                </template>
-                <template v-else>
-                  <button
-                    v-if="showPanelDeleteAction"
-                    type="button"
-                    class="detail-action delete"
-                    :disabled="isPanelDetailLoading"
-                    @click="requestDeletePanelTask"
-                  >
-                    删除
-                  </button>
-                  <button
-                    v-if="showPanelEditAction"
-                    type="button"
-                    class="detail-action secondary"
-                    :disabled="isPanelDetailLoading"
-                    @click="switchPanelToEdit"
-                  >
-                    编辑
-                  </button>
-                  <button
-                    type="button"
-                    class="detail-action primary"
-                    :class="{ 'is-syncing': isTodoStatusUpdating(activePanelTask.id) }"
-                    :disabled="
-                      activePanelTask.completable === false ||
-                      isPanelDetailLoading ||
-                      isTodoStatusUpdating(activePanelTask.id)
-                    "
-                    :aria-busy="isTodoStatusUpdating(activePanelTask.id)"
-                    @click="togglePanelTaskStatus"
-                  >
-                    {{
-                      isTodoStatusUpdating(activePanelTask.id)
-                        ? '处理中...'
-                        : activePanelTask.status === 'done'
-                          ? '恢复待处理'
-                          : '标记完成'
-                    }}
-                  </button>
-                </template>
-              </div>
+              <TodoDetailPanelFooterActions
+                :mode="
+                  showPanelPendingInboxActions
+                    ? 'pending-inbox'
+                    : isPanelDeleteConfirming
+                      ? 'delete-confirm'
+                      : 'actions'
+                "
+                :show-delete="showPanelDeleteAction"
+                :show-edit="showPanelEditAction"
+                :is-done="activePanelTask?.status === 'done'"
+                :completable="activePanelTask?.completable !== false"
+                :loading="isPanelDetailLoading"
+                :pending-processing="pendingActionProcessing"
+                :delete-processing="deleteActionProcessing"
+                :syncing="activePanelTask ? isTodoStatusUpdating(activePanelTask.id) : false"
+                @accept="handleAcceptPanelTodo"
+                @reject="handleRejectPanelTodo"
+                @cancel-delete="cancelDeletePanelTask"
+                @confirm-delete="confirmDeletePanelTask"
+                @delete="requestDeletePanelTask"
+                @edit="switchPanelToEdit"
+                @toggle-status="togglePanelTaskStatus"
+              />
             </template>
           </TodoDetailViewPanel>
 
@@ -2541,7 +2503,7 @@ defineExpose({
 }
 
 .day-preview-popover.is-detail-view :deep(.detail-panel-footer) {
-  background: rgba(255, 255, 255, 0.94);
+  background: transparent;
 }
 
 .day-preview-popover :deep(.preview-panel),

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { httpClient } from '@/shared/request/http'
 import {
   DAILY_OPINION_LIMIT,
+  loadOpinionPage,
   loadTodayOpinionCount,
   submitOpinion,
   toOpinionType,
@@ -111,6 +112,89 @@ describe('opinion-box.service', () => {
     vi.mocked(httpClient.request).mockRejectedValueOnce(new Error('network error'))
 
     await expect(loadTodayOpinionCount()).resolves.toBe(0)
+  })
+
+  it('loads and normalizes the paged opinion list', async () => {
+    vi.mocked(httpClient.request).mockResolvedValueOnce(
+      backendResponse({
+        total: 25,
+        rows: [
+          {
+            id: 1,
+            userNo: '1091241',
+            userName: '张三',
+            content: '建议增加筛选条件',
+            createTime: '2026-07-16T10:30:00',
+            type: 1,
+          },
+        ],
+        statistics: {
+          totalCount: 25,
+          todayCount: 3,
+          type1Count: 10,
+          type2Count: 5,
+          type3Count: 6,
+          type4Count: 4,
+        },
+        code: 200,
+        msg: 'success',
+      }) as never,
+    )
+
+    await expect(
+      loadOpinionPage({ pageNum: 2, pageSize: 10, keyword: ' 张三 ', type: 1 }),
+    ).resolves.toEqual({
+      total: 25,
+      rows: [
+        {
+          id: '1',
+          userNo: '1091241',
+          userName: '张三',
+          content: '建议增加筛选条件',
+          createTime: '2026-07-16T10:30:00',
+          type: 1,
+        },
+      ],
+      statistics: {
+        totalCount: 25,
+        todayCount: 3,
+        type1Count: 10,
+        type2Count: 5,
+        type3Count: 6,
+        type4Count: 4,
+      },
+      pageNum: 2,
+      pageSize: 10,
+    })
+
+    expect(httpClient.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'GET',
+        url: '/opinion-box/page',
+        params: {
+          pageNum: 2,
+          pageSize: 10,
+          keyword: '张三',
+          type: 1,
+        },
+        showError: false,
+      }),
+    )
+  })
+
+  it('omits an empty keyword and rejects invalid page types', async () => {
+    vi.mocked(httpClient.request).mockResolvedValueOnce(
+      backendResponse({ total: 0, rows: [], statistics: {} }) as never,
+    )
+
+    await loadOpinionPage({ keyword: '   ' })
+
+    expect(httpClient.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: expect.objectContaining({ keyword: undefined }),
+      }),
+    )
+    await expect(loadOpinionPage({ type: 9 as 1 })).rejects.toThrow('意见类型无效')
   })
 
   it('exposes daily opinion limit constant', () => {

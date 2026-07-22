@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildAssigneeProgressBreakdown,
   buildTodoDetailPanelViewModel,
   buildDispatchProgressSummary,
   canAddTodoProcess,
+  formatAssigneeProgressBreakdownText,
   isPendingAcceptanceTask,
   mergeCalendarEventWithDetail,
   resolveProgressTargetTodo,
@@ -74,12 +76,36 @@ function buildTask(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
 }
 
 describe('buildTodoDetailPanelViewModel assignee progress', () => {
+  it('shows rejection note when dispatched todo is rejected with a reason', () => {
+    const panel = buildTodoDetailPanelViewModel(
+      buildTask({
+        backendStatus: 9,
+        status: 'todo',
+        childTodos: undefined,
+        handleDesc: '不想干了我要辞职',
+      }),
+      creator,
+    )
+
+    expect(panel.rejectionNote).toBe('拒绝原因：不想干了我要辞职')
+    expect(panel.statusLabel).toBe('已拒绝')
+    expect(panel.statusTone).toBe('rejected')
+  })
+
   it('shows assignee progress for creator and hides single receiver field', () => {
     const panel = buildTodoDetailPanelViewModel(buildTask(), creator)
 
     expect(panel.meta.some((item) => item.key === 'receiver')).toBe(false)
     expect(panel.statusLabel).toBe('1/2 已完成')
     expect(panel.statusTone).toBe('accepted')
+    expect(panel.assigneeProgressBreakdown).toEqual({
+      total: 2,
+      text: '1 已接受 · 1 已完成',
+      segments: [
+        { label: '已接受', count: 1, tone: 'accepted' },
+        { label: '已完成', count: 1, tone: 'done' },
+      ],
+    })
     expect(panel.assigneeProgress).toEqual([
       {
         id: '102',
@@ -102,6 +128,132 @@ describe('buildTodoDetailPanelViewModel assignee progress', () => {
     expect(buildDispatchProgressSummary(buildTask().childTodos ?? [])).toEqual({
       label: '1/2 已完成',
       tone: 'accepted',
+    })
+  })
+
+  it('builds assignee progress breakdown for mixed child todo statuses', () => {
+    expect(buildAssigneeProgressBreakdown(buildTask().childTodos ?? [])).toEqual({
+      total: 2,
+      text: '1 已接受 · 1 已完成',
+      segments: [
+        { label: '已接受', count: 1, tone: 'accepted' },
+        { label: '已完成', count: 1, tone: 'done' },
+      ],
+    })
+  })
+
+  it('orders breakdown segments by workflow priority and omits zero counts', () => {
+    const breakdown = buildAssigneeProgressBreakdown([
+      {
+        id: '201',
+        date: '2026-07-16',
+        time: '11:20',
+        title: '跟进需求',
+        type: 'task',
+        owner: 'A',
+        status: 'todo',
+        assigneeId: '1',
+        backendStatus: 0,
+        receiveStatus: 2,
+      },
+      {
+        id: '202',
+        date: '2026-07-16',
+        time: '11:20',
+        title: '跟进需求',
+        type: 'task',
+        owner: 'B',
+        status: 'todo',
+        assigneeId: '2',
+        backendStatus: 3,
+      },
+      {
+        id: '203',
+        date: '2026-07-16',
+        time: '11:20',
+        title: '跟进需求',
+        type: 'task',
+        owner: 'C',
+        status: 'done',
+        assigneeId: '3',
+        backendStatus: 6,
+      },
+      {
+        id: '204',
+        date: '2026-07-16',
+        time: '11:20',
+        title: '跟进需求',
+        type: 'task',
+        owner: 'D',
+        status: 'todo',
+        assigneeId: '4',
+        backendStatus: 9,
+      },
+    ])
+
+    expect(breakdown.total).toBe(4)
+    expect(breakdown.segments).toEqual([
+      { label: '待接受', count: 1, tone: 'pending' },
+      { label: '已接受', count: 1, tone: 'accepted' },
+      { label: '已完成', count: 1, tone: 'done' },
+      { label: '已拒绝', count: 1, tone: 'rejected' },
+    ])
+    expect(breakdown.text).toBe('1 待接受 · 1 已接受 · 1 已完成 · 1 已拒绝')
+    expect(formatAssigneeProgressBreakdownText(breakdown.segments)).toBe(breakdown.text)
+  })
+
+  it('collapses same-status assignees into one breakdown segment', () => {
+    const breakdown = buildAssigneeProgressBreakdown([
+      {
+        id: '301',
+        date: '2026-07-16',
+        time: '11:20',
+        title: '跟进需求',
+        type: 'task',
+        owner: 'A',
+        status: 'todo',
+        assigneeId: '1',
+        backendStatus: 3,
+      },
+      {
+        id: '302',
+        date: '2026-07-16',
+        time: '11:20',
+        title: '跟进需求',
+        type: 'task',
+        owner: 'B',
+        status: 'todo',
+        assigneeId: '2',
+        backendStatus: 3,
+      },
+      {
+        id: '303',
+        date: '2026-07-16',
+        time: '11:20',
+        title: '跟进需求',
+        type: 'task',
+        owner: 'C',
+        status: 'todo',
+        assigneeId: '3',
+        backendStatus: 9,
+      },
+    ])
+
+    expect(breakdown).toEqual({
+      total: 3,
+      text: '2 已接受 · 1 已拒绝',
+      segments: [
+        { label: '已接受', count: 2, tone: 'accepted' },
+        { label: '已拒绝', count: 1, tone: 'rejected' },
+      ],
+    })
+  })
+
+  it('returns empty breakdown for empty child todo list', () => {
+    expect(buildAssigneeProgressBreakdown([])).toEqual({
+      total: 0,
+      text: '',
+      segments: [],
     })
   })
 
@@ -267,6 +419,7 @@ describe('buildTodoDetailPanelViewModel assignee progress', () => {
     const panel = buildTodoDetailPanelViewModel(buildTask({ scope: 'assigned_to_me' }), assignee)
 
     expect(panel.assigneeProgress).toBeUndefined()
+    expect(panel.assigneeProgressBreakdown).toBeUndefined()
     expect(panel.meta).toEqual(
       expect.arrayContaining([expect.objectContaining({ key: 'receiver', label: '接受人' })]),
     )

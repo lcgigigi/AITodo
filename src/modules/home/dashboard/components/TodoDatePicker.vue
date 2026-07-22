@@ -1,14 +1,18 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from 'vue'
 import { getLocalTimeZone, today } from '@internationalized/date'
-import { computed, ref, shallowRef, useAttrs, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, useAttrs, watch } from 'vue'
 import IconCalendarDays from '~icons/lucide/calendar-days'
 import type { DateValue } from 'reka-ui'
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
-import { safeParseCalendarDate, handlePickerPopoverOutside } from './picker.helpers'
+import {
+  bindPickerDocumentOutsideClose,
+  handlePickerPointerDownOutside,
+  safeParseCalendarDate,
+} from './picker.helpers'
 
 defineOptions({
   inheritAttrs: false,
@@ -37,6 +41,9 @@ const emit = defineEmits<{
 
 const attrs = useAttrs()
 const open = ref(false)
+const panelRef = ref<HTMLElement | null>(null)
+let unbindDocumentOutside: (() => void) | undefined
+let wasOpenOnTriggerPointerDown = false
 const calendarPlaceholder = shallowRef<DateValue>(today(getLocalTimeZone()))
 const externalClass = computed(() => attrs.class as HTMLAttributes['class'])
 
@@ -63,21 +70,66 @@ watch(
   { immediate: true },
 )
 
-function onDatePopoverOutside(event: { target?: EventTarget | null; preventDefault?: () => void }) {
-  handlePickerPopoverOutside(event, () => {
+function onTriggerClick() {
+  if (props.disabled) return
+  const shouldClose = wasOpenOnTriggerPointerDown || open.value
+  wasOpenOnTriggerPointerDown = false
+  if (shouldClose) {
     open.value = false
-  })
+    return
+  }
+  open.value = true
 }
+
+function onTriggerPointerDown() {
+  wasOpenOnTriggerPointerDown = open.value
+}
+
+function onPopoverPointerDownOutside(event: {
+  target?: EventTarget | null
+  preventDefault?: () => void
+}) {
+  handlePickerPointerDownOutside(
+    event,
+    () => {
+      open.value = false
+    },
+    '.todo-date-trigger',
+  )
+}
+
+watch(open, (isOpen) => {
+  unbindDocumentOutside?.()
+  unbindDocumentOutside = undefined
+
+  if (!isOpen) return
+
+  nextTick(() => {
+    unbindDocumentOutside = bindPickerDocumentOutsideClose({
+      isOpen: () => open.value,
+      getContentEl: () => panelRef.value?.closest('[data-slot="popover-content"]') ?? null,
+      close: () => {
+        open.value = false
+      },
+      triggerSelector: '.todo-date-trigger',
+    })
+  })
+})
+
+onBeforeUnmount(() => {
+  unbindDocumentOutside?.()
+})
 </script>
 
 <template>
   <Popover v-model:open="open">
-    <PopoverTrigger as-child>
+    <PopoverAnchor as-child>
       <Button
         type="button"
         variant="outline"
         :disabled="disabled"
         :aria-label="ariaLabel"
+        :aria-expanded="open"
         :class="
           cn(
             'todo-picker-trigger todo-date-trigger',
@@ -85,26 +137,28 @@ function onDatePopoverOutside(event: { target?: EventTarget | null; preventDefau
             externalClass,
           )
         "
+        @pointerdown="onTriggerPointerDown"
+        @click.stop="onTriggerClick"
       >
         <span class="todo-picker-value" :class="{ 'is-placeholder': !modelValue }">
           {{ displayValue }}
         </span>
         <IconCalendarDays aria-hidden="true" />
       </Button>
-    </PopoverTrigger>
+    </PopoverAnchor>
     <PopoverContent
       align="start"
       class="todo-date-popover !z-[1200] !w-[264px] !gap-0 !overflow-hidden !rounded-2xl !border !border-slate-200 !bg-white !p-0 !ring-0 !shadow-[0_18px_42px_-30px_rgba(15,23,42,0.45)]"
-      @pointer-down-outside="onDatePopoverOutside"
-      @interact-outside="onDatePopoverOutside"
-      @focus-outside="onDatePopoverOutside"
+      @pointer-down-outside="onPopoverPointerDownOutside"
     >
-      <Calendar
-        v-model="selectedDate"
-        v-model:placeholder="calendarPlaceholder"
-        locale="zh-CN"
-        layout="month-and-year"
-      />
+      <div ref="panelRef" class="todo-date-panel">
+        <Calendar
+          v-model="selectedDate"
+          v-model:placeholder="calendarPlaceholder"
+          locale="zh-CN"
+          layout="month-and-year"
+        />
+      </div>
     </PopoverContent>
   </Popover>
 </template>

@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from 'vue'
-import { computed, nextTick, ref, useAttrs, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, useAttrs, watch } from 'vue'
 import IconCheck from '~icons/lucide/check'
 import IconClock3 from '~icons/lucide/clock-3'
 import { Button } from '@/components/ui/button'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import {
+  bindPickerDocumentOutsideClose,
   getTodoHourOptions,
   getTodoMinuteOptions,
-  handlePickerPopoverOutside,
+  handlePickerPointerDownOutside,
   parseTodoTime,
 } from './picker.helpers'
 
@@ -44,7 +45,10 @@ const emit = defineEmits<{
 const attrs = useAttrs()
 const open = ref(false)
 const rootRef = ref<HTMLElement | null>(null)
+const panelRef = ref<HTMLElement | null>(null)
 const popoverWidth = ref('')
+let unbindDocumentOutside: (() => void) | undefined
+let wasOpenOnTriggerPointerDown = false
 const hourTouched = ref(false)
 const minuteTouched = ref(false)
 const externalClass = computed(() => attrs.class as HTMLAttributes['class'])
@@ -85,10 +89,32 @@ function tryClosePopover() {
   }
 }
 
-function onTimePopoverOutside(event: { target?: EventTarget | null; preventDefault?: () => void }) {
-  handlePickerPopoverOutside(event, () => {
+function onTriggerClick() {
+  if (props.disabled) return
+  const shouldClose = wasOpenOnTriggerPointerDown || open.value
+  wasOpenOnTriggerPointerDown = false
+  if (shouldClose) {
     open.value = false
-  })
+    return
+  }
+  open.value = true
+}
+
+function onTriggerPointerDown() {
+  wasOpenOnTriggerPointerDown = open.value
+}
+
+function onPopoverPointerDownOutside(event: {
+  target?: EventTarget | null
+  preventDefault?: () => void
+}) {
+  handlePickerPointerDownOutside(
+    event,
+    () => {
+      open.value = false
+    },
+    '.todo-time-trigger',
+  )
 }
 
 function syncPopoverWidth() {
@@ -101,25 +127,42 @@ function syncPopoverWidth() {
 }
 
 watch(open, (isOpen) => {
+  unbindDocumentOutside?.()
+  unbindDocumentOutside = undefined
+
   if (!isOpen) return
 
   resetSelectionState()
   nextTick(() => {
     syncPopoverWidth()
     requestAnimationFrame(syncPopoverWidth)
+
+    unbindDocumentOutside = bindPickerDocumentOutsideClose({
+      isOpen: () => open.value,
+      getContentEl: () => panelRef.value?.closest('[data-slot="popover-content"]') ?? null,
+      close: () => {
+        open.value = false
+      },
+      triggerSelector: '.todo-time-trigger',
+    })
   })
+})
+
+onBeforeUnmount(() => {
+  unbindDocumentOutside?.()
 })
 </script>
 
 <template>
   <div ref="rootRef" class="todo-time-picker">
     <Popover v-model:open="open">
-      <PopoverTrigger as-child>
+      <PopoverAnchor as-child>
         <Button
           type="button"
           variant="outline"
           :disabled="disabled"
           :aria-label="ariaLabel"
+          :aria-expanded="open"
           :aria-invalid="invalid || undefined"
           :class="
             cn(
@@ -129,22 +172,22 @@ watch(open, (isOpen) => {
               externalClass,
             )
           "
+          @pointerdown="onTriggerPointerDown"
+          @click.stop="onTriggerClick"
         >
           <span class="todo-picker-value" :class="{ 'is-placeholder': !parsedTime }">
             {{ displayValue }}
           </span>
           <IconClock3 aria-hidden="true" />
         </Button>
-      </PopoverTrigger>
+      </PopoverAnchor>
       <PopoverContent
         align="start"
         :style="{ '--todo-time-popover-width': popoverWidth || undefined }"
-        class="todo-time-popover gap-0 p-0"
-        @pointer-down-outside="onTimePopoverOutside"
-        @interact-outside="onTimePopoverOutside"
-        @focus-outside="onTimePopoverOutside"
+        class="todo-time-popover !z-[1200] gap-0 p-0"
+        @pointer-down-outside="onPopoverPointerDownOutside"
       >
-        <div class="todo-time-panel">
+        <div ref="panelRef" class="todo-time-panel">
           <div class="todo-time-column" aria-label="小时">
             <span class="todo-time-label">时</span>
             <ScrollArea class="todo-time-scroll">

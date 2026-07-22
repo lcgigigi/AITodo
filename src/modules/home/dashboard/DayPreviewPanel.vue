@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import IconArrowLeft from '~icons/lucide/arrow-left'
 import IconCalendarPlus from '~icons/lucide/calendar-plus'
-import IconLoaderCircle from '~icons/lucide/loader-circle'
+import IconCheck from '~icons/lucide/check'
 import IconPlus from '~icons/lucide/plus'
 import IconX from '~icons/lucide/x'
 import { Button } from '@/components/ui/button'
@@ -321,7 +321,7 @@ function createFormFromEvent(event: CalendarEvent): CalendarTodoForm {
     endDate: event.endDate ?? event.date,
     time: event.time ?? '',
     endTime: event.endTime ?? '',
-    title: event.title,
+    title: event.content?.trim() || event.title?.trim() || '',
     owner: event.owner,
     assigneeId: event.assigneeId ?? props.currentUser.id,
     assigneeName: event.assigneeName ?? event.owner,
@@ -700,21 +700,42 @@ function parseAssigneeIds(value: string) {
     .filter(Boolean)
 }
 
-function selectAssignees(ids: string[]) {
-  const selected = ids
-    .map((id) => props.assignableUsers.find((user) => user.id === id))
-    .filter((user): user is CalendarUser => Boolean(user))
+function splitAssigneeLabels(value: string) {
+  return value
+    .split(/[、,，]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
 
-  if (selected.length === 0) {
+function selectAssignees(ids: string[]) {
+  if (ids.length === 0) {
     todoForm.value.assigneeId = props.currentUser.id
     todoForm.value.assigneeName = props.currentUser.name
     todoForm.value.owner = props.currentUser.name
     return
   }
 
-  todoForm.value.assigneeId = selected.map((user) => user.id).join(',')
-  todoForm.value.assigneeName = selected.map((user) => user.name).join('、')
-  todoForm.value.owner = todoForm.value.assigneeName
+  const previousIds = parseAssigneeIds(todoForm.value.assigneeId)
+  const previousNames = splitAssigneeLabels(todoForm.value.assigneeName)
+
+  todoForm.value.assigneeId = ids.join(',')
+  todoForm.value.assigneeName = ids
+    .map((id, index) => {
+      return (
+        props.assignableUsers.find((user) => user.id === id)?.name ??
+        previousNames[previousIds.indexOf(id)] ??
+        previousNames[index] ??
+        ''
+      )
+    })
+    .filter(Boolean)
+    .join('、')
+  todoForm.value.owner = todoForm.value.assigneeName || props.currentUser.name
+}
+
+function syncAssigneeLabels(labels: string) {
+  todoForm.value.assigneeName = labels
+  todoForm.value.owner = labels || props.currentUser.name
 }
 
 function setTodoType(type: 1 | 2) {
@@ -1331,10 +1352,12 @@ defineExpose({
                 <span>负责人</span>
                 <TodoAssigneeSelect
                   :model-value="parseAssigneeIds(todoForm.assigneeId)"
+                  :selected-labels="todoForm.assigneeName"
                   :users="assignableUsers"
                   :disabled="isFormReadonly"
                   :highlighted="isAiHighlighted('assignee')"
                   @update:model-value="selectAssignees"
+                  @update:selected-labels="syncAssigneeLabels"
                 />
               </label>
               <label class="field field-full">
@@ -1374,18 +1397,30 @@ defineExpose({
         data-tour-target="todo-save-actions"
       >
         <template v-if="isViewMode">
-          <Button type="button" @click="requestCancelForm">返回</Button>
+          <button type="button" class="detail-action secondary" @click="requestCancelForm">返回</button>
         </template>
         <template v-else>
-          <Button type="button" :disabled="isSaveDisabled" @click="requestCancelForm">取消</Button>
-          <Button type="submit" :disabled="isSaveDisabled">
-            <IconLoaderCircle
-              v-if="formSubmitting"
-              class="form-actions__spinner"
-              aria-hidden="true"
-            />
-            <span>{{ formSubmitting ? '保存中…' : '保存' }}</span>
-          </Button>
+          <button
+            type="button"
+            class="detail-action delete"
+            :disabled="isSaveDisabled"
+            @click="requestCancelForm"
+          >
+            取消
+          </button>
+          <button
+            type="submit"
+            class="detail-action primary complete-action"
+            :class="{ 'is-syncing': formSubmitting }"
+            :disabled="isSaveDisabled"
+            :aria-busy="formSubmitting"
+          >
+            <span class="detail-action-complete-check" aria-hidden="true">
+              <span v-if="formSubmitting" class="detail-action-primary-spinner" />
+              <IconCheck v-else />
+            </span>
+            <span class="detail-action-primary-text">{{ formSubmitting ? '保存中…' : '保存' }}</span>
+          </button>
         </template>
       </div>
     </form>
@@ -1393,6 +1428,8 @@ defineExpose({
 </template>
 
 <style scoped>
+@import './components/detail-action-buttons.css';
+
 .preview-panel {
   --todo-primary: #3b82f6;
   --todo-primary-hover: #2563eb;
@@ -1854,7 +1891,6 @@ defineExpose({
 .add-btn,
 .close-btn,
 .item-actions button,
-.form-actions button,
 .discard-warning-actions button,
 .ai-inline-row button {
   min-height: 30px;
@@ -1875,7 +1911,6 @@ defineExpose({
 }
 
 .add-btn,
-.form-actions button[type='submit'],
 .ai-inline-row button {
   display: inline-flex;
   align-items: center;
@@ -1950,7 +1985,6 @@ defineExpose({
 .add-btn:hover,
 .close-btn:hover,
 .item-actions button:hover,
-.form-actions button:hover,
 .discard-warning-actions button:not(.discard-confirm):hover,
 .ai-inline-row button:hover {
   border-color: #cbd5e1;
@@ -1970,14 +2004,12 @@ defineExpose({
 }
 
 .add-btn:hover,
-.form-actions button[type='submit']:not(:disabled):hover,
 .ai-inline-row button:not(:disabled):hover {
   border-color: var(--todo-primary-hover);
   background: var(--todo-primary-hover);
   color: #ffffff;
 }
 
-.form-actions button:disabled,
 .ai-inline-row button:disabled {
   border-color: #e5edf6;
   background: #f1f5f9;
@@ -2729,6 +2761,20 @@ p {
   box-shadow: 0 0 0 3px rgba(var(--form-amber-rgb, 245, 158, 11), 0.1);
 }
 
+.schedule-field-panel :deep(.todo-datetime-trigger.is-field-invalid) {
+  border-color: rgba(239, 68, 68, 0.72);
+  background: rgba(254, 242, 242, 0.92);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+}
+
+.schedule-field-panel :deep(.todo-datetime-trigger.is-field-invalid:hover),
+.schedule-field-panel :deep(.todo-datetime-trigger.is-field-invalid.is-active),
+.schedule-field-panel.is-deadline-panel :deep(.todo-datetime-trigger.is-field-invalid:hover),
+.schedule-field-panel.is-deadline-panel :deep(.todo-datetime-trigger.is-field-invalid.is-active) {
+  border-color: rgba(220, 38, 38, 0.82);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.14);
+}
+
 .mode-switch-field {
   min-width: 0;
   display: flex;
@@ -3122,68 +3168,26 @@ p {
 
 .form-actions {
   flex: 0 0 auto;
-  margin: 0 -18px;
-  padding: 4px 18px 8px;
-  border-top: 1px solid rgba(var(--todo-primary-rgb), 0.1);
-  background: linear-gradient(180deg, rgba(248, 250, 252, 0.35), rgba(239, 246, 255, 0.78));
+  margin: 0 0px 1px;
+  padding: 8px 10px 10px;
+  border-top: 0;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(248, 250, 252, 0.82));
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.96),
+    0 10px 24px rgba(15, 23, 42, 0.05);
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 
 .form-actions.is-single-action {
   grid-template-columns: 1fr;
 }
 
-.form-actions button {
-  min-height: 42px;
-  border-radius: 14px;
-  padding: 0 18px;
-  font-size: 15px;
-  font-weight: 850;
-}
-
-.form-actions button[type='button'] {
-  border-color: rgba(203, 213, 225, 0.9);
-  background: rgba(255, 255, 255, 0.88);
-  color: #52607a;
-}
-
-.form-actions button[type='button']:hover {
-  border-color: rgba(var(--todo-primary-rgb), 0.18);
-  background: rgba(239, 246, 255, 0.92);
-  color: #334155;
-}
-
-.form-actions button[type='submit'] {
-  border-color: rgba(var(--todo-primary-rgb), 0.24);
-  background: linear-gradient(180deg, rgba(var(--todo-primary-rgb), 0.92), rgba(37, 99, 235, 0.9));
-  box-shadow: 0 10px 22px -18px rgba(var(--todo-primary-rgb), 0.55);
-}
-
-.form-actions button[type='submit']:not(:disabled):hover {
-  border-color: rgba(37, 99, 235, 0.34);
-  background: linear-gradient(180deg, #4f93f8, #2563eb);
-}
-
-.form-actions button[type='submit']:disabled {
-  border-color: rgba(203, 213, 225, 0.72);
-  background: rgba(226, 232, 240, 0.58);
-  color: #94a3b8;
-  box-shadow: none;
-  cursor: wait;
-}
-
-.form-actions__spinner {
-  width: 15px;
-  height: 15px;
-  animation: todo-form-save-spin 0.82s linear infinite;
-}
-
-@keyframes todo-form-save-spin {
-  to {
-    transform: rotate(360deg);
-  }
+.form-actions .detail-action {
+  width: 100%;
 }
 
 @media (max-width: 760px) {

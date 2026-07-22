@@ -17,7 +17,7 @@
 注意：
 
 - 登录返回结构是 `{ code, msg, token }`，不是 `data.token`。
-- `.env*` 里当前使用 `VITE_APP_TODO_USERNAME=admin`、`VITE_APP_TODO_PASSWORD=admin123` 做页面启动登录。
+- 登录页不预置账号或密码，需由用户输入完整凭据。
 - 后台的 `assigneeId` 是员工工号，例如 `1102080`，不是姓名。
 
 ## 接口落点

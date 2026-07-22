@@ -32,6 +32,18 @@ export type AssigneeProgressItem = {
   processHistory?: AssigneeProcessHistoryItem[]
 }
 
+export type AssigneeProgressBreakdownSegment = {
+  label: string
+  count: number
+  tone: DetailStatusTone
+}
+
+export type AssigneeProgressBreakdown = {
+  total: number
+  segments: AssigneeProgressBreakdownSegment[]
+  text: string
+}
+
 export type TodoProcessPanelItem = {
   processId: string
   todoProcess: string
@@ -62,6 +74,8 @@ export type TodoDetailPanelViewModel = {
   remarkIsEmpty: boolean
   meta: Array<{ key: string; label: string; value: string }>
   assigneeProgress?: AssigneeProgressItem[]
+  assigneeProgressBreakdown?: AssigneeProgressBreakdown
+  rejectionNote?: string
   processSection?: TodoProcessSection
 }
 
@@ -134,7 +148,7 @@ export function canDeleteTodoEvent(event: CalendarEvent, currentUser: CalendarUs
   return false
 }
 
-export const TODO_PROCESS_MAX_LENGTH = 200
+export const TODO_PROCESS_MAX_LENGTH = 5000
 
 function formatProcessTime(value?: string) {
   if (!value?.trim()) return ''
@@ -246,6 +260,65 @@ export function getAssigneeProgressStatusTone(event: CalendarEvent): DetailStatu
 
 export function getAssigneeProgressDisplayName(event: CalendarEvent) {
   return getTodoAssigneeDisplayName(event)
+}
+
+const ASSIGNEE_PROGRESS_BREAKDOWN_LABEL_ORDER = [
+  '待接受',
+  '待处理',
+  '已接受',
+  '已完成',
+  '已拒绝',
+  '已删除',
+] as const
+
+function getAssigneeProgressBreakdownLabelRank(label: string) {
+  const index = ASSIGNEE_PROGRESS_BREAKDOWN_LABEL_ORDER.indexOf(
+    label as (typeof ASSIGNEE_PROGRESS_BREAKDOWN_LABEL_ORDER)[number],
+  )
+  return index === -1 ? ASSIGNEE_PROGRESS_BREAKDOWN_LABEL_ORDER.length : index
+}
+
+export function formatAssigneeProgressBreakdownText(
+  segments: AssigneeProgressBreakdownSegment[],
+) {
+  return segments.map((segment) => `${segment.count} ${segment.label}`).join(' · ')
+}
+
+export function buildAssigneeProgressBreakdown(
+  childTodos: CalendarEvent[],
+): AssigneeProgressBreakdown {
+  const grouped = new Map<string, AssigneeProgressBreakdownSegment>()
+
+  for (const child of childTodos) {
+    const label = getAssigneeProgressStatusLabel(child)
+    const existing = grouped.get(label)
+
+    if (existing) {
+      existing.count += 1
+      continue
+    }
+
+    grouped.set(label, {
+      label,
+      count: 1,
+      tone: getAssigneeProgressStatusTone(child),
+    })
+  }
+
+  const segments = [...grouped.values()].sort((left, right) => {
+    const rankCompare =
+      getAssigneeProgressBreakdownLabelRank(left.label) -
+      getAssigneeProgressBreakdownLabelRank(right.label)
+    if (rankCompare !== 0) return rankCompare
+
+    return left.label.localeCompare(right.label, 'zh-CN')
+  })
+
+  return {
+    total: childTodos.length,
+    segments,
+    text: formatAssigneeProgressBreakdownText(segments),
+  }
 }
 
 export function buildDispatchProgressSummary(childTodos: CalendarEvent[]): {
@@ -422,9 +495,11 @@ export function buildTodoDetailPanelViewModel(
     })
   }
 
-  const progressSummary = showAssigneeProgress
-    ? buildDispatchProgressSummary(task.childTodos ?? [])
-    : null
+  const childTodos = task.childTodos ?? []
+  const progressSummary = showAssigneeProgress ? buildDispatchProgressSummary(childTodos) : null
+  const assigneeProgressBreakdown = showAssigneeProgress
+    ? buildAssigneeProgressBreakdown(childTodos)
+    : undefined
 
   return {
     title: getTodoContentDisplay(task),
@@ -438,9 +513,9 @@ export function buildTodoDetailPanelViewModel(
     remark: getTodoRemarkDisplay(task),
     remarkIsEmpty: !hasTodoRemark(task),
     meta,
-    assigneeProgress: showAssigneeProgress
-      ? buildAssigneeProgressItems(task.childTodos ?? [])
-      : undefined,
+    assigneeProgress: showAssigneeProgress ? buildAssigneeProgressItems(childTodos) : undefined,
+    assigneeProgressBreakdown,
+    rejectionNote: getRejectedTodoMessage(task) || undefined,
     processSection: buildTodoProcessSection(task, currentUser, users),
   }
 }

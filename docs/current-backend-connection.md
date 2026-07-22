@@ -30,8 +30,6 @@
 | 变量 | 当前值 | 说明 |
 | --- | --- | --- |
 | `VITE_APP_BASE_API` | 开发为空，生产为 `/backendApi` | axios `baseURL`。开发为空时请求走相对路径，命中 Vite proxy。 |
-| `VITE_APP_TODO_USERNAME` | `admin` | 登录页默认用户名。 |
-| `VITE_APP_TODO_PASSWORD` | `admin123` | 登录页默认密码。 |
 | `VITE_APP_SYS_MESSAGE_WS_BASE_URL` | 空 | 站内消息 WebSocket 基础地址。为空时默认使用当前页面 host。 |
 | `VITE_APP_MOCK` | `false` | 当前代码没有在请求封装里用它切换 mock。 |
 

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import defaultUserAvatar from '@/assets/touxiang.webp'
+import { isSuggestionInboxViewer } from '@/modules/suggestion-inbox/access'
 import { storage } from '@/shared/utils/storage'
 
 const TOKEN_STORAGE_KEY = 'ai-workbench:user-token'
@@ -35,6 +36,9 @@ export const useUserStore = defineStore('user', {
   getters: {
     isLoggedIn: (state) => Boolean(state.token),
     isAdmin: (state) => state.profile?.roles?.includes('admin') ?? false,
+    canAccessSuggestionInbox: (state) =>
+      (state.profile?.roles?.includes('admin') ?? false) ||
+      isSuggestionInboxViewer(state.profile?.id),
     hasTokensPower: (state) => state.profile?.tokensPower === true,
     managerDashboardUrl: (state) => state.profile?.managerDashboardUrl?.trim() || '',
   },

@@ -13,6 +13,7 @@ import {
   loadPendingTodos,
   loadLatestWorkSummary,
   loadTodoDetail,
+  searchUsers,
   getTodoMonthRange,
   getTodoWeekRange,
   loadTodos,
@@ -164,7 +165,7 @@ describe('todo.service real backend adapter', () => {
           task: '项目复盘',
           timeType: 1,
           startDateShow: '2026-06-07 17:00:00',
-          assigneeIds: '1102080',
+          assigneeId: [{ badge: '1102080', name: '李四' }],
           type: 1,
           remark: '',
         }) as never
@@ -304,6 +305,37 @@ describe('todo.service real backend adapter', () => {
     )
   })
 
+  it('searches users by keyword from user-search-list endpoint', async () => {
+    vi.mocked(httpClient.request).mockResolvedValueOnce({
+      data: {
+        code: 200,
+        msg: '操作成功',
+        data: [
+          { badge: '1091241', name: '张三', deptFullName: '研发中心/前端组' },
+          { badge: '1102080', name: '张三丰', deptFullName: '研发中心/后端组' },
+        ],
+      },
+    })
+
+    await expect(searchUsers('张三')).resolves.toEqual([
+      { id: '1091241', name: '张三', role: 'employee', department: '研发中心/前端组' },
+      { id: '1102080', name: '张三丰', role: 'employee', department: '研发中心/后端组' },
+    ])
+
+    expect(httpClient.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'GET',
+        url: '/smart-todo/user-search-list',
+        params: { keyword: '张三' },
+      }),
+    )
+  })
+
+  it('returns empty array when search keyword is blank', async () => {
+    await expect(searchUsers('  ')).resolves.toEqual([])
+    expect(httpClient.request).not.toHaveBeenCalled()
+  })
+
   it('maps analyze result type and multiple assigneeIds', async () => {
     vi.mocked(httpClient.request).mockResolvedValueOnce({
       data: {
@@ -313,7 +345,10 @@ describe('todo.service real backend adapter', () => {
           task: '产品评审会',
           timeType: 1,
           startDateShow: '2026-06-12 10:00:00',
-          assigneeIds: '1102080,1102081',
+          assigneeId: [
+            { badge: '1102080', name: '李四' },
+            { badge: '1102081', name: '王五' },
+          ],
           type: 2,
           remark: '会议室A',
         },
@@ -338,7 +373,7 @@ describe('todo.service real backend adapter', () => {
     })
   })
 
-  it('maps analyze result assigneeId by name to assignable user id', async () => {
+  it('maps analyze result assigneeId user objects to ids', async () => {
     vi.mocked(httpClient.request).mockResolvedValueOnce({
       data: {
         code: 200,
@@ -350,7 +385,7 @@ describe('todo.service real backend adapter', () => {
           time: '',
           startDate: '2026-07-03 15:17',
           endDate: '2026-07-03 17:15',
-          assigneeId: '徐逸臣',
+          assigneeId: [{ badge: '1102999', name: '徐逸臣' }],
           remark: '',
           type: 2,
         },
@@ -360,7 +395,7 @@ describe('todo.service real backend adapter', () => {
     const parsed = await analyzeTodoText(
       '下午让徐逸臣开会',
       currentUser,
-      [currentUser, { id: '1102999', name: '徐逸臣', role: 'employee' }],
+      assignableUsers,
       {
         date: '2026-07-03',
         title: '',
@@ -440,7 +475,7 @@ describe('todo.service real backend adapter', () => {
           time: '09:00',
           startDate: '',
           endDate: '',
-          assigneeId: '',
+          assigneeId: [],
           remark: '在317',
         },
       },
@@ -476,7 +511,7 @@ describe('todo.service real backend adapter', () => {
           task: '开部门会议',
           timeType: 1,
           startDateShow: '2026-06-12 09:00:00',
-          assigneeId: '',
+          assigneeId: [],
           remark: '在317',
         },
       },
@@ -551,7 +586,7 @@ describe('todo.service real backend adapter', () => {
           timeType: 2,
           startDateShow: '2026-06-01 00:00:00',
           endDateShow: '2026-06-30 23:59:59',
-          assigneeId: '1102080',
+          assigneeId: [{ badge: '1102080', name: '李四' }],
           remark: '',
         },
       },
@@ -1107,6 +1142,41 @@ describe('todo.service real backend adapter', () => {
         status: 'todo',
       },
     ])
+  })
+
+  it('maps completeDesc to handleDesc for rejected todos', async () => {
+    vi.mocked(httpClient.request).mockResolvedValueOnce(
+      backendResponse({
+        mainTodo: {
+          id: 9,
+          title: '',
+          timeType: 1,
+          startDateShow: '2026-07-17 17:00:00',
+          content: '1',
+          assigneeIds: '1110691,1102080',
+          assigneeNickName: '田坤坤,徐逸臣',
+          remark: '1',
+          creatorId: '1110691',
+          creatorNickName: '田坤坤',
+          status: 9,
+          handlerId: '1102080',
+          handlerNickName: '徐逸臣',
+          receiveStatus: 2,
+          completeDesc: '不想干了我要辞职',
+          fid: 8,
+          type: 1,
+        },
+        childTodoList: [],
+      }) as never,
+    )
+
+    await expect(
+      loadTodoDetail('9', { id: '1110691', name: '田坤坤', role: 'employee' }, assignableUsers),
+    ).resolves.toMatchObject({
+      id: '9',
+      backendStatus: 9,
+      handleDesc: '不想干了我要辞职',
+    })
   })
 
   it('filters rejected todos out of pending inbox list', async () => {

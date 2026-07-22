@@ -8,7 +8,7 @@ export const suggestionInboxRoutes: RouteRecordRaw[] = [
     meta: {
       title: '心声收件箱',
       requiresAuth: true,
-      requiresAdmin: true,
+      requiresSuggestionInbox: true,
     },
   },
 ]

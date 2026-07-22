@@ -21,6 +21,7 @@ export interface AgentCatalogItem {
   level: AgentTier
   scenarios: string[]
   launchUrl?: string
+  requiresToken?: boolean
   recommended?: boolean
 }
 

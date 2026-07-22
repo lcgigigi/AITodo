@@ -8,9 +8,6 @@ import {
 } from '@/shared/request/smart-todo-client'
 import type { CalendarUser } from '@/modules/home/dashboard/config/types'
 
-const DEFAULT_LOGIN_USERNAME = import.meta.env.VITE_APP_TODO_USERNAME || 'admin'
-const DEFAULT_LOGIN_PASSWORD = import.meta.env.VITE_APP_TODO_PASSWORD || 'admin123'
-
 interface SmartTodoLoginResponse extends SmartTodoResponse {
   token?: string
 }
@@ -45,8 +42,8 @@ interface SmartTodoInfoResponse extends SmartTodoResponse<SmartTodoInfoPayload> 
 }
 
 export interface SmartTodoLoginCredentials {
-  username?: string
-  password?: string
+  username: string
+  password: string
 }
 
 export interface SmartTodoCurrentUser extends CalendarUser {
@@ -80,12 +77,12 @@ function normalizeFeatureCodes(value: unknown) {
   )
 }
 
-export async function loginSmartTodo(credentials: SmartTodoLoginCredentials = {}) {
+export async function loginSmartTodo(credentials: SmartTodoLoginCredentials) {
   const response = await httpClient.post<SmartTodoLoginResponse>(
     '/login',
     {
-      username: credentials.username || DEFAULT_LOGIN_USERNAME,
-      password: credentials.password || DEFAULT_LOGIN_PASSWORD,
+      username: credentials.username,
+      password: credentials.password,
     },
     {
       timeout: SMART_TODO_REQUEST_TIMEOUT,

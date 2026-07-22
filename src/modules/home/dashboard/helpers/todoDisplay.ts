@@ -162,7 +162,7 @@ export function getRejectedTodoMessage(event: CalendarEvent) {
   if (!isRejectedTodo(event)) return ''
 
   const reason = event.handleDesc?.trim()
-  if (reason) return `拒绝理由：${reason}`
+  if (reason) return `拒绝原因：${reason}`
   return ''
 }
 
@@ -396,6 +396,9 @@ export function hasTodoRemark(event: CalendarEvent) {
 }
 
 export function getTodoListRemarkLine(event: CalendarEvent) {
+  const rejection = getRejectedTodoMessage(event)
+  if (rejection) return rejection
+
   const remark = event.remark?.trim()
   if (remark) return `备注：${remark}`
   return '暂无备注'

@@ -26,7 +26,8 @@ import {
 import { formatTokenCompact, formatTokenNumber } from '@/modules/token-usage/token-usage.formatters'
 import AppStateBlock from '@/shared/components/state/AppStateBlock.vue'
 import { useECharts } from '@/shared/composables/useECharts'
-import { openUrlInNewTab } from './links'
+import { useUserStore } from '@/stores/user.store'
+import { buildAgentSsoLaunchUrl, openUrlInNewTab } from './links'
 import { agents, getAgentByKey, permissionLabels } from './mock'
 import type { AgentCatalogItem, AgentCategory } from './types'
 
@@ -60,6 +61,7 @@ type TokenTrendPoint = {
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
 
 const activeCategory = ref<AgentCategory | '全部'>('全部')
 const agentSearchQuery = ref('')
@@ -396,7 +398,17 @@ function closeAgentPanel() {
 
 function launchAgent(agent: AgentCatalogItem) {
   if (agent.launchUrl) {
-    openUrlInNewTab(agent.launchUrl)
+    if (agent.requiresToken !== false && !userStore.token) {
+      showToast('当前登录状态无效，请重新登录后再试')
+      return
+    }
+
+    const launchUrl =
+      agent.requiresToken === false
+        ? agent.launchUrl
+        : buildAgentSsoLaunchUrl(agent.launchUrl, userStore.token)
+
+    openUrlInNewTab(launchUrl)
     showToast(`已在新标签页打开 ${agent.name}`)
     return
   }
@@ -765,8 +777,10 @@ watch(selectedTokenPeriodCode, () => {
   transform: translateY(clamp(28px, 4.8vh, 72px));
 }
 
-.agent-center-topbar-wrap {
+.agent-center-page > .agent-center-topbar-wrap {
   flex-shrink: 0;
+  z-index: 100;
+  overflow: visible;
 }
 
 .agent-center-topbar-wrap :deep(.dashboard-topbar) {

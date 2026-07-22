@@ -82,7 +82,7 @@ const isLoggingOut = ref(false)
 const displayName = computed(() => userStore.profile?.name ?? '刘美华')
 const department = computed(() => userStore.profile?.department ?? '信息技术部')
 const avatarUrl = computed(() => userStore.profile?.avatar ?? DEFAULT_USER_AVATAR)
-const isAdminUser = computed(() => userStore.isAdmin)
+const canAccessSuggestionInbox = computed(() => userStore.canAccessSuggestionInbox)
 const hasTokensPower = computed(() => userStore.hasTokensPower)
 
 const hasContextualNav = computed(() => Boolean(props.pageTitle?.trim()) && !props.embedded)
@@ -157,6 +157,13 @@ function closeSettingsMenu() {
   isSettingsMenuOpen.value = false
 }
 
+function closeAllTransientOverlays() {
+  closeNotificationPanel()
+  closeUserMenu()
+  closeSettingsMenu()
+  closeWorkReportMenu()
+}
+
 function goHome() {
   void router.push({ name: 'Home' }).catch(() => router.push('/'))
 }
@@ -165,12 +172,14 @@ watch(isNotificationPanelOpen, (open) => {
   if (!open) return
   closeUserMenu()
   closeSettingsMenu()
+  closeWorkReportMenu()
 })
 
 function toggleUserMenu() {
   if (!isUserMenuOpen.value) {
     closeNotificationPanel()
     closeSettingsMenu()
+    closeWorkReportMenu()
   }
 
   isUserMenuOpen.value = !isUserMenuOpen.value
@@ -191,6 +200,7 @@ function toggleSettingsMenu() {
   if (!isSettingsMenuOpen.value) {
     closeNotificationPanel()
     closeUserMenu()
+    closeWorkReportMenu()
     if (props.embedded) updateSettingsMenuPosition()
   }
   isSettingsMenuOpen.value = !isSettingsMenuOpen.value
@@ -326,10 +336,12 @@ onActivated(() => {
 })
 
 onDeactivated(() => {
+  closeAllTransientOverlays()
   unbindTopbarDocumentListeners()
 })
 
 onBeforeUnmount(() => {
+  closeAllTransientOverlays()
   unbindTopbarDocumentListeners()
 })
 </script>
@@ -402,7 +414,6 @@ onBeforeUnmount(() => {
           <IconMailbox />
         </span>
         <span class="suggestion-entry-btn__label">悄悄说</span>
-        <span class="suggestion-entry-btn__dot" aria-hidden="true" />
       </button>
       <div ref="workReportMenuWrapRef" class="work-report-menu-wrap">
         <button
@@ -502,7 +513,7 @@ onBeforeUnmount(() => {
                 <span>Token看板</span>
               </button>
               <button
-                v-if="isAdminUser"
+                v-if="canAccessSuggestionInbox"
                 type="button"
                 class="settings-menu-item"
                 @click="openSuggestionInbox"
@@ -963,11 +974,6 @@ onBeforeUnmount(() => {
     background: transparent;
   }
 
-  .suggestion-entry-btn__dot {
-    top: 6px;
-    right: 7px;
-  }
-
   .notification-panel {
     --notification-arrow-center: 151px;
     right: -132px;
@@ -1072,11 +1078,6 @@ onBeforeUnmount(() => {
   width: 20px;
   height: 20px;
   background: transparent;
-}
-
-.dashboard-topbar.has-tool-dock .suggestion-entry-btn__dot {
-  top: 6px;
-  right: 7px;
 }
 
 .dashboard-topbar.has-tool-dock .work-report-entry-btn {
@@ -1301,18 +1302,6 @@ onBeforeUnmount(() => {
   height: 14px;
 }
 
-.suggestion-entry-btn__dot {
-  position: absolute;
-  top: 4px;
-  right: 6px;
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: #f97316;
-  box-shadow: 0 0 0 2px rgba(255, 247, 237, 0.96);
-  animation: suggestion-entry-pulse 2s ease-in-out infinite;
-}
-
 .work-report-entry-btn {
   border: 1px solid rgba(125, 154, 219, 0.42);
   border-radius: 999px;
@@ -1521,21 +1510,8 @@ onBeforeUnmount(() => {
   }
 }
 
-@keyframes suggestion-entry-pulse {
-  0%,
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  50% {
-    transform: scale(1.18);
-    opacity: 0.72;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .suggestion-entry-btn,
-  .suggestion-entry-btn__dot {
+  .suggestion-entry-btn {
     animation: none;
   }
 }

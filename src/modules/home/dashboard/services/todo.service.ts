@@ -22,6 +22,7 @@ import { compareEvents, ymd } from '../helpers/todoDisplay'
 interface SmartTodoBackendUser {
   badge?: string | number
   name?: string
+  deptFullName?: string | null
 }
 
 export interface WorkReportStoryboardItem {
@@ -70,6 +71,7 @@ interface SmartTodoBackendItem {
   handlerIds?: string | null
   receiveStatus?: number | null
   handleDesc?: string | null
+  completeDesc?: string | null
   source?: string | null
   thirdId?: string | number | null
   fid?: string | number | null
@@ -88,7 +90,7 @@ interface SmartTodoAnalyzeData {
   endTime?: string
   startDateShow?: string
   endDateShow?: string
-  assigneeId?: string | number
+  assigneeId?: SmartTodoBackendUser[] | string | number
   assigneeIds?: string
   remark?: string
   type?: number | string
@@ -377,6 +379,19 @@ function normalizeProcessList(items?: SmartTodoProcessBackendItem[] | null): Tod
     .filter((item): item is TodoProcess => Boolean(item))
 }
 
+function resolveBackendHandleDesc(item: SmartTodoBackendItem) {
+  const handleDesc = item.handleDesc?.trim()
+  if (handleDesc) return handleDesc
+
+  const completeDesc = item.completeDesc?.trim()
+  if (!completeDesc) return undefined
+
+  // 拒绝待办时，后端可能把拒绝原因放在 completeDesc。
+  if (item.status === 9) return completeDesc
+
+  return undefined
+}
+
 function normalizeBackendTodo(
   item: SmartTodoBackendItem,
   currentUser: CalendarUser,
@@ -451,7 +466,7 @@ function normalizeBackendTodo(
       userMap.get(currentHandlerId)?.name ||
       (currentHandlerId ? currentHandlerId : undefined) ||
       '未指定',
-    handleDesc: item.handleDesc?.trim() || undefined,
+    handleDesc: resolveBackendHandleDesc(item),
     currentHandlerId: currentHandlerId || undefined,
     handlerIds: item.handlerIds ?? undefined,
     content: item.content ?? undefined,
@@ -513,57 +528,54 @@ function normalizeBackendTodos(
     .sort(compareEvents)
 }
 
-function matchAssignableUser(token: string, assignableUsers: CalendarUser[]) {
-  if (!token) return undefined
+function mapBackendUser(user: SmartTodoBackendUser): CalendarUser | null {
+  const id = toId(user.badge)
+  const name = user.name?.trim()
 
-  return assignableUsers.find(
-    (user) => user.id === token || user.name === token || token.includes(user.name),
-  )
+  if (!id || !name) return null
+
+  return {
+    id,
+    name,
+    role: 'employee',
+    department: user.deptFullName?.trim() || undefined,
+  }
 }
 
-function findAssignees(
-  assigneeId: string | number | undefined,
-  assigneeIds: string | undefined,
+function mapBackendUsers(users: SmartTodoBackendUser[]): CalendarUser[] {
+  return users.map(mapBackendUser).filter((user): user is CalendarUser => Boolean(user))
+}
+
+function resolveAnalyzeAssignees(
+  data: SmartTodoAnalyzeData,
   currentUser: CalendarUser,
   assignableUsers: CalendarUser[],
   fallback: ParsedTodoDraft,
 ) {
-  const rawIds = resolveAssigneeIds(assigneeId, assigneeIds)
-  const ids = rawIds
-    ? rawIds
-        .split(',')
-        .map((item) => item.trim())
-        .filter(Boolean)
-    : []
-
-  if (ids.length === 0) {
-    return findAssignee(assigneeId, currentUser, assignableUsers, fallback)
+  if (Array.isArray(data.assigneeId)) {
+    const matched = mapBackendUsers(data.assigneeId)
+    if (matched.length > 0) {
+      return {
+        id: matched.map((user) => user.id).join(','),
+        name: matched.map((user) => user.name).join('、'),
+      }
+    }
+  } else if (data.assigneeId || data.assigneeIds) {
+    const rawIds = resolveAssigneeIds(data.assigneeId, data.assigneeIds)
+    const ids = splitAssigneeIds(rawIds)
+    if (ids.length > 0) {
+      const userMap = createUserMap(assignableUsers)
+      const matched = ids.map((id) => userMap.get(id) ?? { id, name: id })
+      return {
+        id: matched.map((user) => user.id).join(','),
+        name: matched.map((user) => user.name).join('、'),
+      }
+    }
   }
 
-  const matched = ids.map(
-    (token) => matchAssignableUser(token, assignableUsers) ?? { id: token, name: token },
-  )
-
   return {
-    id: matched.map((user) => user.id).join(','),
-    name: matched.map((user) => user.name).join('、'),
-  }
-}
-
-function findAssignee(
-  assigneeText: string | number | undefined,
-  currentUser: CalendarUser,
-  assignableUsers: CalendarUser[],
-  fallback: ParsedTodoDraft,
-) {
-  const normalizedAssignee = toId(assigneeText)
-  const matchedAssignee = matchAssignableUser(normalizedAssignee, assignableUsers)
-
-  if (matchedAssignee) return matchedAssignee
-
-  return {
-    id: fallback.assigneeId || normalizedAssignee || currentUser.id,
-    name: fallback.assigneeName || fallback.owner || normalizedAssignee || currentUser.name,
+    id: fallback.assigneeId || currentUser.id,
+    name: fallback.assigneeName || fallback.owner || currentUser.name,
   }
 }
 
@@ -576,13 +588,7 @@ function normalizeAnalyzeData(
   const schedule = normalizeAnalyzeSchedule(data)
   const date = schedule.date || fallback.date
   const endDate = schedule.isRange ? schedule.endDate || date : undefined
-  const assignee = findAssignees(
-    data.assigneeId,
-    data.assigneeIds,
-    currentUser,
-    assignableUsers,
-    fallback,
-  )
+  const assignee = resolveAnalyzeAssignees(data, currentUser, assignableUsers, fallback)
 
   return {
     mode: schedule.isRange ? 'deadline' : 'scheduled',
@@ -717,20 +723,23 @@ export async function loadAssignableUsers() {
     '查询用户列表失败',
   )
 
-  return users
-    .map((user): CalendarUser | null => {
-      const id = toId(user.badge)
-      const name = user.name?.trim()
+  return mapBackendUsers(users)
+}
 
-      if (!id || !name) return null
+export async function searchUsers(keyword: string) {
+  const trimmed = keyword.trim()
+  if (!trimmed) return []
 
-      return {
-        id,
-        name,
-        role: 'employee',
-      }
-    })
-    .filter((user): user is CalendarUser => Boolean(user))
+  const users = await requestSmartTodoData<SmartTodoBackendUser[]>(
+    {
+      method: 'GET',
+      url: '/smart-todo/user-search-list',
+      params: { keyword: trimmed },
+    },
+    '搜索用户失败',
+  )
+
+  return mapBackendUsers(users)
 }
 
 export type TodoDateRange = {
