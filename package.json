@@ -6,7 +6,9 @@
   "packageManager": "pnpm@8.15.9",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "dev:h5": "vite --host 127.0.0.1 --open /h5/",
     "build": "vue-tsc --noEmit && vite build",
+    "build:h5": "vue-tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "typecheck": "vue-tsc --noEmit",
     "test": "vitest run",
@@ -14,6 +16,7 @@
     "format": "prettier --write ."
   },
   "dependencies": {
+    "@fontsource/noto-sans-sc": "^5.3.0",
     "@internationalized/date": "^3.12.2",
     "@lucide/vue": "^1.17.0",
     "@rive-app/canvas-lite": "^2.38.0",

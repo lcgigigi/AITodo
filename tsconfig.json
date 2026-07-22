@@ -25,6 +25,8 @@
     "src/**/*.d.ts",
     "src/**/*.tsx",
     "src/**/*.vue",
+    "h5/**/*.ts",
+    "h5/**/*.vue",
     "vite.config.ts",
     "uno.config.ts"
   ],

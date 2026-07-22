@@ -13,6 +13,14 @@ export default defineConfig({
       autoInstall: false,
     }),
   ],
+  build: {
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        h5: path.resolve(__dirname, 'h5/index.html'),
+      },
+    },
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
