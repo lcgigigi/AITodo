@@ -1,4 +1,5 @@
 import { httpClient } from '@/shared/request/http'
+import { md5 } from 'js-md5'
 import {
   SMART_TODO_REQUEST_TIMEOUT,
   getOptionalText,
@@ -99,6 +100,19 @@ export async function loginSmartTodo(credentials: SmartTodoLoginCredentials) {
   }
 
   return response.data.token
+}
+
+/** H5 使用 PAD 工号自动登录：账号为工号，密码为工号的 32 位小写 MD5。 */
+export async function loginSmartTodoByPadAccount(loginName: string) {
+  const employeeNumber = loginName.trim()
+  if (!employeeNumber) {
+    throw new Error('PAD 未返回有效工号')
+  }
+
+  return loginSmartTodo({
+    username: employeeNumber,
+    password: md5(employeeNumber),
+  })
 }
 
 export async function logoutSmartTodo() {

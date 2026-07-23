@@ -35,7 +35,7 @@ const aiParsingSteps = ['识别日期', '整理时间', '提取事项']
         <strong id="ai-parse-status-title">正在解析待办内容</strong>
         <span>智能整理中</span>
       </div>
-      <p>正在识别时间、地点和事项，稍后自动填入表单。</p>
+      <p>正在识别时间、地点和事项。如需修改内容，可点击「停止解析」后重新发起。</p>
       <div class="ai-status-steps" aria-hidden="true">
         <span
           v-for="(step, index) in aiParsingSteps"

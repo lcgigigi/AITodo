@@ -106,19 +106,19 @@ const dashboardToolCatalog: Record<DashboardToolId, DashboardTool> = {
 
 const HOME_PANEL_TOOL_IDS: DashboardToolId[] = [
   'policy-qa',
+  'code-assistant',
   'image-analysis',
   'meeting-notes',
-  'ppt-creator',
   'more',
 ]
 
 const DASHBOARD_TOOL_IDS: DashboardToolId[] = [
   'policy-qa',
+  'code-assistant',
   'image-analysis',
   'meeting-notes',
   'ppt-creator',
   'agent-workshop',
-  'code-assistant',
   'interview-center',
   'more',
 ]

@@ -61,6 +61,10 @@ export function setupInterceptors(instance: AxiosInstance) {
       return response
     },
     (error: AxiosError) => {
+      if (error.code === 'ERR_CANCELED') {
+        return Promise.reject(error)
+      }
+
       const message = getErrorMessage(error.response?.status, error.message)
       notifyRequestError(error.config, message)
 

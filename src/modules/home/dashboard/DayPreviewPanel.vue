@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import IconArrowLeft from '~icons/lucide/arrow-left'
 import IconCalendarPlus from '~icons/lucide/calendar-plus'
 import IconCheck from '~icons/lucide/check'
@@ -50,6 +50,7 @@ import {
   ymd,
 } from './helpers/todoDisplay'
 import { loadTodoDetail, parseTodoText as serviceParseTodoText } from './services/todo.service'
+import { isAbortedRequestError } from '@/shared/request/request-error'
 
 const props = defineProps<{
   date: string
@@ -98,6 +99,7 @@ const initialFormSnapshot = ref(formSnapshot(todoForm.value))
 const discardWarningVisible = ref(false)
 const pendingDeleteId = ref('')
 let pendingDiscardAction: (() => void) | undefined
+let parseAbortController: AbortController | undefined
 let highlightTimer: ReturnType<typeof setTimeout> | undefined
 
 const eventsForStatusCounts = computed(() => filterEventsByType(props.events, typeFilter.value))
@@ -432,10 +434,16 @@ function setScopeFilter(filter: Exclude<TodoScopeFilter, 'all'>) {
   scopeFilter.value = scopeFilter.value === filter ? 'all' : filter
 }
 
+function abortActiveParse() {
+  parseAbortController?.abort()
+  parseAbortController = undefined
+}
+
 function resetFormState() {
   hideDiscardWarning()
   hideDeleteWarning()
   clearParsedHighlights()
+  abortActiveParse()
   const nextForm = createEmptyForm(props.date)
   editingId.value = ''
   aiPrompt.value = ''
@@ -452,6 +460,7 @@ function resetFormState() {
 function beginCreateForm(overrides: Partial<CalendarTodoForm> = {}) {
   hideDiscardWarning()
   clearParsedHighlights()
+  abortActiveParse()
   const nextForm = {
     ...createEmptyForm(props.date),
     ...overrides,
@@ -570,7 +579,11 @@ function requestClosePanel() {
 async function parseTodoText() {
   if (!aiPrompt.value.trim()) return
 
+  abortActiveParse()
+  const controller = new AbortController()
+  parseAbortController = controller
   isParsing.value = true
+
   try {
     const previousForm = createFormCopy(todoForm.value)
     const parsed = await serviceParseTodoText(
@@ -578,7 +591,10 @@ async function parseTodoText() {
       props.currentUser,
       props.assignableUsers,
       todoForm.value,
+      { signal: controller.signal },
     )
+    if (controller.signal.aborted) return
+
     const nextForm = {
       ...todoForm.value,
       ...parsed,
@@ -591,11 +607,26 @@ async function parseTodoText() {
     aiParsedOriginalText.value = aiPrompt.value.trim()
     triggerParsedHighlights(previousForm, nextForm)
   } catch (error) {
+    if (isAbortedRequestError(error)) return
     emit('notify', error instanceof Error ? error.message : 'AI 解析待办失败，请稍后重试', 'error')
   } finally {
-    isParsing.value = false
+    if (parseAbortController === controller) {
+      parseAbortController = undefined
+      isParsing.value = false
+    }
   }
 }
+
+function stopParseTodoText() {
+  if (!isParsing.value) return
+
+  abortActiveParse()
+  isParsing.value = false
+}
+
+onBeforeUnmount(() => {
+  abortActiveParse()
+})
 
 function isAiHighlighted(field: ParsedHighlightField) {
   return highlightedFields.value.has(field)
@@ -1165,22 +1196,22 @@ defineExpose({
                 v-model="aiPrompt"
                 class="ai-prompt-input"
                 type="text"
-                :disabled="isParsing"
                 :aria-describedby="isParsing ? 'ai-parse-status-title' : undefined"
                 placeholder="例如：明天下午给XXX布置一项开发公司官方网站的任务"
               />
               <Button
                 type="button"
-                :class="{ 'is-parsing': isParsing }"
-                :disabled="isParsing || !aiPrompt.trim()"
-                @click="parseTodoText"
+                class="ai-parse-trigger"
+                :class="{ 'is-parsing': isParsing, 'is-stop-parsing': isParsing }"
+                :disabled="!isParsing && !aiPrompt.trim()"
+                @click="isParsing ? stopParseTodoText() : parseTodoText()"
               >
                 <span v-if="isParsing" class="ai-button-dots" aria-hidden="true">
                   <span></span>
                   <span></span>
                   <span></span>
                 </span>
-                {{ isParsing ? '解析中' : 'AI 解析' }}
+                {{ isParsing ? '停止解析' : 'AI 解析' }}
               </Button>
             </div>
           </label>
@@ -1985,8 +2016,7 @@ defineExpose({
 .add-btn:hover,
 .close-btn:hover,
 .item-actions button:hover,
-.discard-warning-actions button:not(.discard-confirm):hover,
-.ai-inline-row button:hover {
+.discard-warning-actions button:not(.discard-confirm):hover {
   border-color: #cbd5e1;
   background: #f8fafc;
   color: #111827;
@@ -2003,8 +2033,7 @@ defineExpose({
   color: #475569;
 }
 
-.add-btn:hover,
-.ai-inline-row button:not(:disabled):hover {
+.add-btn:hover {
   border-color: var(--todo-primary-hover);
   background: var(--todo-primary-hover);
   color: #ffffff;
@@ -2583,6 +2612,23 @@ p {
   font-size: 14px;
 }
 
+.ai-inline-row .ai-parse-trigger:not(:disabled) {
+  border-color: rgba(var(--todo-primary-rgb), 0.24);
+  background: linear-gradient(180deg, rgba(var(--todo-primary-rgb), 0.92), rgba(37, 99, 235, 0.9)) !important;
+  box-shadow: 0 10px 22px -18px rgba(var(--todo-primary-rgb), 0.55) !important;
+  color: #ffffff !important;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease !important;
+}
+
+.ai-inline-row .ai-parse-trigger:not(:disabled):hover {
+  border-color: rgba(var(--todo-primary-rgb), 0.38);
+  background: linear-gradient(180deg, #2563eb, #1d4ed8) !important;
+  box-shadow: 0 12px 26px -16px rgba(var(--todo-primary-rgb), 0.68) !important;
+  color: #ffffff !important;
+}
+
 .ai-inline-section .field > span {
   color: #5b7cab;
 }
@@ -2604,18 +2650,31 @@ p {
   opacity: 1;
 }
 
-.ai-inline-row button:not(:disabled) {
-  border-color: rgba(var(--todo-primary-rgb), 0.24);
-  background: linear-gradient(180deg, rgba(var(--todo-primary-rgb), 0.92), rgba(37, 99, 235, 0.9));
-  box-shadow: 0 10px 22px -18px rgba(var(--todo-primary-rgb), 0.55);
+.ai-inline-row .ai-parse-trigger:disabled {
+  border-color: #e5edf6 !important;
+  background: #f1f5f9 !important;
+  color: #94a3b8 !important;
+  box-shadow: none !important;
+  cursor: not-allowed;
 }
 
-.ai-inline-row button.is-parsing:disabled {
-  border-color: var(--todo-primary);
-  background: var(--todo-primary);
-  color: #ffffff;
-  cursor: progress;
-  box-shadow: 0 10px 22px -16px rgba(var(--todo-primary-rgb), 0.72);
+.ai-inline-row .ai-parse-trigger.is-parsing:not(:disabled) {
+  border-color: rgba(248, 113, 113, 0.42) !important;
+  background: linear-gradient(180deg, rgba(254, 242, 242, 0.98), rgba(254, 226, 226, 0.96)) !important;
+  color: #b91c1c !important;
+  box-shadow: 0 10px 22px -18px rgba(239, 68, 68, 0.35) !important;
+  cursor: pointer;
+}
+
+.ai-inline-row .ai-parse-trigger.is-parsing:not(:disabled):hover {
+  border-color: rgba(239, 68, 68, 0.58) !important;
+  background: linear-gradient(180deg, rgba(254, 226, 226, 0.98), rgba(252, 165, 165, 0.92)) !important;
+  color: #991b1b !important;
+  box-shadow: 0 12px 26px -16px rgba(239, 68, 68, 0.42) !important;
+}
+
+.ai-inline-row .ai-parse-trigger.is-parsing .ai-button-dots span {
+  background: rgba(185, 28, 28, 0.72);
 }
 
 .ai-button-dots {

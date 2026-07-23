@@ -16,10 +16,8 @@ describe('dashboardTools catalog', () => {
   })
 
   it('names the ppt tool consistently as 智能PPT', () => {
-    const pptInHome = homePanelTools.find((tool) => tool.id === 'ppt-creator')
     const pptInDetail = dashboardTools.find((tool) => tool.id === 'ppt-creator')
 
-    expect(pptInHome?.name).toBe('智能PPT')
     expect(pptInDetail?.name).toBe('智能PPT')
   })
 

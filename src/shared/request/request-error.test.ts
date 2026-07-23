@@ -2,7 +2,7 @@ import axios, { AxiosError } from 'axios'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { setupInterceptors } from './interceptors'
-import { RequestError, isUnauthorizedRequestError } from './request-error'
+import { RequestError, isAbortedRequestError, isUnauthorizedRequestError } from './request-error'
 
 describe('request errors', () => {
   beforeEach(() => {
@@ -103,5 +103,31 @@ describe('request errors', () => {
   it('keeps legacy unauthorized message detection as a fallback', () => {
     expect(isUnauthorizedRequestError(new Error('登录状态已过期'))).toBe(true)
     expect(isUnauthorizedRequestError(new Error('普通请求失败'))).toBe(false)
+  })
+
+  it('detects aborted axios requests without treating them as business failures', async () => {
+    const instance = axios.create()
+    setupInterceptors(instance)
+
+    const request = instance.request({
+      url: '/analyze',
+      showError: false,
+      adapter: async (config) => {
+        const error = new AxiosError('canceled', 'ERR_CANCELED', config)
+        throw error
+      },
+    })
+
+    await expect(request).rejects.toMatchObject({
+      code: 'ERR_CANCELED',
+    })
+    expect(isAbortedRequestError(new AxiosError('canceled', 'ERR_CANCELED'))).toBe(true)
+    expect(
+      isAbortedRequestError(
+        new RequestError('canceled', {
+          cause: new AxiosError('canceled', 'ERR_CANCELED'),
+        }),
+      ),
+    ).toBe(true)
   })
 })

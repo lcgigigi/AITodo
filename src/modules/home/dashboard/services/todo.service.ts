@@ -696,17 +696,23 @@ export type {
   SmartTodoEmailProvider,
 } from '@/modules/auth/services/auth.service'
 
+export type AnalyzeTodoTextOptions = {
+  signal?: AbortSignal
+}
+
 export async function analyzeTodoText(
   text: string,
   currentUser: CalendarUser,
   assignableUsers: CalendarUser[],
   fallback: ParsedTodoDraft,
+  options: AnalyzeTodoTextOptions = {},
 ) {
   const data = await requestSmartTodoData<SmartTodoAnalyzeData>(
     {
       method: 'POST',
       url: '/smart-todo/analyze',
       data: { text: text.trim() },
+      signal: options.signal,
     },
     'AI解析待办失败',
   )
@@ -1066,6 +1072,7 @@ export function parseTodoText(
   currentUser: CalendarUser,
   assignableUsers: CalendarUser[],
   fallback: ParsedTodoDraft,
+  options: AnalyzeTodoTextOptions = {},
 ) {
-  return analyzeTodoText(text, currentUser, assignableUsers, fallback)
+  return analyzeTodoText(text, currentUser, assignableUsers, fallback, options)
 }

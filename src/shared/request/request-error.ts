@@ -29,3 +29,18 @@ export function isUnauthorizedRequestError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error ?? '')
   return message.includes('登录状态') || message.includes('401')
 }
+
+export function isAbortedRequestError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+
+  const candidate = error as { code?: string; name?: string; cause?: unknown }
+  if (candidate.code === 'ERR_CANCELED' || candidate.name === 'CanceledError') {
+    return true
+  }
+
+  if (candidate.cause) {
+    return isAbortedRequestError(candidate.cause)
+  }
+
+  return false
+}

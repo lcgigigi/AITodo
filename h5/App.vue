@@ -1,20 +1,14 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
-import H5LoginView from './components/H5LoginView.vue'
 import H5Toast from './components/H5Toast.vue'
 import { useH5Auth } from './composables/useH5Auth'
 import H5TodoWorkspace from './H5TodoWorkspace.vue'
 
-const { userStore, isBootstrapping, isAuthenticating, authError, restoreSession, login, logout } =
-  useH5Auth()
+const { userStore, isBootstrapping, authError, restoreSession, reauthenticate } = useH5Auth()
 
 onMounted(() => {
   void restoreSession()
 })
-
-async function handleLogin(payload: { username: string; password: string }) {
-  await login(payload.username, payload.password)
-}
 </script>
 
 <template>
@@ -35,13 +29,15 @@ async function handleLogin(payload: { username: string; password: string }) {
       </section>
     </div>
 
-    <H5LoginView
-      v-else-if="!userStore.isLoggedIn"
-      :loading="isAuthenticating"
-      :error="authError"
-      @submit="handleLogin"
-    />
+    <div v-else-if="!userStore.isLoggedIn" class="st-app st-app--auth">
+      <section class="st-auth-hero">
+        <p class="st-auth-hero__brand">Smart Todo</p>
+        <h1 class="st-auth-hero__title">无法自动登录</h1>
+        <p class="st-pad-auth__message">{{ authError || '暂时无法获取 PAD 账号信息' }}</p>
+        <button type="button" class="st-pad-auth__retry" @click="restoreSession">重新获取</button>
+      </section>
+    </div>
 
-    <H5TodoWorkspace v-else @unauthorized="logout" />
+    <H5TodoWorkspace v-else @unauthorized="reauthenticate" />
   </div>
 </template>
